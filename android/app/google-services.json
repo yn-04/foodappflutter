@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1064590405120",
+    "project_id": "food-stock-management-app",
+    "storage_bucket": "food-stock-management-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1064590405120:android:12a8550f07c6f42448f2e5",
+        "android_client_info": {
+          "package_name": "com.example.my_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBb0A3Oi5MZ7sbZJWcWl7XFmRXLbz3PdTw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
