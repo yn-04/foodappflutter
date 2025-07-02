@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -19,6 +21,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isLoading = false;
   bool _acceptTerms = false;
 
+  // Firebase Authentication instance
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  // Firestore instance for storing user profile data
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -31,9 +38,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String? _validateName(String? value) {
     if (value == null || value.isEmpty) {
       return 'กรุณากรอกชื่อ';
-    }
-    if (value.length < 2) {
-      return 'ชื่อต้องมีอย่างน้อย 2 ตัวอักษร';
     }
     return null;
   }
@@ -91,23 +95,104 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _isLoading = true;
     });
 
-    // จำลองการลงทะเบียน
-    await Future.delayed(const Duration(seconds: 2));
-
-    setState(() {
-      _isLoading = false;
-    });
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('ลงทะเบียนสำเร็จ!'),
-          backgroundColor: Colors.green,
-        ),
+    try {
+      // แสดงข้อมูลในคอนโซลเพื่อเช็คว่าได้รับข้อมูลจากฟอร์มถูกต้อง
+      print(
+        'กำลังลงทะเบียนผู้ใช้: ${_nameController.text} (${_emailController.text})',
       );
 
-      // นำทางไปหน้าอื่นหรือปิดหน้า
-      Navigator.pop(context);
+      // สร้างผู้ใช้ใหม่ด้วย Firebase Authentication
+      UserCredential userCredential = await _auth
+          .createUserWithEmailAndPassword(
+            email: _emailController.text.trim(),
+            password: _passwordController.text,
+          );
+
+      print('สร้างบัญชีผู้ใช้สำเร็จ UID: ${userCredential.user!.uid}');
+
+      // สร้าง Map ของข้อมูลผู้ใช้
+      Map<String, dynamic> userData = {
+        'name': _nameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'createdAt': FieldValue.serverTimestamp(),
+        'phoneNumber':
+            '', // เพิ่มฟิลด์เปล่าสำหรับเบอร์โทร (ถ้าต้องการเพิ่มในอนาคต)
+        'profileCompleted': false,
+      };
+
+      print('กำลังบันทึกข้อมูลผู้ใช้ไปยัง Firestore...');
+
+      // เก็บข้อมูลเพิ่มเติมของผู้ใช้ใน Firestore
+      await _firestore
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .set(userData);
+
+      print('บันทึกข้อมูลผู้ใช้สำเร็จ');
+
+      // ส่งอีเมลยืนยันตัวตน (optional)
+      await userCredential.user!.sendEmailVerification();
+      print('ส่งอีเมลยืนยันตัวตนแล้ว');
+
+      // อัปเดตชื่อในโปรไฟล์ Firebase Authentication (optional)
+      await userCredential.user!.updateDisplayName(_nameController.text.trim());
+
+      if (mounted) {
+        // แสดงผลสำเร็จ
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('ลงทะเบียนสำเร็จ! กรุณาตรวจสอบอีเมลเพื่อยืนยันตัวตน'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+
+        // นำทางไปหน้า Login หรือหน้าหลัก
+        Navigator.pop(context);
+      }
+    } on FirebaseAuthException catch (e) {
+      print('เกิดข้อผิดพลาด FirebaseAuth: ${e.code} - ${e.message}');
+      String errorMessage = 'เกิดข้อผิดพลาดในการลงทะเบียน';
+
+      if (e.code == 'weak-password') {
+        errorMessage = 'รหัสผ่านไม่รัดกุมเพียงพอ';
+      } else if (e.code == 'email-already-in-use') {
+        errorMessage = 'อีเมลนี้มีผู้ใช้งานแล้ว';
+      } else if (e.code == 'invalid-email') {
+        errorMessage = 'รูปแบบอีเมลไม่ถูกต้อง';
+      } else if (e.code == 'network-request-failed') {
+        errorMessage = 'มีปัญหาเกี่ยวกับการเชื่อมต่อเครือข่าย';
+      } else if (e.code == 'operation-not-allowed') {
+        errorMessage =
+            'การลงทะเบียนด้วยอีเมลและรหัสผ่านยังไม่ได้เปิดใช้งานใน Firebase Console';
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      print('เกิดข้อผิดพลาดทั่วไป: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('เกิดข้อผิดพลาด: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -133,7 +218,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                 // Header
                 Text(
-                  'สร้างบัญชีใหม่',
+                  'สร้างบัญชีผู้ใช้',
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: Colors.black87,
@@ -155,7 +240,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   controller: _nameController,
                   validator: _validateName,
                   decoration: InputDecoration(
-                    labelText: 'ชื่อ-นามสกุล',
+                    labelText: 'ชื่อ',
                     prefixIcon: const Icon(Icons.person_outline),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
