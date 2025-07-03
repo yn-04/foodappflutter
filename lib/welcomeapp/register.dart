@@ -191,7 +191,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   validator: _validateName,
                   keyboardType: TextInputType.name,
                   decoration: InputDecoration(
-                    labelText: 'ชื่อ',
+                    labelText: 'ชื่อ-นามสกุล',
                     prefixIcon: const Icon(Icons.person_outline),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -372,7 +372,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                 // Register Button (ชิดซ้าย)
                 Align(
-                  alignment: Alignment.centerLeft,
+                  alignment: Alignment.centerRight,
                   child: SizedBox(
                     width: 120, // กำหนดความกว้างของปุ่ม
                     height: 56,

@@ -263,7 +263,7 @@ class _RegistrationPageState extends State<Registerinfor> {
       );
 
       // นำทางไปหน้าหลักหลังลงทะเบียนเสร็จ
-      Navigator.pushReplacementNamed(context, '/home');
+      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
     } on FirebaseAuthException catch (e) {
       String errorMessage = 'เกิดข้อผิดพลาดในการลงทะเบียน';
 
