@@ -21,11 +21,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isLoading = false;
   bool _acceptTerms = false;
 
-  // Firebase Authentication instance
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  // Firestore instance for storing user profile data
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
   @override
   void dispose() {
     _nameController.dispose();
@@ -98,92 +93,47 @@ class _RegisterScreenState extends State<RegisterScreen> {
     try {
       // แสดงข้อมูลในคอนโซลเพื่อเช็คว่าได้รับข้อมูลจากฟอร์มถูกต้อง
       print(
-        'กำลังลงทะเบียนผู้ใช้: ${_nameController.text} (${_emailController.text})',
+        'กำลังตรวจสอบข้อมูล: ${_nameController.text} (${_emailController.text})',
       );
 
-      // สร้างผู้ใช้ใหม่ด้วย Firebase Authentication
-      UserCredential userCredential = await _auth
-          .createUserWithEmailAndPassword(
-            email: _emailController.text.trim(),
-            password: _passwordController.text,
-          );
+      // ตรวจสอบรูปแบบอีเมลและรหัสผ่าน
+      if (_emailController.text.trim().isEmpty ||
+          _passwordController.text.isEmpty) {
+        throw Exception('กรุณากรอกข้อมูลให้ครบถ้วน');
+      }
 
-      print('สร้างบัญชีผู้ใช้สำเร็จ UID: ${userCredential.user!.uid}');
-
-      // สร้าง Map ของข้อมูลผู้ใช้
-      Map<String, dynamic> userData = {
-        'name': _nameController.text.trim(),
-        'email': _emailController.text.trim(),
-        'createdAt': FieldValue.serverTimestamp(),
-        'phoneNumber':
-            '', // เพิ่มฟิลด์เปล่าสำหรับเบอร์โทร (ถ้าต้องการเพิ่มในอนาคต)
-        'profileCompleted': false,
-      };
-
-      print('กำลังบันทึกข้อมูลผู้ใช้ไปยัง Firestore...');
-
-      // เก็บข้อมูลเพิ่มเติมของผู้ใช้ใน Firestore
-      await _firestore
-          .collection('users')
-          .doc(userCredential.user!.uid)
-          .set(userData);
-
-      print('บันทึกข้อมูลผู้ใช้สำเร็จ');
-
-      // ส่งอีเมลยืนยันตัวตน (optional)
-      await userCredential.user!.sendEmailVerification();
-      print('ส่งอีเมลยืนยันตัวตนแล้ว');
-
-      // อัปเดตชื่อในโปรไฟล์ Firebase Authentication (optional)
-      await userCredential.user!.updateDisplayName(_nameController.text.trim());
+      // จำลองการตรวจสอบข้อมูล (หน่วงเวลา 1 วินาที)
+      await Future.delayed(const Duration(seconds: 1));
 
       if (mounted) {
         // แสดงผลสำเร็จ
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('ลงทะเบียนสำเร็จ! กรุณาตรวจสอบอีเมลเพื่อยืนยันตัวตน'),
+            content: Text('ข้อมูลถูกต้อง! กำลังไปหน้าถัดไป'),
             backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
+            duration: Duration(seconds: 2),
           ),
         );
 
-        // นำทางไปหน้า Login หรือหน้าหลัก
-        Navigator.pop(context);
-      }
-    } on FirebaseAuthException catch (e) {
-      print('เกิดข้อผิดพลาด FirebaseAuth: ${e.code} - ${e.message}');
-      String errorMessage = 'เกิดข้อผิดพลาดในการลงทะเบียน';
-
-      if (e.code == 'weak-password') {
-        errorMessage = 'รหัสผ่านไม่รัดกุมเพียงพอ';
-      } else if (e.code == 'email-already-in-use') {
-        errorMessage = 'อีเมลนี้มีผู้ใช้งานแล้ว';
-      } else if (e.code == 'invalid-email') {
-        errorMessage = 'รูปแบบอีเมลไม่ถูกต้อง';
-      } else if (e.code == 'network-request-failed') {
-        errorMessage = 'มีปัญหาเกี่ยวกับการเชื่อมต่อเครือข่าย';
-      } else if (e.code == 'operation-not-allowed') {
-        errorMessage =
-            'การลงทะเบียนด้วยอีเมลและรหัสผ่านยังไม่ได้เปิดใช้งานใน Firebase Console';
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 5),
-          ),
+        // ส่งข้อมูลไปหน้าถัดไป
+        Navigator.pushNamed(
+          context,
+          '/registerinfor',
+          arguments: {
+            'name': _nameController.text.trim(),
+            'email': _emailController.text.trim(),
+            'password': _passwordController.text,
+          },
         );
       }
     } catch (e) {
-      print('เกิดข้อผิดพลาดทั่วไป: $e');
+      print('เกิดข้อผิดพลาด: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('เกิดข้อผิดพลาด: ${e.toString()}'),
             backgroundColor: Colors.red,
-            duration: Duration(seconds: 5),
+            duration: Duration(seconds: 3),
           ),
         );
       }
@@ -239,6 +189,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 TextFormField(
                   controller: _nameController,
                   validator: _validateName,
+                  keyboardType: TextInputType.name,
                   decoration: InputDecoration(
                     labelText: 'ชื่อ',
                     prefixIcon: const Icon(Icons.person_outline),
@@ -419,37 +370,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 30),
 
-                // Register Button
-                SizedBox(
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _handleRegister,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                // Register Button (ชิดซ้าย)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: SizedBox(
+                    width: 120, // กำหนดความกว้างของปุ่ม
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _handleRegister,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 2,
                       ),
-                      elevation: 2,
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.white,
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
+                              ),
+                            )
+                          : const Text(
+                              'ถัดไป',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          )
-                        : const Text(
-                            'ลงทะเบียน',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -464,7 +419,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     GestureDetector(
                       onTap: () {
-                        Navigator.pop(context);
+                        // นำทางไปหน้าเข้าสู่ระบบ
+                        Navigator.pushNamed(context, '/login');
+                        // หรือใช้ Navigator.pushReplacementNamed(context, '/login'); ถ้าต้องการแทนที่หน้าปัจจุบัน
                       },
                       child: const Text(
                         'เข้าสู่ระบบ',
