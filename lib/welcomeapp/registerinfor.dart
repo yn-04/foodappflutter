@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:my_app/welcomeapp/home.dart';
 import 'package:my_app/welcomeapp/register.dart';
 
 void main() async {
@@ -27,70 +28,6 @@ class MyApp extends StatelessWidget {
         '/registerinfor': (context) => Registerinfor(),
         '/home': (context) => HomeScreen(), // หน้าหลักหลังลงทะเบียนเสร็จ
       },
-    );
-  }
-}
-
-// หน้าหลักที่แสดงหลังลงทะเบียนเสร็จ
-class HomeScreen extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('หน้าหลัก'),
-        backgroundColor: Colors.blue[600],
-        foregroundColor: Colors.white,
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.blue[600]!, Colors.blue[100]!],
-          ),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.check_circle, size: 100, color: Colors.green),
-              SizedBox(height: 20),
-              Text(
-                'ลงทะเบียนสำเร็จ!',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue[700],
-                ),
-              ),
-              SizedBox(height: 10),
-              Text(
-                'ยินดีต้อนรับสู่แอปพลิเคชัน',
-                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-              ),
-              SizedBox(height: 30),
-              ElevatedButton(
-                onPressed: () {
-                  // กลับไปหน้าแรก หรือไปหน้าอื่นๆ
-                  Navigator.pushReplacementNamed(context, '/register');
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue[600],
-                  foregroundColor: Colors.white,
-                  padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Text(
-                  'เริ่มใช้งาน',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

@@ -1,3 +1,4 @@
+// main.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -5,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:my_app/welcomeapp/register.dart';
 import 'package:my_app/welcomeapp/login.dart';
 import 'package:my_app/welcomeapp/registerinfor.dart';
+import 'package:my_app/welcomeapp/home.dart'; // ตรวจสอบ path ให้ถูกต้อง
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,17 +20,19 @@ class AuthGate extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        // ถ้ามีผู้ใช้ล็อกอินอยู่แล้ว → ไป Home
-        if (snapshot.connectionState == ConnectionState.active) {
-          final user = snapshot.data;
-          if (user != null) {
-            return HomeScreen();
-          } else {
-            return const LoginScreen();
-          }
+        // กำลังตรวจสอบสถานะการล็อกอิน
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        // ถ้ามีผู้ใช้ล็อกอินอยู่แล้ว → ไป Home
+        if (snapshot.hasData) {
+          return const HomeScreen();
+        } else {
+          return const LoginScreen();
+        }
       },
     );
   }
@@ -39,15 +43,25 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ระบบผู้ใช้งาน',
-      theme: ThemeData(primarySwatch: Colors.blue, fontFamily: 'Kanit'),
-      initialRoute: '/login',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        fontFamily: 'Kanit',
+        scaffoldBackgroundColor: Colors.grey[50],
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black,
+          elevation: 0,
+          centerTitle: true,
+        ),
+      ),
+      home: AuthGate(), // ใช้ home แทน initialRoute
       routes: {
-        '/': (context) => AuthGate(),
         '/login': (context) => const LoginScreen(),
         '/register': (context) => const RegisterScreen(),
         '/registerinfor': (context) => const Registerinfor(),
-        '/home': (context) => HomeScreen(),
+        '/home': (context) => const HomeScreen(),
       },
+      debugShowCheckedModeBanner: false,
     );
   }
 }
