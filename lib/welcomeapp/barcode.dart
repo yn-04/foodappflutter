@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'dart:async';
 
 class BarcodeScannerPage extends StatefulWidget {
-  const BarcodeScannerPage({Key? key}) : super(key: key);
+  const BarcodeScannerPage({super.key});
 
   @override
   State<BarcodeScannerPage> createState() => _BarcodeScannerPageState();
@@ -23,30 +22,78 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
   @override
   void initState() {
     super.initState();
-    _initializeCamera();
     _initializeBarcodeScanner();
+    _initializeCamera();
   }
 
   Future<void> _initializeCamera() async {
     try {
-      _cameras = await availableCameras();
+      // เพิ่ม timeout
+      _cameras = await availableCameras().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Timeout: ไม่สามารถเข้าถึงกล้องได้');
+        },
+      );
+
       if (_cameras.isNotEmpty) {
         _cameraController = CameraController(
           _cameras.first,
-          ResolutionPreset.medium,
+          ResolutionPreset.low,
           enableAudio: false,
         );
 
-        await _cameraController!.initialize();
+        await _cameraController!.initialize().timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            throw Exception('Timeout: การเตรียมกล้องใช้เวลานานเกินไป');
+          },
+        );
+
         if (mounted) {
           setState(() {
             _isCameraInitialized = true;
           });
+          await Future.delayed(const Duration(milliseconds: 500));
           _startImageStream();
         }
+      } else {
+        throw Exception('ไม่พบกล้องในอุปกรณ์');
       }
     } catch (e) {
       print('Error initializing camera: $e');
+      if (mounted) {
+        // แสดง dialog แทน SnackBar
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('ไม่สามารถเปิดกล้องได้'),
+            content: Text(
+              'สาเหตุ: $e\n\n'
+              'กรุณาตรวจสอบ:\n'
+              '• อนุญาตการใช้กล้องในการตั้งค่า\n'
+              '• ไม่มีแอปอื่นใช้กล้องอยู่\n'
+              '• รีสตาร์ทแอป',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context); // ปิด dialog
+                  Navigator.pop(context); // กลับหน้าก่อน
+                },
+                child: const Text('ตกลง'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _initializeCamera(); // ลองใหม่
+                },
+                child: const Text('ลองใหม่'),
+              ),
+            ],
+          ),
+        );
+      }
     }
   }
 
@@ -71,10 +118,19 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
   }
 
   void _startImageStream() {
+    if (_cameraController?.value.isStreamingImages == true) {
+      return; // ป้องกันการเริ่ม stream ซ้ำ
+    }
+
     _cameraController!.startImageStream((CameraImage image) {
       if (!_isProcessing) {
         _isProcessing = true;
-        _processImage(image);
+        _processImage(image).then((_) {
+          // เพิ่มหน่วงเวลาเล็กน้อยระหว่างการประมวลผล
+          Future.delayed(const Duration(milliseconds: 100), () {
+            _isProcessing = false;
+          });
+        });
       }
     });
   }
@@ -93,14 +149,14 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
           });
 
           // หยุดการสแกนเมื่อพบบาร์โค้ด
-          await _cameraController?.stopImageStream();
+          if (_cameraController?.value.isStreamingImages == true) {
+            await _cameraController?.stopImageStream();
+          }
           _showBarcodeDialog(barcodes.first);
         }
       }
     } catch (e) {
       print('Error processing image: $e');
-    } finally {
-      _isProcessing = false;
     }
   }
 
@@ -137,6 +193,9 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
   }
 
   void _showBarcodeDialog(Barcode barcode) {
+    String barcodeValue =
+        barcode.displayValue ?? barcode.rawValue ?? "ไม่พบข้อมูล";
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -147,20 +206,25 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
           children: [
             Text('ประเภท: ${_getBarcodeTypeName(barcode.type)}'),
             const SizedBox(height: 8),
-            Text(
-              'ข้อมูล: ${barcode.displayValue ?? barcode.rawValue ?? "ไม่พบข้อมูล"}',
-            ),
-            if (barcode.type == BarcodeType.url) ...[
+            Text('ข้อมูล: $barcodeValue'),
+            if (barcode.type == BarcodeType.url &&
+                _isValidUrl(barcodeValue)) ...[
               const SizedBox(height: 8),
-              Text('URL: ${barcode.displayValue ?? barcode.rawValue ?? ""}'),
+              Text('URL: $barcodeValue'),
             ],
-            if (barcode.type == BarcodeType.email) ...[
+            if (barcode.type == BarcodeType.email &&
+                _isValidEmail(barcodeValue)) ...[
               const SizedBox(height: 8),
-              Text('Email: ${barcode.displayValue ?? barcode.rawValue ?? ""}'),
+              Text('Email: $barcodeValue'),
             ],
-            if (barcode.type == BarcodeType.phone) ...[
+            if (barcode.type == BarcodeType.phone &&
+                _isValidPhone(barcodeValue)) ...[
               const SizedBox(height: 8),
-              Text('Phone: ${barcode.displayValue ?? barcode.rawValue ?? ""}'),
+              Text('Phone: $barcodeValue'),
+            ],
+            if (barcode.type == BarcodeType.wifi) ...[
+              const SizedBox(height: 8),
+              Text('WiFi: $barcodeValue'),
             ],
           ],
         ),
@@ -175,13 +239,29 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              Navigator.pop(context, barcode.displayValue ?? barcode.rawValue);
+              Navigator.pop(context, barcodeValue);
             },
             child: const Text('ใช้ข้อมูลนี้'),
           ),
         ],
       ),
     );
+  }
+
+  bool _isValidUrl(String? value) {
+    if (value == null) return false;
+    return Uri.tryParse(value) != null &&
+        (value.startsWith('http://') || value.startsWith('https://'));
+  }
+
+  bool _isValidEmail(String? value) {
+    if (value == null) return false;
+    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value);
+  }
+
+  bool _isValidPhone(String? value) {
+    if (value == null) return false;
+    return RegExp(r'^[\+]?[0-9\-\(\)\s]+$').hasMatch(value);
   }
 
   String _getBarcodeTypeName(BarcodeType type) {
@@ -198,18 +278,16 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
         return 'SMS';
       case BarcodeType.text:
         return 'Text';
-      case BarcodeType.product:
-        return 'Product';
       case BarcodeType.contactInfo:
         return 'Contact';
       case BarcodeType.calendarEvent:
         return 'Calendar';
-      case BarcodeType.driverLicense:
-        return 'Driver License';
       case BarcodeType.isbn:
         return 'ISBN';
-      default:
+      case BarcodeType.unknown:
         return 'Unknown';
+      default:
+        return 'Other';
     }
   }
 
@@ -217,12 +295,23 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
     setState(() {
       _scannedCode = null;
       _barcodes.clear();
+      _isProcessing = false;
     });
-    _startImageStream();
+
+    // หน่วงเวลาเล็กน้อยก่อนเริ่มสแกนใหม่
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted && _cameraController?.value.isInitialized == true) {
+        _startImageStream();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _isProcessing = false;
+    if (_cameraController?.value.isStreamingImages == true) {
+      _cameraController?.stopImageStream();
+    }
     _cameraController?.dispose();
     _barcodeScanner?.close();
     super.dispose();
@@ -409,9 +498,29 @@ class _BarcodeScannerPageState extends State<BarcodeScannerPage> {
                       ),
                     ),
                   ),
+
+                // Loading indicator เมื่อกำลังประมวลผล
+                if (_isProcessing)
+                  const Positioned(
+                    top: 50,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    ),
+                  ),
               ],
             )
-          : const Center(child: CircularProgressIndicator()),
+          : const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('กำลังเตรียมกล้อง...'),
+                ],
+              ),
+            ),
     );
   }
 }

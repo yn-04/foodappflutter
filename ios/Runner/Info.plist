@@ -3,7 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>NSCameraUsageDescription</key>
-	<string>ต้องการเข้าถึงกล้องเพื่อสแกนบาร์โค้ด</string>
+	<string>แอปนี้ต้องการใช้กล้องเพื่อสแกนบาร์โค้ดและ QR Code</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>แอปนี้ไม่ใช้ไมโครโฟน</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
