@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-import 'package:my_app/register/register.dart';
-import 'package:my_app/register/login.dart';
-import 'package:my_app/register/registerinfor.dart';
-import 'package:my_app/register/home.dart'; // ตรวจสอบ path ให้ถูกต้อง
+import 'package:my_app/welcomeapp/register.dart';
+import 'package:my_app/welcomeapp/login.dart';
+import 'package:my_app/welcomeapp/registerinfor.dart';
+import 'package:my_app/welcomeapp/home.dart'; // ตรวจสอบ path ให้ถูกต้อง
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
