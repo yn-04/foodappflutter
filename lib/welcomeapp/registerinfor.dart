@@ -2,13 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-<<<<<<< HEAD
-import 'package:my_app/register/home.dart';
-import 'package:my_app/register/register.dart';
-=======
 import 'package:my_app/welcomeapp/home.dart';
 import 'package:my_app/welcomeapp/register.dart';
->>>>>>> 042b438647d2fd2dde10ec244616df775c0d9cde
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
