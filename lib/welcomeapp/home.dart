@@ -17,7 +17,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final List<Widget> _pages = [
     const DashboardTab(),
-    const AddRawMaterialPage(),
+    ShoppingListApp(),
     const FoodRecommendationTab(),
     const ProfileTab(),
   ];
