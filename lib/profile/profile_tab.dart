@@ -1,196 +1,12 @@
-// profile_tab.dart (ไฟล์สมบูรณ์)
+// profile_tab.dart (Main Profile Tab)
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:my_app/profile/account_details/account_details_screen.dart';
+import 'package:my_app/profile/account_settings/account_settings_screen.dart';
+import 'package:my_app/profile/family/family_account_screen.dart';
+import 'package:my_app/profile/health_info_screen.dart';
 import 'dart:io';
 import 'headeredit.dart';
-
-// สร้างหน้า AccountDetailsScreen ในไฟล์เดียวกันก่อน
-class AccountDetailsScreen extends StatefulWidget {
-  const AccountDetailsScreen({super.key});
-
-  @override
-  State<AccountDetailsScreen> createState() => _AccountDetailsScreenState();
-}
-
-class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
-  bool _isLoading = true;
-  Map<String, dynamic>? _userData;
-  final user = FirebaseAuth.instance.currentUser;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadUserData();
-  }
-
-  Future<void> _loadUserData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      if (user != null) {
-        // ดึงข้อมูลจาก Firestore registrations collection
-        final doc = await FirebaseFirestore.instance
-            .collection('registrations')
-            .doc(user!.uid)
-            .get();
-
-        if (doc.exists) {
-          setState(() {
-            _userData = doc.data();
-          });
-        }
-      }
-    } catch (e) {
-      print('Error loading user data: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        backgroundColor: Colors.grey[100],
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'บัญชีของฉัน',
-          style: TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.w600,
-            fontSize: 18,
-          ),
-        ),
-        centerTitle: true,
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.black))
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  // Profile Summary
-                  const SizedBox(height: 20),
-
-                  // ข้อมูลส่วนตัว
-                  _buildInfoCard('ข้อมูลส่วนตัว', [
-                    _buildInfoRow('ชื่อ', _userData?['firstName'] ?? 'ไม่ระบุ'),
-                    _buildInfoRow(
-                      'นามสกุล',
-                      _userData?['lastName'] ?? 'ไม่ระบุ',
-                    ),
-                    _buildInfoRow('เพศ', _userData?['gender'] ?? 'ไม่ระบุ'),
-                    _buildInfoRow(
-                      'วันเกิด',
-                      _formatDate(_userData?['birthDate']),
-                    ),
-                  ]),
-
-                  const SizedBox(height: 16),
-
-                  // ข้อมูลร่างกาย
-                  _buildInfoCard('ข้อมูลร่างกาย', [
-                    _buildInfoRow(
-                      'ส่วนสูง',
-                      _userData?['height'] != null
-                          ? '${_userData!['height']} ซม.'
-                          : 'ไม่ระบุ',
-                    ),
-                    _buildInfoRow(
-                      'น้ำหนัก',
-                      _userData?['weight'] != null
-                          ? '${_userData!['weight']} กก.'
-                          : 'ไม่ระบุ',
-                    ),
-                    _buildInfoRow(
-                      'ภูมิแพ้',
-                      _userData?['allergies']?.isNotEmpty == true
-                          ? _userData!['allergies']
-                          : 'ไม่มี',
-                    ),
-                  ]),
-
-                  const SizedBox(height: 16),
-
-                  // ข้อมูลบัญชี
-                  _buildInfoCard('ข้อมูลบัญชี', [
-                    _buildInfoRow(
-                      'User ID',
-                      _userData?['userId'] ?? user?.uid ?? 'ไม่ทราบ',
-                    ),
-                    _buildInfoRow(
-                      'วันที่สมัคร',
-                      _formatDate(_userData?['registrationDate']),
-                    ),
-                  ]),
-                ],
-              ),
-            ),
-    );
-  }
-
-  Widget _buildInfoCard(String title, List<Widget> children) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-          ),
-          ...children,
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(color: Colors.grey[600])),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
-        ],
-      ),
-    );
-  }
-
-  String _formatDate(dynamic date) {
-    if (date == null) return 'ไม่ระบุ';
-
-    DateTime? dateTime;
-    if (date is Timestamp) {
-      dateTime = date.toDate();
-    } else if (date is DateTime) {
-      dateTime = date;
-    } else {
-      return 'ไม่ระบุ';
-    }
-
-    return '${dateTime.day}/${dateTime.month}/${dateTime.year + 543}';
-  }
-}
 
 class ProfileTab extends StatefulWidget {
   const ProfileTab({super.key});
@@ -210,7 +26,6 @@ class _ProfileTabState extends State<ProfileTab> {
     _loadUserData();
   }
 
-  // โหลดข้อมูลผู้ใช้จาก Firebase
   Future<void> _loadUserData() async {
     setState(() {
       _isLoading = true;
@@ -219,25 +34,18 @@ class _ProfileTabState extends State<ProfileTab> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
-        // Reload user data from Firebase Auth
         await user.reload();
-
-        // ดึง updated user instance
         final updatedUser = FirebaseAuth.instance.currentUser;
 
-        // อัปเดต state ด้วยข้อมูลล่าสุด
         setState(() {
           _updatedDisplayName = updatedUser?.displayName;
-          // รีเซ็ต selectedImage ถ้ามีการอัปเดตรูปใน Firebase
           if (updatedUser?.photoURL != null) {
-            _selectedImage = null; // ให้ใช้รูปจาก Firebase แทน
+            _selectedImage = null;
           }
         });
       }
     } catch (e) {
       print('Error loading user data: $e');
-
-      // แสดง error message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -292,7 +100,7 @@ class _ProfileTabState extends State<ProfileTab> {
                   children: [
                     const SizedBox(height: 10),
 
-                    // Profile Header Card (แก้ไขได้)
+                    // Profile Header Card
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16),
                       padding: const EdgeInsets.all(20),
@@ -311,6 +119,9 @@ class _ProfileTabState extends State<ProfileTab> {
                                           ? NetworkImage(user!.photoURL!)
                                           : null)
                                       as ImageProvider?,
+                            key: ValueKey(
+                              '${user?.photoURL ?? ''}_${_selectedImage?.path ?? ''}',
+                            ),
                             child:
                                 _selectedImage == null && user?.photoURL == null
                                 ? const Icon(
@@ -319,9 +130,6 @@ class _ProfileTabState extends State<ProfileTab> {
                                     size: 30,
                                   )
                                 : null,
-                            key: ValueKey(
-                              '${user?.photoURL ?? ''}_${_selectedImage?.path ?? ''}',
-                            ),
                           ),
                           const SizedBox(width: 15),
                           Expanded(
@@ -354,7 +162,7 @@ class _ProfileTabState extends State<ProfileTab> {
                             child: Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.1),
+                                color: Colors.white.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: const Icon(
@@ -370,7 +178,7 @@ class _ProfileTabState extends State<ProfileTab> {
 
                     const SizedBox(height: 30),
 
-                    // Menu Items
+                    // ข้อมูลส่วนตัว Section
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16),
                       decoration: BoxDecoration(
@@ -382,52 +190,46 @@ class _ProfileTabState extends State<ProfileTab> {
                           _buildProfileMenuItem(
                             icon: Icons.person_outline,
                             title: 'บัญชีของฉัน',
-                            subtitle: 'ข้อมูลส่วนตัวของคุณ',
+                            subtitle: 'ข้อมูลส่วนตัวและการติดต่อ',
                             onTap: () {
-                              print(
-                                'Navigating to AccountDetailsScreen',
-                              ); // Debug
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) =>
-                                      const AccountDetailsScreen(),
+                                      const ModernAccountDetailsScreen(),
                                 ),
-                              ).then((_) {
-                                print(
-                                  'Returned from AccountDetailsScreen',
-                                ); // Debug
-                              });
+                              );
                             },
                           ),
                           _buildDivider(),
                           _buildProfileMenuItem(
-                            icon: Icons.help_outline,
-                            title: 'ข้อมูลการสนับสนุน',
-                            subtitle: 'ข้อมูลสำคัญ',
-                            onTap: () {},
+                            icon: Icons.health_and_safety_outlined,
+                            title: 'ข้อมูลสุขภาพ',
+                            subtitle: 'BMI, เป้าหมาย, ภูมิแพ้',
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const HealthInfoScreen(),
+                                ),
+                              );
+                            },
                           ),
                           _buildDivider(),
                           _buildProfileMenuItem(
-                            icon: Icons.fingerprint,
-                            title: 'Face ID / Touch ID',
-                            subtitle: 'ความปลอดภัยชีวมิติ',
-                            onTap: () {},
-                            hasSwitch: true,
-                          ),
-                          _buildDivider(),
-                          _buildProfileMenuItem(
-                            icon: Icons.notifications_outlined,
-                            title: 'บัญชีการแจ้งเตือน',
-                            subtitle: 'ตั้งค่าการแจ้งเตือนต่างๆ',
-                            onTap: () {},
-                          ),
-                          _buildDivider(),
-                          _buildProfileMenuItem(
-                            icon: Icons.share_outlined,
-                            title: 'วงการแชร์',
-                            subtitle: 'แชร์แอปกับเพื่อนๆ',
-                            onTap: () {},
+                            icon: Icons.family_restroom_outlined,
+                            title: 'บัญชีครอบครัว',
+                            subtitle: 'จัดการสมาชิกในครอบครัว',
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const FamilyAccountScreen(),
+                                ),
+                              );
+                            },
                           ),
                         ],
                       ),
@@ -435,7 +237,7 @@ class _ProfileTabState extends State<ProfileTab> {
 
                     const SizedBox(height: 30),
 
-                    // More Section
+                    // การตั้งค่า Section
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16),
                       child: Column(
@@ -444,7 +246,7 @@ class _ProfileTabState extends State<ProfileTab> {
                           const Padding(
                             padding: EdgeInsets.only(left: 4, bottom: 12),
                             child: Text(
-                              'More',
+                              'การตั้งค่า',
                               style: TextStyle(
                                 color: Colors.grey,
                                 fontSize: 14,
@@ -459,6 +261,81 @@ class _ProfileTabState extends State<ProfileTab> {
                             ),
                             child: Column(
                               children: [
+                                _buildProfileMenuItem(
+                                  icon: Icons.settings_outlined,
+                                  title: 'การตั้งค่าบัญชี',
+                                  subtitle: 'ความปลอดภัย, การแจ้งเตือน',
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            const AccountSettingsScreen(),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                _buildDivider(),
+                                _buildProfileMenuItem(
+                                  icon: Icons.fingerprint,
+                                  title: 'Face ID / Touch ID',
+                                  subtitle: 'ความปลอดภัยชีวมิติ',
+                                  onTap: () {},
+                                  hasSwitch: true,
+                                ),
+                                _buildDivider(),
+                                _buildProfileMenuItem(
+                                  icon: Icons.notifications_outlined,
+                                  title: 'การแจ้งเตือน',
+                                  subtitle: 'ตั้งค่าการแจ้งเตือนต่างๆ',
+                                  onTap: () {},
+                                ),
+                                _buildDivider(),
+                                _buildProfileMenuItem(
+                                  icon: Icons.share_outlined,
+                                  title: 'แชร์แอป',
+                                  subtitle: 'แชร์แอปกับเพื่อนๆ',
+                                  onTap: () {},
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 30),
+
+                    // เพิ่มเติม Section
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(left: 4, bottom: 12),
+                            child: Text(
+                              'เพิ่มเติม',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              children: [
+                                _buildProfileMenuItem(
+                                  icon: Icons.help_outline,
+                                  title: 'ข้อมูลการสนับสนุน',
+                                  onTap: () {},
+                                ),
+                                _buildDivider(),
                                 _buildProfileMenuItem(
                                   icon: Icons.info_outline,
                                   title: 'ข้อมูลพื้นฐาน',
@@ -484,7 +361,7 @@ class _ProfileTabState extends State<ProfileTab> {
                       ),
                     ),
 
-                    const SizedBox(height: 100), // Space for bottom navigation
+                    const SizedBox(height: 100),
                   ],
                 ),
               ),
@@ -492,92 +369,12 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 
-  Widget _buildInfoRow({
-    required String label,
-    required String value,
-    required IconData icon,
-  }) {
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: Colors.grey[600]),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.black,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _getProviderName(User? user) {
-    if (user == null) return 'ไม่ทราบ';
-
-    for (var provider in user.providerData) {
-      switch (provider.providerId) {
-        case 'google.com':
-          return 'Google';
-        case 'password':
-          return 'อีเมล/รหัสผ่าน';
-        case 'facebook.com':
-          return 'Facebook';
-        case 'apple.com':
-          return 'Apple';
-        default:
-          return provider.providerId;
-      }
-    }
-    return 'ไม่ทราบ';
-  }
-
-  String _formatDate(DateTime? date) {
-    if (date == null) return 'ไม่ทราบ';
-
-    final months = [
-      'มกราคม',
-      'กุมภาพันธ์',
-      'มีนาคม',
-      'เมษายน',
-      'พฤษภาคม',
-      'มิถุนายน',
-      'กรกฎาคม',
-      'สิงหาคม',
-      'กันยายน',
-      'ตุลาคม',
-      'พฤศจิกายน',
-      'ธันวาคม',
-    ];
-
-    return '${date.day} ${months[date.month - 1]} ${date.year + 543}';
-  }
-
-  // ใช้ HeaderEditDialog แทน dialog เดิม
   void _showEditProfileDialog() {
     HeaderEditDialog.show(
       context: context,
       currentDisplayName: _updatedDisplayName,
       currentImage: _selectedImage,
       onSave: (String? newName, File? newImage) async {
-        // อัปเดต state ทันที
         setState(() {
           if (newName != null && newName.isNotEmpty) {
             _updatedDisplayName = newName;
@@ -585,14 +382,10 @@ class _ProfileTabState extends State<ProfileTab> {
           _selectedImage = newImage;
         });
 
-        // รีโหลดข้อมูลจาก Firebase เพื่อให้แน่ใจว่าข้อมูลล่าสุด
         await Future.delayed(const Duration(milliseconds: 500));
         await _loadUserData();
 
-        // แสดงข้อมูลที่อัปเดตแล้ว
-        setState(() {
-          // Force rebuild with new data
-        });
+        setState(() {});
       },
     );
   }
@@ -696,24 +489,38 @@ class _ProfileTabState extends State<ProfileTab> {
             TextButton(
               onPressed: () async {
                 try {
-                  await FirebaseAuth.instance.signOut();
+                  // Close dialog first
                   Navigator.of(context).pop();
 
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('ออกจากระบบสำเร็จ'),
-                      backgroundColor: Colors.green,
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
+                  // Sign out from Firebase
+                  await FirebaseAuth.instance.signOut();
+
+                  // Navigate to login screen and clear all previous routes
+                  if (context.mounted) {
+                    Navigator.of(context).pushNamedAndRemoveUntil(
+                      '/login', // หรือ route name ของหน้า login ที่คุณใช้
+                      (Route<dynamic> route) => false,
+                    );
+                  }
+
+                  // Optional: Show success message
+                  // ScaffoldMessenger.of(context).showSnackBar(
+                  //   const SnackBar(
+                  //     content: Text('ออกจากระบบสำเร็จ'),
+                  //     backgroundColor: Colors.green,
+                  //     behavior: SnackBarBehavior.floating,
+                  //   ),
+                  // );
                 } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('เกิดข้อผิดพลาด: $e'),
-                      backgroundColor: Colors.red,
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('เกิดข้อผิดพลาด: $e'),
+                        backgroundColor: Colors.red,
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
                 }
               },
               child: const Text(

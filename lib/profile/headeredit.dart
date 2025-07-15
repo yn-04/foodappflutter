@@ -1,12 +1,12 @@
-// headeredit.dart (ไฟล์สมบูรณ์เชื่อมต่อ Firebase)
+// headeredit.dart - ใช้ FirebaseStorageService
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:my_app/services/firebase_storage_service.dart';
 import 'dart:io';
 
 class HeaderEditDialog {
+  /// แสดง Dialog สำหรับแก้ไขโปรไฟล์ผู้ใช้
   static void show({
     required BuildContext context,
     required Function(String?, File?) onSave,
@@ -19,6 +19,7 @@ class HeaderEditDialog {
     final ImagePicker picker = ImagePicker();
     bool isLoading = false;
 
+    // ตั้งค่าเริ่มต้นของชื่อผู้ใช้
     nameController.text = currentDisplayName ?? user?.displayName ?? 'ผู้ใช้';
 
     showDialog(
@@ -38,7 +39,7 @@ class HeaderEditDialog {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Title
+                    // หัวข้อ Dialog
                     const Text(
                       'แก้ไขโปรไฟล์',
                       style: TextStyle(
@@ -49,7 +50,7 @@ class HeaderEditDialog {
                     ),
                     const SizedBox(height: 24),
 
-                    // Profile Picture Section
+                    // ส่วนแสดงรูปโปรไฟล์และปุ่มแก้ไข
                     Stack(
                       children: [
                         Container(
@@ -80,6 +81,7 @@ class HeaderEditDialog {
                                 : null,
                           ),
                         ),
+                        // ปุ่มแก้ไขรูปภาพ
                         Positioned(
                           bottom: 0,
                           right: 0,
@@ -119,7 +121,7 @@ class HeaderEditDialog {
 
                     const SizedBox(height: 20),
 
-                    // Name Field
+                    // ช่องใส่ชื่อผู้ใช้
                     Container(
                       decoration: BoxDecoration(
                         border: Border.all(color: Colors.grey[300]!),
@@ -145,7 +147,7 @@ class HeaderEditDialog {
 
                     const SizedBox(height: 24),
 
-                    // Loading Indicator
+                    // แสดง Loading Indicator เมื่อกำลังบันทึก
                     if (isLoading) ...[
                       const CircularProgressIndicator(
                         color: Colors.black,
@@ -159,9 +161,10 @@ class HeaderEditDialog {
                       const SizedBox(height: 24),
                     ],
 
-                    // Action Buttons
+                    // ปุ่มยกเลิกและบันทึก
                     Row(
                       children: [
+                        // ปุ่มยกเลิก
                         Expanded(
                           child: TextButton(
                             onPressed: isLoading
@@ -190,113 +193,122 @@ class HeaderEditDialog {
                           ),
                         ),
                         const SizedBox(width: 12),
+                        // ปุ่มบันทึก
                         Expanded(
                           child: ElevatedButton(
                             onPressed: isLoading
                                 ? null
                                 : () async {
-                                    // Validate input
+                                    // ตรวจสอบความถูกต้องของข้อมูล
                                     final trimmedName = nameController.text
                                         .trim();
 
+                                    // ตรวจสอบชื่อผู้ใช้
                                     if (!_isValidDisplayName(trimmedName)) {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'ชื่อต้องมีความยาว 2-50 ตัวอักษร และไม่มีอักขระพิเศษ',
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'ชื่อต้องมีความยาว 2-50 ตัวอักษร และไม่มีอักขระพิเศษ',
+                                            ),
+                                            backgroundColor: Colors.orange,
+                                            behavior: SnackBarBehavior.floating,
                                           ),
-                                          backgroundColor: Colors.orange,
-                                          behavior: SnackBarBehavior.floating,
-                                        ),
-                                      );
+                                        );
+                                      }
                                       return;
                                     }
 
+                                    // ตรวจสอบรูปภาพ
                                     if (selectedImage != null &&
-                                        !_isValidImageSize(selectedImage!)) {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'ขนาดรูปภาพต้องไม่เกิน 5MB',
+                                        !FirebaseStorageService.isValidImage(
+                                          selectedImage!,
+                                        )) {
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'รูปภาพไม่ถูกต้อง หรือขนาดเกิน 5MB',
+                                            ),
+                                            backgroundColor: Colors.orange,
+                                            behavior: SnackBarBehavior.floating,
                                           ),
-                                          backgroundColor: Colors.orange,
-                                          behavior: SnackBarBehavior.floating,
-                                        ),
-                                      );
+                                        );
+                                      }
                                       return;
                                     }
 
-                                    // Start loading
+                                    // เริ่มแสดง Loading
                                     setDialogState(() {
                                       isLoading = true;
                                     });
 
                                     try {
-                                      await _saveToFirebase(
+                                      // ทดสอบการเชื่อมต่อก่อน
+                                      await FirebaseStorageService.testConnection();
+
+                                      // บันทึกข้อมูลผ่าน Service
+                                      await FirebaseStorageService.updateCompleteProfile(
                                         displayName: trimmedName,
                                         imageFile: selectedImage,
-                                        context: context,
                                       );
 
-                                      // Save changes locally
+                                      // ตรวจสอบว่า widget ยังไม่ถูก dispose
+                                      if (!context.mounted) return;
+
+                                      // บันทึกข้อมูลใน Local State
                                       onSave(trimmedName, selectedImage);
 
                                       nameController.dispose();
                                       Navigator.of(context).pop();
 
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('อัปเดตโปรไฟล์สำเร็จ'),
-                                          backgroundColor: Colors.green,
-                                          behavior: SnackBarBehavior.floating,
-                                          duration: Duration(seconds: 2),
-                                        ),
-                                      );
+                                      // แสดงข้อความสำเร็จ (หลังจากปิด dialog)
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'อัปเดตโปรไฟล์สำเร็จ',
+                                            ),
+                                            backgroundColor: Colors.green,
+                                            behavior: SnackBarBehavior.floating,
+                                            duration: Duration(seconds: 2),
+                                          ),
+                                        );
+                                      }
                                     } catch (e) {
+                                      // ตรวจสอบว่า widget ยังไม่ถูก dispose
+                                      if (!context.mounted) return;
+
+                                      // หยุด Loading เมื่อเกิดข้อผิดพลาด
                                       setDialogState(() {
                                         isLoading = false;
                                       });
 
-                                      String errorMessage =
-                                          'เกิดข้อผิดพลาดไม่ทราบสาเหตุ';
-
-                                      if (e.toString().contains('network')) {
-                                        errorMessage =
-                                            'ไม่สามารถเชื่อมต่ออินเทอร์เน็ตได้';
-                                      } else if (e.toString().contains(
-                                        'permission',
-                                      )) {
-                                        errorMessage =
-                                            'ไม่มีสิทธิ์ในการแก้ไขข้อมูล';
-                                      } else if (e.toString().contains(
-                                        'storage',
-                                      )) {
-                                        errorMessage =
-                                            'ไม่สามารถอัปโหลดรูปภาพได้';
-                                      }
-
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        SnackBar(
-                                          content: Text(errorMessage),
-                                          backgroundColor: Colors.red,
-                                          behavior: SnackBarBehavior.floating,
-                                          action: SnackBarAction(
-                                            label: 'ลองอีกครั้ง',
-                                            textColor: Colors.white,
-                                            onPressed: () {
-                                              // ปิด SnackBar และลองอีกครั้ง
-                                            },
+                                      // แสดงข้อความข้อผิดพลาด
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(e.toString()),
+                                            backgroundColor: Colors.red,
+                                            behavior: SnackBarBehavior.floating,
+                                            action: SnackBarAction(
+                                              label: 'ลองอีกครั้ง',
+                                              textColor: Colors.white,
+                                              onPressed: () {
+                                                // ปิด SnackBar
+                                              },
+                                            ),
                                           ),
-                                        ),
-                                      );
+                                        );
+                                      }
                                     }
                                   },
                             style: ElevatedButton.styleFrom(
@@ -330,7 +342,7 @@ class HeaderEditDialog {
     );
   }
 
-  // Validation สำหรับชื่อ
+  /// ตรวจสอบความถูกต้องของชื่อผู้ใช้
   static bool _isValidDisplayName(String name) {
     if (name.trim().isEmpty) return false;
     if (name.trim().length < 2) return false;
@@ -346,127 +358,7 @@ class HeaderEditDialog {
     return true;
   }
 
-  // Validation สำหรับขนาดไฟล์
-  static bool _isValidImageSize(File imageFile) {
-    final int fileSizeInBytes = imageFile.lengthSync();
-    final double fileSizeInMB = fileSizeInBytes / (1024 * 1024);
-
-    return fileSizeInMB <= 5.0; // จำกัดที่ 5MB
-  }
-
-  // บันทึกข้อมูลไป Firebase
-  static Future<void> _saveToFirebase({
-    required String displayName,
-    required File? imageFile,
-    required BuildContext context,
-  }) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception('ไม่พบผู้ใช้');
-
-    String? downloadURL;
-
-    try {
-      // อัปโหลดรูปภาพถ้ามี
-      if (imageFile != null) {
-        downloadURL = await _uploadImageToStorage(imageFile, user.uid);
-      }
-
-      // อัปเดต Firebase Auth Profile
-      await user.updateDisplayName(displayName);
-      if (downloadURL != null) {
-        await user.updatePhotoURL(downloadURL);
-      }
-
-      // บันทึกข้อมูลใน Firestore
-      await _saveToFirestore(
-        uid: user.uid,
-        displayName: displayName,
-        photoURL: downloadURL,
-        email: user.email,
-      );
-
-      // Reload user data
-      await user.reload();
-    } catch (e) {
-      print('Error saving to Firebase: $e');
-      throw e;
-    }
-  }
-
-  // อัปโหลดรูปภาพไป Firebase Storage
-  static Future<String> _uploadImageToStorage(
-    File imageFile,
-    String uid,
-  ) async {
-    try {
-      final storageRef = FirebaseStorage.instance
-          .ref()
-          .child('profile_images')
-          .child('$uid.jpg');
-
-      final uploadTask = storageRef.putFile(
-        imageFile,
-        SettableMetadata(
-          contentType: 'image/jpeg',
-          customMetadata: {
-            'uploaded_by': uid,
-            'uploaded_at': DateTime.now().toIso8601String(),
-          },
-        ),
-      );
-
-      final snapshot = await uploadTask;
-      final downloadURL = await snapshot.ref.getDownloadURL();
-
-      return downloadURL;
-    } catch (e) {
-      print('Error uploading image: $e');
-      throw Exception('ไม่สามารถอัปโหลดรูปภาพได้');
-    }
-  }
-
-  // บันทึกข้อมูลใน Firestore
-  static Future<void> _saveToFirestore({
-    required String uid,
-    required String displayName,
-    String? photoURL,
-    String? email,
-  }) async {
-    try {
-      final firestore = FirebaseFirestore.instance;
-      final docRef = firestore.collection('users').doc(uid);
-
-      // ตรวจสอบว่า document มีอยู่หรือไม่
-      final docSnapshot = await docRef.get();
-
-      final data = {
-        'displayName': displayName,
-        'email': email,
-        'updatedAt': FieldValue.serverTimestamp(),
-        'lastActiveAt': FieldValue.serverTimestamp(),
-      };
-
-      if (photoURL != null) {
-        data['photoURL'] = photoURL;
-        data['hasCustomPhoto'] = true;
-      }
-
-      if (docSnapshot.exists) {
-        // อัปเดตข้อมูลที่มีอยู่
-        await docRef.update(data);
-      } else {
-        // สร้างข้อมูลใหม่
-        data['createdAt'] = FieldValue.serverTimestamp();
-        data['profileVersion'] = 1;
-        await docRef.set(data);
-      }
-    } catch (e) {
-      print('Error saving to Firestore: $e');
-      throw Exception('ไม่สามารถบันทึกข้อมูลได้');
-    }
-  }
-
-  // Dialog เลือกรูปภาพ
+  /// แสดง Dialog เลือกรูปภาพ
   static void _showImagePickerDialog({
     required BuildContext context,
     required ImagePicker picker,
@@ -502,9 +394,10 @@ class HeaderEditDialog {
               ),
               const SizedBox(height: 20),
 
-              // Options
+              // ตัวเลือกการเลือกรูป
               Row(
                 children: [
+                  // ปุ่มกล้อง
                   Expanded(
                     child: InkWell(
                       onTap: () => _pickImage(
@@ -541,6 +434,7 @@ class HeaderEditDialog {
                     ),
                   ),
                   const SizedBox(width: 12),
+                  // ปุ่มแกลเลอรี่
                   Expanded(
                     child: InkWell(
                       onTap: () => _pickImage(
@@ -581,7 +475,7 @@ class HeaderEditDialog {
 
               const SizedBox(height: 16),
 
-              // Remove photo option
+              // ปุ่มลบรูปภาพ (แสดงเฉพาะเมื่อมีรูป)
               if (currentImage != null ||
                   FirebaseAuth.instance.currentUser?.photoURL != null)
                 SizedBox(
@@ -613,59 +507,68 @@ class HeaderEditDialog {
     );
   }
 
-  // เลือกรูปภาพ
+  /// เลือกรูปภาพจากกล้องหรือแกลเลอรี่
   static Future<void> _pickImage({
     required BuildContext context,
     required ImageSource source,
     required ImagePicker picker,
     required Function(File?) onImageSelected,
   }) async {
-    Navigator.of(context).pop(); // Close bottom sheet
+    Navigator.of(context).pop(); // ปิด bottom sheet
 
     try {
       final XFile? image = await picker.pickImage(
         source: source,
-        maxWidth: 1024,
+        maxWidth: 1024, // จำกัดขนาดเพื่อประสิทธิภาพ
         maxHeight: 1024,
-        imageQuality: 85,
+        imageQuality: 85, // คุณภาพภาพ 85%
       );
 
       if (image != null) {
         onImageSelected(File(image.path));
 
+        // ตรวจสอบว่า context ยังใช้งานได้
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('เลือกรูปภาพสำเร็จ'),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      // ตรวจสอบว่า context ยังใช้งานได้
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('เลือกรูปภาพสำเร็จ'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: Text('เกิดข้อผิดพลาด: $e'),
+            backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
         );
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('เกิดข้อผิดพลาด: $e'),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
     }
   }
 
-  // ลบรูปภาพ
+  /// ลบรูปภาพ
   static void _removePhoto({
     required BuildContext context,
     required Function(File?) onImageSelected,
   }) {
-    Navigator.of(context).pop(); // Close bottom sheet
+    Navigator.of(context).pop(); // ปิด bottom sheet
     onImageSelected(null);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('ลบรูปภาพแล้ว'),
-        backgroundColor: Colors.orange,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    // ตรวจสอบว่า context ยังใช้งานได้
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ลบรูปภาพแล้ว'),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 }

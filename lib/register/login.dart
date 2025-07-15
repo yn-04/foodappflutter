@@ -58,7 +58,6 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: const Text('เข้าสู่ระบบ'),
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.black87,
         elevation: 0,
