@@ -1,10 +1,27 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     <!-- Permissions -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-feature android:name="android.hardware.camera" android:required="true" /> 
+    <uses-permission android:name="android.permission.FLASHLIGHT" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Camera features -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="true" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+
     <application
         android:label="my_app"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+
+         <!-- ML Kit Dependencies -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_scanning" />
+        
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -45,3 +62,5 @@
         </intent>
     </queries>
 </manifest>
+
+
