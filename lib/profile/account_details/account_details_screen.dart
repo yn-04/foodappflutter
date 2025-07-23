@@ -1,7 +1,6 @@
-// screens/modern_account_details_screen.dart
+// lib/profile/account_details/account_details_screen.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:my_app/profile/account_details/info_card.dart';
 import 'package:my_app/profile/account_settings/services/user_service.dart';
 import 'package:my_app/profile/my_user.dart';
 
@@ -109,7 +108,7 @@ class _ModernAccountDetailsScreenState
           return Theme(
             data: Theme.of(context).copyWith(
               colorScheme: ColorScheme.light(
-                primary: Colors.blue[600]!,
+                primary: Colors.grey[800]!,
                 onPrimary: Colors.white,
                 surface: Colors.white,
                 onSurface: Colors.black,
@@ -240,474 +239,484 @@ class _ModernAccountDetailsScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      body: CustomScrollView(
-        slivers: [
-          // Modern App Bar
-          SliverAppBar(
-            expandedHeight: 120,
-            floating: false,
-            pinned: true,
-            backgroundColor: Colors.black,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            flexibleSpace: FlexibleSpaceBar(
-              title: const Text(
-                'บัญชีของฉัน',
+      appBar: AppBar(
+        backgroundColor: Colors.grey[50],
+        elevation: 0,
+        title: const Text(
+          'บัญชีของฉัน',
+          style: TextStyle(
+            color: Colors.black87,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.black87),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          if (!_isLoading)
+            TextButton(
+              onPressed: _toggleEditMode,
+              child: Text(
+                _isEditing ? 'ยกเลิก' : 'แก้ไข',
                 style: TextStyle(
+                  color: _isEditing ? Colors.red[600] : Colors.blue[600],
                   fontWeight: FontWeight.w600,
-                  fontSize: 18,
-                  color: Colors.white,
                 ),
               ),
-              background: Container(color: Colors.black),
             ),
-            actions: [
-              if (!_isLoading)
-                Container(
-                  margin: const EdgeInsets.only(right: 16),
-                  child: IconButton(
-                    icon: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(10),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.grey),
+              ),
+            )
+          : Form(
+              key: _formKey,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    // ข้อมูลส่วนตัว
+                    _buildInfoSection('ข้อมูลส่วนตัว', [
+                      _buildInfoItem(
+                        'ชื่อ',
+                        _myUser?.firstName ?? '',
+                        _firstNameController,
+                        Icons.person_outline,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'กรุณากรอกชื่อ';
+                          }
+                          return null;
+                        },
                       ),
-                      child: Icon(
-                        _isEditing ? Icons.close : Icons.edit,
-                        color: Colors.white,
-                        size: 20,
+                      _buildInfoItem(
+                        'นามสกุล',
+                        _myUser?.lastName ?? '',
+                        _lastNameController,
+                        Icons.person_outline,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'กรุณากรอกนามสกุล';
+                          }
+                          return null;
+                        },
                       ),
-                    ),
-                    onPressed: _toggleEditMode,
-                  ),
-                ),
-            ],
-          ),
+                      _buildGenderItem(),
+                      _buildBirthDateItem(),
+                      _buildReadOnlyItem(
+                        'อายุ',
+                        _myUser?.age != null ? '${_myUser!.age} ปี' : 'ไม่ระบุ',
+                        Icons.cake_outlined,
+                      ),
+                    ]),
 
-          // Content
-          SliverToBoxAdapter(
-            child: _isLoading
-                ? const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(40),
-                      child: CircularProgressIndicator(),
-                    ),
-                  )
-                : Form(
-                    key: _formKey,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        children: [
-                          // Profile Header
-                          Container(
-                            padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.08),
-                                  offset: const Offset(0, 4),
-                                  blurRadius: 20,
-                                ),
-                              ],
+                    const SizedBox(height: 16),
+
+                    // ข้อมูลสุขภาพ
+                    _buildInfoSection('ข้อมูลสุขภาพ', [
+                      _buildInfoItem(
+                        'ส่วนสูง (ซม.)',
+                        _myUser?.height != null && _myUser!.height > 0
+                            ? _myUser!.height.toStringAsFixed(0)
+                            : '',
+                        _heightController,
+                        Icons.height,
+                        keyboardType: TextInputType.number,
+                      ),
+                      _buildInfoItem(
+                        'น้ำหนัก (กก.)',
+                        _myUser?.weight != null && _myUser!.weight > 0
+                            ? _myUser!.weight.toStringAsFixed(0)
+                            : '',
+                        _weightController,
+                        Icons.monitor_weight_outlined,
+                        keyboardType: TextInputType.number,
+                      ),
+                      _buildReadOnlyItem(
+                        'BMI',
+                        _myUser?.bmi != null && _myUser!.bmi > 0
+                            ? '${_myUser!.bmi.toStringAsFixed(1)} (${_myUser!.bmiCategory})'
+                            : 'ไม่ระบุ',
+                        Icons.analytics_outlined,
+                      ),
+                      _buildInfoItem(
+                        'ประวัติการแพ้',
+                        _myUser?.allergies ?? '',
+                        _allergiesController,
+                        Icons.medical_services_outlined,
+                        maxLines: 2,
+                      ),
+                    ]),
+
+                    const SizedBox(height: 16),
+
+                    // ข้อมูลติดต่อ
+                    _buildInfoSection('ข้อมูลติดต่อ', [
+                      _buildReadOnlyItem(
+                        'อีเมล',
+                        _myUser?.email ?? user?.email ?? 'ไม่ระบุ',
+                        Icons.email_outlined,
+                      ),
+                      _buildInfoItem(
+                        'เบอร์โทรศัพท์',
+                        _myUser?.phoneNumber ?? '',
+                        _phoneController,
+                        Icons.phone_outlined,
+                        keyboardType: TextInputType.phone,
+                      ),
+                    ]),
+
+                    const SizedBox(height: 16),
+
+                    // ข้อมูลบัญชี
+                    _buildInfoSection('ข้อมูลบัญชี', [
+                      _buildReadOnlyItem(
+                        'วันที่สมัคร',
+                        _myUser?.createdAt != null
+                            ? _formatDateFull(_myUser!.createdAt)
+                            : 'ไม่ระบุ',
+                        Icons.calendar_today_outlined,
+                      ),
+                      _buildReadOnlyItem(
+                        'วิธีการล็อกอิน',
+                        _getProviderName(user),
+                        Icons.login_outlined,
+                      ),
+                      _buildReadOnlyItem(
+                        'สถานะบัญชี',
+                        'ใช้งานได้',
+                        Icons.check_circle_outline,
+                      ),
+                      _buildReadOnlyItem(
+                        'การยืนยันตัวตน',
+                        user?.emailVerified == true
+                            ? 'ยืนยันแล้ว'
+                            : 'ยังไม่ยืนยัน',
+                        Icons.verified_outlined,
+                      ),
+                    ]),
+
+                    // ปุ่มบันทึก
+                    if (_isEditing) ...[
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _saveUserData,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.black87,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
                             ),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 30,
-                                  backgroundColor: Colors.blue[100],
-                                  child: Text(
-                                    _myUser?.firstName.isNotEmpty == true
-                                        ? _myUser!.firstName[0].toUpperCase()
-                                        : 'U',
-                                    style: TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.blue[800],
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
                                     ),
                                   ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        _myUser?.fullName ?? 'ไม่ระบุชื่อ',
-                                        style: const TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.black87,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        _myUser?.email ??
-                                            user?.email ??
-                                            'ไม่ระบุอีเมล',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                    ],
+                                )
+                              : const Text(
+                                  'บันทึกข้อมูล',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                              ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 32),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+
+  Widget _buildInfoSection(String title, List<Widget> children) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+          ),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoItem(
+    String label,
+    String value,
+    TextEditingController controller,
+    IconData icon, {
+    TextInputType keyboardType = TextInputType.text,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: Colors.grey[600]),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: _isEditing
+                ? TextFormField(
+                    controller: controller,
+                    keyboardType: keyboardType,
+                    maxLines: maxLines,
+                    validator: validator,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 8,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: const BorderSide(color: Colors.black87),
+                      ),
+                      hintText: keyboardType == TextInputType.phone
+                          ? '08X-XXX-XXXX'
+                          : null,
+                      hintStyle: TextStyle(color: Colors.grey[400]),
+                    ),
+                  )
+                : Text(
+                    value.isEmpty ? 'ไม่ระบุ' : value,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: value.isEmpty ? Colors.grey[500] : Colors.black87,
+                    ),
+                    textAlign: TextAlign.right,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReadOnlyItem(String label, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: Colors.grey[600]),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value.isEmpty ? 'ไม่ระบุ' : value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: value.isEmpty ? Colors.grey[500] : Colors.black87,
+              ),
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGenderItem() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(Icons.wc, size: 20, color: Colors.grey[600]),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: Text(
+              'เพศ',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: _isEditing
+                ? DropdownButtonFormField<String>(
+                    value: _selectedGender,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 8,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                    ),
+                    items: ['ชาย', 'หญิง', 'อื่นๆ'].map((gender) {
+                      return DropdownMenuItem(
+                        value: gender,
+                        child: Text(gender),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedGender = value!;
+                      });
+                    },
+                  )
+                : Text(
+                    _selectedGender.isEmpty ? 'ไม่ระบุ' : _selectedGender,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: _selectedGender.isEmpty
+                          ? Colors.grey[500]
+                          : Colors.black87,
+                    ),
+                    textAlign: TextAlign.right,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBirthDateItem() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(Icons.calendar_today, size: 20, color: Colors.grey[600]),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: Text(
+              'วันเกิด',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: _isEditing
+                ? InkWell(
+                    onTap: _selectBirthDate,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            _selectedBirthDate != null
+                                ? _formatDate(_selectedBirthDate!)
+                                : 'เลือกวันเกิด',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: _selectedBirthDate != null
+                                  ? Colors.black87
+                                  : Colors.grey[500],
                             ),
                           ),
-
-                          const SizedBox(height: 24),
-
-                          // ข้อมูลส่วนตัว
-                          ModernInfoCard(
-                            title: 'ข้อมูลส่วนตัว',
-                            children: [
-                              ModernEditableRow(
-                                label: 'ชื่อ',
-                                value: _myUser?.firstName ?? '',
-                                controller: _firstNameController,
-                                isEditing: _isEditing,
-                                validator: (value) {
-                                  if (value == null || value.isEmpty) {
-                                    return 'กรุณากรอกชื่อ';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              ModernEditableRow(
-                                label: 'นามสกุล',
-                                value: _myUser?.lastName ?? '',
-                                controller: _lastNameController,
-                                isEditing: _isEditing,
-                                validator: (value) {
-                                  if (value == null || value.isEmpty) {
-                                    return 'กรุณากรอกนามสกุล';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              _buildGenderSelector(),
-                              _buildBirthDateSelector(),
-                              ModernInfoRow(
-                                label: 'อายุ',
-                                value: _myUser?.age != null
-                                    ? '${_myUser!.age} ปี'
-                                    : 'ไม่ระบุ',
-                              ),
-                            ],
+                          Icon(
+                            Icons.keyboard_arrow_down,
+                            size: 16,
+                            color: Colors.grey[600],
                           ),
-
-                          // ข้อมูลสุขภาพ
-                          ModernInfoCard(
-                            title: 'ข้อมูลสุขภาพ',
-                            children: [
-                              ModernEditableRow(
-                                label: 'ส่วนสูง (ซม.)',
-                                value:
-                                    _myUser?.height != null &&
-                                        _myUser!.height > 0
-                                    ? _myUser!.height.toStringAsFixed(0)
-                                    : '',
-                                controller: _heightController,
-                                isEditing: _isEditing,
-                                keyboardType: TextInputType.number,
-                              ),
-                              ModernEditableRow(
-                                label: 'น้ำหนัก (กก.)',
-                                value:
-                                    _myUser?.weight != null &&
-                                        _myUser!.weight > 0
-                                    ? _myUser!.weight.toStringAsFixed(0)
-                                    : '',
-                                controller: _weightController,
-                                isEditing: _isEditing,
-                                keyboardType: TextInputType.number,
-                              ),
-                              ModernInfoRow(
-                                label: 'BMI',
-                                value: _myUser?.bmi != null && _myUser!.bmi > 0
-                                    ? '${_myUser!.bmi.toStringAsFixed(1)} (${_myUser!.bmiCategory})'
-                                    : 'ไม่ระบุ',
-                              ),
-                              ModernEditableRow(
-                                label: 'ประวัติการแพ้',
-                                value: _myUser?.allergies ?? '',
-                                controller: _allergiesController,
-                                isEditing: _isEditing,
-                                maxLines: 2,
-                              ),
-                            ],
-                          ),
-
-                          // ข้อมูลติดต่อ
-                          ModernInfoCard(
-                            title: 'ข้อมูลติดต่อ',
-                            children: [
-                              ModernInfoRow(
-                                label: 'อีเมล',
-                                value:
-                                    _myUser?.email ?? user?.email ?? 'ไม่ระบุ',
-                              ),
-                              ModernEditableRow(
-                                label: 'เบอร์โทรศัพท์',
-                                value: _myUser?.phoneNumber ?? '',
-                                controller: _phoneController,
-                                isEditing: _isEditing,
-                                keyboardType: TextInputType.phone,
-                              ),
-                            ],
-                          ),
-
-                          // ข้อมูลบัญชี
-                          ModernInfoCard(
-                            title: 'ข้อมูลบัญชี',
-                            children: [
-                              ModernInfoRow(
-                                label: 'วันที่สมัคร',
-                                value: _myUser?.createdAt != null
-                                    ? _formatDateFull(_myUser!.createdAt)
-                                    : 'ไม่ระบุ',
-                              ),
-                              ModernInfoRow(
-                                label: 'วิธีการล็อกอิน',
-                                value: _getProviderName(user),
-                              ),
-                              ModernInfoRow(
-                                label: 'สถานะบัญชี',
-                                value: 'ใช้งานได้',
-                              ),
-                              ModernInfoRow(
-                                label: 'การยืนยันตัวตน',
-                                value: user?.emailVerified == true
-                                    ? 'ยืนยันแล้ว'
-                                    : 'ยังไม่ยืนยัน',
-                              ),
-                            ],
-                          ),
-
-                          // ปุ่มบันทึก
-                          if (_isEditing) ...[
-                            const SizedBox(height: 24),
-                            Container(
-                              width: double.infinity,
-                              height: 56,
-                              decoration: BoxDecoration(
-                                color: Colors.black,
-                                borderRadius: BorderRadius.circular(16),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.2),
-                                    offset: const Offset(0, 4),
-                                    blurRadius: 12,
-                                  ),
-                                ],
-                              ),
-                              child: ElevatedButton(
-                                onPressed: _isLoading ? null : _saveUserData,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.transparent,
-                                  foregroundColor: Colors.white,
-                                  shadowColor: Colors.transparent,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                ),
-                                child: _isLoading
-                                    ? const SizedBox(
-                                        width: 24,
-                                        height: 24,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor:
-                                              AlwaysStoppedAnimation<Color>(
-                                                Colors.white,
-                                              ),
-                                        ),
-                                      )
-                                    : const Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          Icon(Icons.save, size: 20),
-                                          SizedBox(width: 8),
-                                          Text(
-                                            'บันทึกข้อมูล',
-                                            style: TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                              ),
-                            ),
-                          ],
-
-                          const SizedBox(height: 40),
                         ],
                       ),
                     ),
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGenderSelector() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Icon(Icons.wc, color: Colors.blue[600], size: 14),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'เพศ',
-                style: TextStyle(
-                  color: Colors.grey[700],
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (_isEditing)
-            DropdownButtonFormField<String>(
-              value: _selectedGender,
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey[300]!),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey[300]!),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.blue[600]!, width: 2),
-                ),
-              ),
-              items: ['ชาย', 'หญิง', 'อื่นๆ'].map((gender) {
-                return DropdownMenuItem(value: gender, child: Text(gender));
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedGender = value!;
-                });
-              },
-            )
-          else
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey[200]!),
-              ),
-              child: Text(
-                _selectedGender.isEmpty ? 'ไม่ระบุ' : _selectedGender,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: Colors.black87,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBirthDateSelector() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Icon(
-                  Icons.calendar_today,
-                  color: Colors.blue[600],
-                  size: 14,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'วันเกิด',
-                style: TextStyle(
-                  color: Colors.grey[700],
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          InkWell(
-            onTap: _isEditing ? _selectBirthDate : null,
-            borderRadius: BorderRadius.circular(12),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: _isEditing ? Colors.white : Colors.grey[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
+                  )
+                : Text(
                     _selectedBirthDate != null
-                        ? _formatDate(_selectedBirthDate!) // ใช้ ค.ศ.
-                        : (_isEditing ? 'เลือกวันเกิด' : 'ไม่ระบุ'),
+                        ? _formatDate(_selectedBirthDate!)
+                        : 'ไม่ระบุ',
                     style: TextStyle(
-                      fontWeight: FontWeight.w600,
                       fontSize: 14,
+                      fontWeight: FontWeight.w500,
                       color: _selectedBirthDate != null
                           ? Colors.black87
                           : Colors.grey[500],
                     ),
+                    textAlign: TextAlign.right,
                   ),
-                  if (_isEditing)
-                    Icon(
-                      Icons.calendar_today,
-                      size: 16,
-                      color: Colors.grey[600],
-                    ),
-                ],
-              ),
-            ),
           ),
         ],
       ),
@@ -726,7 +735,7 @@ class _ModernAccountDetailsScreenState
         ),
         backgroundColor: Colors.green[600],
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }
@@ -743,7 +752,7 @@ class _ModernAccountDetailsScreenState
         ),
         backgroundColor: Colors.red[600],
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }

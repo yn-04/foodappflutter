@@ -1,258 +1,12 @@
+// lib/screens/shopping_list_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:my_app/rawmaterial/addraw.dart'; // Import หน้า AddRawMaterialPage
+import 'package:my_app/rawmaterial/addraw.dart';
+import 'package:my_app/rawmaterial/barcode_scanner.dart';
+import '../models/shopping_item.dart';
+import '../widgets/shopping_item_card.dart';
 
-// Model สำหรับ Shopping Item
-class ShoppingItem {
-  final String id;
-  final String name;
-  final String category;
-  final int quantity;
-  final String unit;
-  final DateTime? expiryDate; // เปลี่ยนเป็น nullable
-  final String imageUrl;
-  final bool isExpired;
-
-  ShoppingItem({
-    required this.id,
-    required this.name,
-    required this.category,
-    required this.quantity,
-    required this.unit,
-    this.expiryDate, // เปลี่ยนเป็น nullable
-    required this.imageUrl,
-    required this.isExpired,
-  });
-
-  factory ShoppingItem.fromMap(Map<String, dynamic> map, String id) {
-    DateTime? parsedExpiryDate;
-
-    // ตรวจสอบและแปลงวันหมดอายุ
-    if (map['expiry_date'] != null) {
-      if (map['expiry_date'] is Timestamp) {
-        parsedExpiryDate = (map['expiry_date'] as Timestamp).toDate();
-      } else if (map['expiry_date'] is String) {
-        try {
-          parsedExpiryDate = DateTime.parse(map['expiry_date']);
-        } catch (e) {
-          print('Error parsing expiry_date: $e');
-        }
-      }
-    }
-
-    return ShoppingItem(
-      id: id,
-      name: map['name'] ?? '',
-      category: map['category'] ?? '',
-      quantity: map['quantity'] ?? 0,
-      unit: map['unit'] ?? '',
-      expiryDate: parsedExpiryDate,
-      imageUrl: map['imageUrl'] ?? '',
-      isExpired: parsedExpiryDate != null
-          ? parsedExpiryDate.isBefore(DateTime.now())
-          : false,
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'name': name,
-      'category': category,
-      'quantity': quantity,
-      'unit': unit,
-      'expiry_date': expiryDate?.toIso8601String(),
-      'imageUrl': imageUrl,
-      'isExpired': isExpired,
-    };
-  }
-}
-
-// Main App
-class ShoppingListApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Shopping List',
-      theme: ThemeData(primarySwatch: Colors.orange, fontFamily: 'Kanit'),
-      home: AuthWrapper(),
-    );
-  }
-}
-
-// Authentication Wrapper
-class AuthWrapper extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Scaffold(body: Center(child: CircularProgressIndicator()));
-        }
-
-        if (snapshot.hasData) {
-          return ShoppingListScreen();
-        } else {
-          return AuthScreen();
-        }
-      },
-    );
-  }
-}
-
-// Authentication Screen
-class AuthScreen extends StatefulWidget {
-  @override
-  _AuthScreenState createState() => _AuthScreenState();
-}
-
-class _AuthScreenState extends State<AuthScreen> {
-  final _auth = FirebaseAuth.instance;
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _isLogin = true;
-  bool _isLoading = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.shopping_cart, size: 100, color: Colors.orange),
-              SizedBox(height: 20),
-              Text(
-                'วัตถุดิบ',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                ),
-              ),
-              SizedBox(height: 40),
-
-              TextField(
-                controller: _emailController,
-                decoration: InputDecoration(
-                  labelText: 'อีเมล',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.email),
-                ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              SizedBox(height: 16),
-
-              TextField(
-                controller: _passwordController,
-                decoration: InputDecoration(
-                  labelText: 'รหัสผ่าน',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock),
-                ),
-                obscureText: true,
-              ),
-              SizedBox(height: 24),
-
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _submitAuth,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: _isLoading
-                      ? CircularProgressIndicator(color: Colors.white)
-                      : Text(
-                          _isLogin ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                ),
-              ),
-              SizedBox(height: 16),
-
-              TextButton(
-                onPressed: () {
-                  setState(() {
-                    _isLogin = !_isLogin;
-                  });
-                },
-                child: Text(
-                  _isLogin
-                      ? 'ยังไม่มีบัญชี? สมัครสมาชิก'
-                      : 'มีบัญชีแล้ว? เข้าสู่ระบบ',
-                  style: TextStyle(color: Colors.orange),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _submitAuth() async {
-    if (_emailController.text.trim().isEmpty ||
-        _passwordController.text.trim().isEmpty) {
-      _showError('กรุณากรอกอีเมลและรหัสผ่าน');
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      if (_isLogin) {
-        await _auth.signInWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
-        );
-      } else {
-        final userCredential = await _auth.createUserWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
-        );
-
-        // สร้าง user document
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userCredential.user!.uid)
-            .set({
-              'email': _emailController.text.trim(),
-              'createdAt': FieldValue.serverTimestamp(),
-            });
-      }
-    } catch (e) {
-      _showError(e.toString());
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
-    );
-  }
-}
-
-// หน้าจอหลัก
 class ShoppingListScreen extends StatefulWidget {
   @override
   _ShoppingListScreenState createState() => _ShoppingListScreenState();
@@ -266,11 +20,10 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
   String selectedCategory = 'ทั้งหมด';
   String searchQuery = '';
-  String selectedExpiryFilter = 'ทั้งหมด'; // เพิ่มตัวแปรสำหรับตัวกรองวันหมดอายุ
-  int? customDays; // สำหรับกำหนดวันเอง
-  List<String> availableCategories = ['ทั้งหมด']; // เริ่มต้นด้วย "ทั้งหมด"
+  String selectedExpiryFilter = 'ทั้งหมด';
+  int? customDays;
+  List<String> availableCategories = ['ทั้งหมด'];
 
-  // ตัวเลือกสำหรับตัวกรองวันหมดอายุ
   final List<String> expiryFilterOptions = [
     'ทั้งหมด',
     '1 วัน',
@@ -319,7 +72,6 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
       setState(() {
         availableCategories = categories.toList();
-        // ถ้าหมวดหมู่ที่เลือกไม่มีอยู่แล้ว ให้เปลี่ยนเป็น "ทั้งหมด"
         if (!availableCategories.contains(selectedCategory)) {
           selectedCategory = 'ทั้งหมด';
         }
@@ -332,7 +84,6 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   // กรองข้อมูลตามคำค้นหา
   List<ShoppingItem> _filterItemsBySearch(List<ShoppingItem> items) {
     if (searchQuery.isEmpty) return items;
-
     return items.where((item) {
       return item.name.toLowerCase().contains(searchQuery);
     }).toList();
@@ -345,7 +96,6 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     final now = DateTime.now();
     int daysToCheck = 0;
 
-    // กำหนดจำนวนวันตามตัวเลือก
     switch (selectedExpiryFilter) {
       case '1 วัน':
         daysToCheck = 1;
@@ -372,7 +122,6 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
       final daysUntilExpiry = item.expiryDate!.difference(now).inDays;
 
-      // แสดงเฉพาะวัตถุดิบที่หมดอายุในจำนวนวันที่กำหนดเท่านั้น (ไม่รวมน้อยกว่า)
       if (selectedExpiryFilter == '1 วัน') {
         return daysUntilExpiry == 0 || daysUntilExpiry == 1;
       } else if (selectedExpiryFilter == '2 วัน') {
@@ -389,7 +138,6 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
       } else if (selectedExpiryFilter == '14 วัน') {
         return daysUntilExpiry >= 8 && daysUntilExpiry <= 14;
       } else if (selectedExpiryFilter == 'กำหนดเอง') {
-        // สำหรับกำหนดเอง - แสดงเฉพาะวัตถุดิบที่หมดอายุตรงกับจำนวนวันที่ผู้ใช้กำหนด
         return daysUntilExpiry == daysToCheck;
       } else {
         return daysUntilExpiry <= daysToCheck && daysUntilExpiry >= 0;
@@ -932,6 +680,47 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     );
   }
 
+  // เพิ่ม method สำหรับไปหน้า barcode scanner
+  void _navigateToBarcodeScanner() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => WorkingBarcodeScanner()),
+    );
+
+    // ถ้าได้ผลลัพธ์จากการสแกน
+    if (result != null && result is Map<String, dynamic>) {
+      String barcode = result['barcode'] ?? '';
+      Map<String, dynamic>? productData = result['productData'];
+
+      // ไปหน้าเพิ่มสินค้าพร้อมข้อมูลที่สแกนได้
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AddRawMaterialPage(
+            scannedBarcode: barcode,
+            scannedProductData: productData,
+          ),
+        ),
+      ).then((_) {
+        _loadAvailableCategories();
+        setState(() {});
+      });
+    }
+  }
+
+  // แก้ไข method _navigateToAddRawMaterial
+  void _navigateToAddRawMaterial() {
+    if (currentUser == null) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => AddRawMaterialPage()),
+    ).then((_) {
+      _loadAvailableCategories();
+      setState(() {});
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1058,7 +847,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
             ),
           ),
 
-          // Items List Header with Filter Menu (ส่วนที่ปรับปรุงใหม่)
+          // Items List Header with Filter Menu
           Container(
             padding: EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -1328,8 +1117,13 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                 });
 
                 return ListView.builder(
-                  itemCount: filteredItems.length,
+                  itemCount:
+                      filteredItems.length + 1, // บวก 1 เพื่อใส่ SizedBox
                   itemBuilder: (context, index) {
+                    if (index == filteredItems.length) {
+                      return SizedBox(height: 120); // เว้นช่องให้ FAB
+                    }
+
                     final item = filteredItems[index];
                     return ShoppingItemCard(
                       item: item,
@@ -1339,7 +1133,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                       onDelete: () {
                         _deleteItem(item.id);
                       },
-                      searchQuery: searchQuery, // ส่งคำค้นหาไปให้ card
+                      searchQuery: searchQuery,
                     );
                   },
                 );
@@ -1349,10 +1143,11 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
         ],
       ),
 
-      // Floating Action Button
+      // Floating Action Button - แก้ไขให้มีแค่ Write และ Scan
       floatingActionButton: Container(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(30),
+          color: Colors.yellow[700], // สีพื้นหลังของก้อนปุ่ม
+          borderRadius: BorderRadius.circular(30), // ขอบมนทั้งกล่อง
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.1),
@@ -1361,31 +1156,50 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
             ),
           ],
         ),
-        child: FloatingActionButton.extended(
-          onPressed: _navigateToAddRawMaterial,
-          backgroundColor: Colors.yellow[600],
-          icon: Icon(Icons.add, color: Colors.black),
-          label: Row(
-            children: [
-              Text(
-                'write',
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4), // ขอบด้านใน
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ปุ่ม Write
+            TextButton.icon(
+              onPressed: _navigateToAddRawMaterial,
+              icon: Icon(Icons.edit, color: Colors.black),
+              label: Text(
+                'Write',
                 style: TextStyle(
                   color: Colors.black,
                   fontWeight: FontWeight.bold,
+                  fontSize: 14,
                 ),
               ),
-              SizedBox(width: 8),
-              Icon(Icons.qr_code_scanner, color: Colors.black),
-              SizedBox(width: 4),
-              Text(
-                'scan',
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
+              ),
+            ),
+            SizedBox(width: 8), // ระยะห่างระหว่างปุ่ม
+            // ปุ่ม Scan
+            TextButton.icon(
+              onPressed: _navigateToBarcodeScanner,
+              icon: Icon(Icons.qr_code_scanner, color: Colors.black),
+              label: Text(
+                'Scan',
                 style: TextStyle(
                   color: Colors.black,
                   fontWeight: FontWeight.bold,
+                  fontSize: 14,
                 ),
               ),
-            ],
-          ),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1474,362 +1288,4 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
       );
     }
   }
-
-  void _navigateToAddRawMaterial() {
-    if (currentUser == null) return;
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => AddRawMaterialPage()),
-    ).then((_) {
-      _loadAvailableCategories();
-      setState(() {});
-    });
-  }
-}
-
-// Card สำหรับแสดงรายการวัตถุดิบ (แก้ไข RenderFlex overflow)
-class ShoppingItemCard extends StatelessWidget {
-  final ShoppingItem item;
-  final Function(int) onQuantityChanged;
-  final VoidCallback onDelete;
-  final String searchQuery;
-
-  const ShoppingItemCard({
-    Key? key,
-    required this.item,
-    required this.onQuantityChanged,
-    required this.onDelete,
-    this.searchQuery = '',
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    // คำนวณสถานะการหมดอายุ
-    Color statusColor = Colors.green;
-    String statusText = 'ยังไม่หมดอายุ';
-
-    if (item.expiryDate != null) {
-      final now = DateTime.now();
-      final daysUntilExpiry = item.expiryDate!.difference(now).inDays;
-
-      if (daysUntilExpiry < 0) {
-        statusColor = Colors.red;
-        statusText = 'หมดอายุแล้ว';
-      } else if (daysUntilExpiry <= 3) {
-        statusColor = Colors.orange;
-        statusText = 'ใกล้หมดอายุ';
-      }
-    }
-
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            blurRadius: 5,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ListTile(
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            width: 50,
-            height: 50,
-            color: Colors.grey[200],
-            child: item.imageUrl.isNotEmpty
-                ? Image.network(
-                    item.imageUrl,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Icon(
-                        Icons.image_not_supported,
-                        color: Colors.grey,
-                      );
-                    },
-                  )
-                : Icon(_getCategoryIcon(item.category), color: Colors.grey),
-          ),
-        ),
-        title: _buildHighlightedText(item.name, searchQuery),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: _buildHighlightedText(
-                    item.category,
-                    searchQuery,
-                    TextStyle(
-                      color: statusColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                SizedBox(width: 8),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    statusText,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 4),
-            Text(
-              item.expiryDate != null
-                  ? 'หมดอายุ: ${_formatDate(item.expiryDate!)}'
-                  : 'ไม่มีวันหมดอายุ',
-              style: TextStyle(color: Colors.grey[600], fontSize: 12),
-            ),
-          ],
-        ),
-        // แก้ไข trailing เพื่อป้องกัน RenderFlex overflow
-        trailing: SizedBox(
-          width: 112, // กำหนดความกว้างสูงสุด
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // ปุ่มลบ - ลดขนาด
-              Container(
-                width: 28, // ลดจาก 32 เป็น 28
-                height: 28,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  icon: Icon(
-                    Icons.remove_circle_outline,
-                    color: Colors.red,
-                    size: 18, // ลดขนาดไอคอน
-                  ),
-                  onPressed: () {
-                    if (item.quantity > 1) {
-                      onQuantityChanged(item.quantity - 1);
-                    } else {
-                      _showDeleteConfirmDialog(context);
-                    }
-                  },
-                ),
-              ),
-
-              // แสดงจำนวน - ลดขนาด
-              Container(
-                width: 28, // ลดจาก 40 เป็น 28
-                child: Center(
-                  child: Text(
-                    '${item.quantity}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14, // ลดขนาดฟอนต์
-                    ),
-                  ),
-                ),
-              ),
-
-              // ปุ่มเพิ่ม - ลดขนาด
-              Container(
-                width: 28, // ลดจาก 32 เป็น 28
-                height: 28,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  icon: Icon(
-                    Icons.add_circle_outline,
-                    color: Colors.green,
-                    size: 18, // ลดขนาดไอคอน
-                  ),
-                  onPressed: () {
-                    onQuantityChanged(item.quantity + 1);
-                  },
-                ),
-              ),
-
-              // ไอคอนถังขยะ - ลดขนาด
-              Container(
-                width: 28, // ลดจาก 32 เป็น 28
-                height: 28,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  icon: Icon(
-                    Icons.delete_outline,
-                    color: Colors.grey[600],
-                    size: 18, // ลดขนาดไอคอน
-                  ),
-                  onPressed: () {
-                    _showDeleteDialog(context);
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-        onLongPress: () {
-          _showDeleteDialog(context);
-        },
-      ),
-    );
-  }
-
-  // สร้างข้อความที่ไฮไลต์คำค้นหา
-  Widget _buildHighlightedText(String text, String query, [TextStyle? style]) {
-    if (query.isEmpty) {
-      return Text(
-        text,
-        style: style ?? TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-      );
-    }
-
-    final lowerText = text.toLowerCase();
-    final lowerQuery = query.toLowerCase();
-    final index = lowerText.indexOf(lowerQuery);
-
-    if (index == -1) {
-      return Text(
-        text,
-        style: style ?? TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-      );
-    }
-
-    final beforeMatch = text.substring(0, index);
-    final match = text.substring(index, index + query.length);
-    final afterMatch = text.substring(index + query.length);
-
-    return RichText(
-      text: TextSpan(
-        style:
-            style ??
-            TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: Colors.black,
-            ),
-        children: [
-          TextSpan(text: beforeMatch),
-          TextSpan(
-            text: match,
-            style: TextStyle(
-              backgroundColor: Colors.yellow[300],
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          TextSpan(text: afterMatch),
-        ],
-      ),
-    );
-  }
-
-  IconData _getCategoryIcon(String category) {
-    switch (category) {
-      case 'เนื้อสัตว์':
-        return Icons.set_meal;
-      case 'ผัก':
-        return Icons.eco;
-      case 'ผลไม้':
-        return Icons.apple;
-      case 'เครื่องเทศ':
-        return Icons.grain;
-      case 'แป้ง':
-        return Icons.bakery_dining;
-      case 'น้ำมัน':
-        return Icons.opacity;
-      case 'เครื่องดื่ม':
-        return Icons.local_drink;
-      case 'ของแห้ง':
-        return Icons.inventory_2;
-      case 'ของแช่แข็ง':
-        return Icons.ac_unit;
-      default:
-        return Icons.fastfood;
-    }
-  }
-
-  String _formatDate(DateTime date) {
-    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${(date.year + 543).toString().substring(2)}';
-  }
-
-  void _showDeleteConfirmDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('ลบรายการ'),
-        content: Text(
-          'จำนวน ${item.name} จะเป็น 0 ต้องการลบรายการนี้ออกใช่หรือไม่?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('ยกเลิก'),
-          ),
-          TextButton(
-            onPressed: () {
-              onQuantityChanged(0); // ส่ง 0 เพื่อลบรายการ
-              Navigator.pop(context);
-            },
-            child: Text('ลบ', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showDeleteDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('ลบรายการ'),
-        content: Text('คุณต้องการลบ ${item.name} ใช่หรือไม่?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('ยกเลิก'),
-          ),
-          TextButton(
-            onPressed: () {
-              onDelete();
-              Navigator.pop(context);
-            },
-            child: Text('ลบ', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// Main function
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // จัดการ error ที่เกิดจาก keyboard events
-  FlutterError.onError = (FlutterErrorDetails details) {
-    // ถ้าเป็น error จาก keyboard events ให้ ignore
-    if (details.exception.toString().contains('KeyUpEvent') ||
-        details.exception.toString().contains('_pressedKeys.containsKey')) {
-      return;
-    }
-    // สำหรับ error อื่นๆ ให้แสดงตามปกติ
-    FlutterError.presentError(details);
-  };
-
-  await Firebase.initializeApp();
-  runApp(ShoppingListApp());
 }

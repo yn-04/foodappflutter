@@ -3,7 +3,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class AddRawMaterialPage extends StatefulWidget {
-  const AddRawMaterialPage({Key? key}) : super(key: key);
+  // เพิ่ม parameters สำหรับรับข้อมูลจากบาร์โค้ด
+  final String? scannedBarcode;
+  final Map<String, dynamic>? scannedProductData;
+
+  const AddRawMaterialPage({
+    super.key,
+    this.scannedBarcode,
+    this.scannedProductData,
+  });
 
   @override
   State<AddRawMaterialPage> createState() => _AddRawMaterialPageState();
@@ -13,6 +21,10 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _priceController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
+  final TextEditingController _barcodeController =
+      TextEditingController(); // เพิ่มสำหรับบาร์โค้ด
+  final TextEditingController _brandController =
+      TextEditingController(); // เพิ่มสำหรับยี่ห้อ
 
   int _quantity = 1;
   String _selectedUnit = 'กรัม';
@@ -26,6 +38,7 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
 
   final List<String> _units = [
     'กรัม',
+    'ฟอง',
     'กิโลกรัม',
     'ลิตร',
     'มิลลิลิตร',
@@ -38,6 +51,7 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
 
   final List<String> _categories = [
     'เนื้อสัตว์',
+    'ไข่',
     'ผัก',
     'ผลไม้',
     'เครื่องเทศ',
@@ -55,6 +69,41 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
     super.initState();
     _checkFirestoreConnection();
     _loadRecentMaterials();
+    _initializeWithScannedData(); // เพิ่มการเติมข้อมูลจากบาร์โค้ด
+  }
+
+  // เพิ่ม method สำหรับเติมข้อมูลจากบาร์โค้ด
+  void _initializeWithScannedData() {
+    // ถ้ามีข้อมูลจากบาร์โค้ด
+    if (widget.scannedBarcode != null) {
+      _barcodeController.text = widget.scannedBarcode!;
+    }
+
+    if (widget.scannedProductData != null) {
+      final data = widget.scannedProductData!;
+
+      _nameController.text = data['name'] ?? '';
+      _brandController.text = data['brand'] ?? '';
+      _notesController.text = data['description'] ?? '';
+
+      if (data['category'] != null && _categories.contains(data['category'])) {
+        _selectedCategory = data['category'];
+      }
+
+      if (data['unit'] != null && _units.contains(data['unit'])) {
+        _selectedUnit = data['unit'];
+      }
+
+      // ถ้ามีจำนวนเริ่มต้น
+      if (data['defaultQuantity'] != null) {
+        _quantity = data['defaultQuantity'];
+      }
+
+      // ถ้ามีราคาเริ่มต้น
+      if (data['price'] != null) {
+        _priceController.text = data['price'].toString();
+      }
+    }
   }
 
   @override
@@ -62,6 +111,8 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
     _nameController.dispose();
     _priceController.dispose();
     _notesController.dispose();
+    _barcodeController.dispose();
+    _brandController.dispose();
     super.dispose();
   }
 
@@ -186,7 +237,17 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
         'created_at': DateTime.now().toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
         'user_id': user.uid,
+        'imageUrl': '', // เพิ่มสำหรับรูปภาพ (ว่างไว้ก่อน)
       };
+
+      // เพิ่มข้อมูลจากบาร์โค้ดถ้ามี
+      if (widget.scannedBarcode != null) {
+        rawMaterialData['barcode'] = widget.scannedBarcode!;
+      }
+
+      if (_brandController.text.trim().isNotEmpty) {
+        rawMaterialData['brand'] = _brandController.text.trim();
+      }
 
       print('Saving data: $rawMaterialData');
 
@@ -203,6 +264,11 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
 
       await docRef.set(rawMaterialData);
       print('Data saved with ID: ${docRef.id}');
+
+      // บันทึกข้อมูลสินค้าในฐานข้อมูลทั่วไป (ถ้ามีบาร์โค้ดและยังไม่มีในระบบ)
+      if (widget.scannedBarcode != null && widget.scannedProductData == null) {
+        await _saveProductToDatabase(rawMaterialData);
+      }
 
       final savedDoc = await docRef.get();
       if (savedDoc.exists) {
@@ -242,17 +308,23 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
     }
   }
 
-  void _clearForm() {
-    _nameController.clear();
-    _priceController.clear();
-    _notesController.clear();
-    setState(() {
-      _quantity = 1;
-      _selectedUnit = 'กรัม';
-      _selectedExpiry = ''; // เปลี่ยนให้เป็นค่าว่างเพื่อบังคับเลือก
-      _selectedCategory = null;
-      _customExpiryDate = null;
-    });
+  // เพิ่ม method สำหรับบันทึกข้อมูลสินค้าในฐานข้อมูลทั่วไป
+  Future<void> _saveProductToDatabase(Map<String, dynamic> productData) async {
+    try {
+      await _firestore.collection('products').doc(widget.scannedBarcode!).set({
+        'barcode': widget.scannedBarcode,
+        'name': productData['name'],
+        'category': productData['category'],
+        'brand': productData['brand'],
+        'description': productData['notes'],
+        'unit': productData['unit'],
+        'created_at': FieldValue.serverTimestamp(),
+        'created_by': _auth.currentUser?.uid,
+      }, SetOptions(merge: true));
+      print('Product data saved to general database');
+    } catch (e) {
+      print('Error saving product to database: $e');
+    }
   }
 
   void _showErrorSnackBar(String message) {
@@ -333,13 +405,24 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
           icon: const Icon(Icons.arrow_back, color: Colors.black),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
-          'เพิ่มวัตถุดิบ',
-          style: TextStyle(
-            color: Colors.black,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'เพิ่มวัตถุดิบ',
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            // แสดงข้อมูลบาร์โค้ดถ้ามี
+            if (widget.scannedBarcode != null)
+              Text(
+                'จากบาร์โค้ด: ${widget.scannedBarcode}',
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+          ],
         ),
         centerTitle: true,
       ),
@@ -350,6 +433,59 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ถ้ามีข้อมูลจากบาร์โค้ด แสดง Banner
+              if (widget.scannedBarcode != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.green[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.green[100],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(
+                          Icons.qr_code_scanner,
+                          color: Colors.green[700],
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'ข้อมูลจากบาร์โค้ด',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green[800],
+                              ),
+                            ),
+                            Text(
+                              widget.scannedProductData != null
+                                  ? 'พบข้อมูลในระบบ - กรุณาตรวจสอบความถูกต้อง'
+                                  : 'ไม่พบข้อมูลในระบบ - กรุณากรอกข้อมูลใหม่',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.green[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
               const SizedBox(height: 30),
 
               // Name field
@@ -393,6 +529,14 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
 
               const SizedBox(height: 20),
 
+              // ข้อมูลเพิ่มเติม (แสดงเฉพาะเมื่อมีบาร์โค้ด)
+              if (widget.scannedBarcode != null) ...[
+                _buildSectionTitle('ข้อมูลเพิ่มเติม'),
+                const SizedBox(height: 20),
+                _buildAdditionalInfoSection(),
+                const SizedBox(height: 20),
+              ],
+
               // Notes field
               _buildNotesField(),
 
@@ -404,6 +548,55 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
           ),
         ),
       ),
+    );
+  }
+
+  // เพิ่ม method สำหรับข้อมูลเพิ่มเติม
+  Widget _buildAdditionalInfoSection() {
+    return Column(
+      children: [
+        // บาร์โค้ด
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: Colors.grey[300]!),
+          ),
+          child: TextField(
+            controller: _barcodeController,
+            style: const TextStyle(color: Colors.black87, fontSize: 16),
+            decoration: const InputDecoration(
+              hintText: '📊 บาร์โค้ด',
+              hintStyle: TextStyle(color: Colors.grey),
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.all(20),
+              prefixIcon: Icon(Icons.qr_code, color: Colors.black),
+            ),
+            enabled: false, // ไม่ให้แก้ไขได้
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // ยี่ห้อ
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: Colors.black),
+          ),
+          child: TextField(
+            controller: _brandController,
+            style: const TextStyle(color: Colors.black87, fontSize: 16),
+            decoration: const InputDecoration(
+              hintText: '🏷️ ยี่ห้อ (ไม่บังคับ)',
+              hintStyle: TextStyle(color: Colors.grey),
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.all(20),
+              prefixIcon: Icon(Icons.business_outlined, color: Colors.black),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

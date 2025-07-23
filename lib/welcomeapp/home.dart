@@ -1,9 +1,9 @@
 // home.dart
 import 'package:flutter/material.dart';
 import 'package:my_app/dashboard/dashboard.dart';
-import 'package:my_app/foodreccom/foodreccom.dart';
+import 'package:my_app/foodreccom/recommendation_page.dart';
 import 'package:my_app/profile/profile_tab.dart';
-import 'package:my_app/rawmaterial/rawmaterial.dart';
+import 'package:my_app/rawmaterial/screens/shopping_list_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,8 +17,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final List<Widget> _pages = [
     const DashboardTab(),
-    ShoppingListApp(),
-    const FoodRecommendationTab(),
+    ShoppingListScreen(),
+    const RecommendationPage(),
     const ProfileTab(),
   ];
 
