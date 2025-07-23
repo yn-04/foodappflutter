@@ -6,6 +6,7 @@ import 'package:my_app/rawmaterial/addraw.dart';
 import 'package:my_app/rawmaterial/barcode_scanner.dart';
 import '../models/shopping_item.dart';
 import '../widgets/shopping_item_card.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class ShoppingListScreen extends StatefulWidget {
   @override
@@ -1183,7 +1184,11 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
             // ปุ่ม Scan
             TextButton.icon(
               onPressed: _navigateToBarcodeScanner,
-              icon: Icon(Icons.qr_code_scanner, color: Colors.black),
+              icon: Icon(
+                FontAwesomeIcons.barcode,
+                size: 20,
+                color: const Color.fromARGB(255, 0, 0, 0),
+              ),
               label: Text(
                 'Scan',
                 style: TextStyle(

@@ -9,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class WorkingBarcodeScanner extends StatefulWidget {
   @override
@@ -494,16 +495,16 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
     return Scaffold(
       appBar: AppBar(
         title: Text('สแกนบาร์โค้ด'),
-        backgroundColor: Colors.green,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.grey[50],
+        foregroundColor: const Color.fromARGB(255, 7, 7, 7),
       ),
       body: Padding(
         padding: EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(Icons.qr_code_scanner, size: 120, color: Colors.green),
-            SizedBox(height: 30),
+            Icon(FontAwesomeIcons.barcode, size: 120, color: Colors.grey[500]),
+            SizedBox(height: 20),
 
             Text(
               'เลือกวิธีสแกนบาร์โค้ด',
@@ -514,7 +515,10 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
 
             Text(
               'ระบบจะค้นหาข้อมูลจาก OpenFoodFacts อัตโนมัติ',
-              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+              style: TextStyle(
+                fontSize: 16,
+                color: const Color.fromARGB(255, 0, 0, 0),
+              ),
               textAlign: TextAlign.center,
             ),
             SizedBox(height: 40),
@@ -525,8 +529,8 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
               icon: Icon(Icons.camera_alt, size: 24),
               label: Text('ถ่ายรูปบาร์โค้ด', style: TextStyle(fontSize: 18)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
+                backgroundColor: Colors.yellow[700],
+                foregroundColor: const Color.fromARGB(255, 0, 0, 0),
                 padding: EdgeInsets.symmetric(vertical: 15),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -545,8 +549,8 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
                 style: TextStyle(fontSize: 18),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
+                backgroundColor: Colors.yellow[700],
+                foregroundColor: const Color.fromARGB(255, 0, 0, 0),
                 padding: EdgeInsets.symmetric(vertical: 15),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
