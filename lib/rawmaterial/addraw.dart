@@ -25,6 +25,8 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
       TextEditingController(); // เพิ่มสำหรับบาร์โค้ด
   final TextEditingController _brandController =
       TextEditingController(); // เพิ่มสำหรับยี่ห้อ
+  // 1. เพิ่มตัวแปรนี้ในส่วน class variables (หลัง _brandController):
+  final TextEditingController _quantityController = TextEditingController();
 
   int _quantity = 1;
   String _selectedUnit = 'กรัม';
@@ -43,9 +45,6 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
     'ลิตร',
     'มิลลิลิตร',
     'ขวด',
-    'ถุง',
-    'กล่อง',
-    'แผ่น',
     'ชิ้น',
   ];
 
@@ -54,7 +53,10 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
     'ไข่',
     'ผัก',
     'ผลไม้',
+    'ผลิตภัณฑ์จากนม',
+    'ข้าว',
     'เครื่องเทศ',
+    'เครื่องปรุง',
     'แป้ง',
     'น้ำมัน',
     'เครื่องดื่ม',
@@ -70,6 +72,7 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
     _checkFirestoreConnection();
     _loadRecentMaterials();
     _initializeWithScannedData(); // เพิ่มการเติมข้อมูลจากบาร์โค้ด
+    _quantityController.text = _quantity.toString(); // เพิ่มบรรทัดนี้
   }
 
   // เพิ่ม method สำหรับเติมข้อมูลจากบาร์โค้ด
@@ -113,6 +116,7 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
     _notesController.dispose();
     _barcodeController.dispose();
     _brandController.dispose();
+    _quantityController.dispose(); // เพิ่มบรรทัดนี้
     super.dispose();
   }
 
@@ -751,66 +755,103 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
     }
   }
 
+  // แทนที่ method _buildQuantityControls() เดิมด้วยโค้ดนี้
+
   Widget _buildQuantityControls() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.black),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            GestureDetector(
-              onTap: () {
-                if (_quantity > 1) {
-                  setState(() {
-                    _quantity--;
-                  });
-                }
-              },
-              child: Container(
-                width: 35,
-                height: 35,
-                decoration: BoxDecoration(
-                  color: Colors.yellow[600],
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.remove, size: 20, color: Colors.black),
-              ),
+    return Row(
+      children: [
+        // ปุ่มลด
+        GestureDetector(
+          onTap: () {
+            if (_quantity > 1) {
+              setState(() {
+                _quantity--;
+                _quantityController.text = _quantity.toString();
+              });
+            }
+          },
+          child: Container(
+            width: 35,
+            height: 35,
+            decoration: BoxDecoration(
+              color: Colors.yellow[600],
+              borderRadius: BorderRadius.circular(10),
             ),
-            Text(
-              '$_quantity',
+            child: const Icon(Icons.remove, size: 20, color: Colors.black),
+          ),
+        ),
+
+        const SizedBox(width: 10),
+
+        // ช่องป้อนตัวเลข (กรอบสีดำคลุมแค่ส่วนนี้)
+        Expanded(
+          child: Container(
+            width: 25,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: Colors.black),
+            ),
+            child: TextField(
+              controller: _quantityController,
+              keyboardType: TextInputType.number,
+              textAlign: TextAlign.center,
               style: const TextStyle(
-                fontSize: 18,
+                fontSize: 16,
                 fontWeight: FontWeight.bold,
                 color: Colors.black87,
               ),
-            ),
-            GestureDetector(
-              onTap: () {
-                setState(() {
-                  _quantity++;
-                });
-              },
-              child: Container(
-                width: 35,
-                height: 35,
-                decoration: BoxDecoration(
-                  color: Colors.yellow[600],
-                  borderRadius: BorderRadius.circular(10),
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                hintStyle: TextStyle(
+                  color: Colors.grey[400],
+                  fontSize: 12,
+                  fontWeight: FontWeight.normal,
                 ),
-                child: const Icon(Icons.add, size: 20, color: Colors.black),
+                contentPadding: const EdgeInsets.symmetric(vertical: 15),
               ),
+              onChanged: (value) {
+                final parsedValue = int.tryParse(value);
+                if (parsedValue != null && parsedValue > 0) {
+                  setState(() {
+                    _quantity = parsedValue;
+                  });
+                } else if (value.isEmpty) {
+                  setState(() {
+                    _quantity = 1;
+                  });
+                }
+              },
             ),
-          ],
+          ),
         ),
-      ),
+
+        const SizedBox(width: 10),
+
+        // ปุ่มเพิ่ม
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _quantity++;
+              _quantityController.text = _quantity.toString();
+            });
+          },
+          child: Container(
+            width: 35,
+            height: 35,
+            decoration: BoxDecoration(
+              color: Colors.yellow[600],
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.add, size: 20, color: Colors.black),
+          ),
+        ),
+      ],
     );
   }
 
+  // 4. แก้ไข _buildUnitDropdown() ให้อัพเดทค่าแนะนำเมื่อเปลี่ยนหน่วย:
   Widget _buildUnitDropdown() {
     return Container(
       decoration: BoxDecoration(
@@ -842,6 +883,7 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
             onChanged: (String? newValue) {
               setState(() {
                 _selectedUnit = newValue!;
+                // อัพเดท hint text ใน quantity field
               });
             },
           ),
