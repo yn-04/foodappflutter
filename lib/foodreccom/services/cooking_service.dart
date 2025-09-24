@@ -1,8 +1,10 @@
-// lib/services/cooking_service.dart
+//lib/foodreccom/services/cooking_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../models/recipe_model.dart';
+import '../models/recipe/recipe_model.dart';
 import '../models/cooking_history_model.dart';
+import '../models/recipe/recipe.dart';
+import '../models/recipe/used_ingredient.dart';
 
 class CookingService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -23,7 +25,7 @@ class CookingService {
         throw Exception('วัตถุดิบไม่เพียงพอ');
       }
 
-      // 2. ลดสต็อกวัตถุดิบ
+      // 2. ลดสต็อกวัตถุดิบ (transaction)
       final usedIngredients = await _reduceIngredientStock(
         recipe,
         servingsToMake,
@@ -32,13 +34,13 @@ class CookingService {
       // 3. บันทึกประวัติการทำอาหาร
       await _recordCookingHistory(
         recipe,
-        servingsToMade: servingsToMake,
+        servingsMade: servingsToMake, // ✅ fixed name
         usedIngredients: usedIngredients,
       );
 
       return true;
     } catch (e) {
-      print('Error starting cooking: $e');
+      print('❌ Error starting cooking: $e');
       return false;
     }
   }
@@ -54,7 +56,7 @@ class CookingService {
     try {
       for (final recipeIngredient in recipe.ingredients) {
         final requiredAmount =
-            recipeIngredient.amount * (servingsToMake / recipe.servings);
+            recipeIngredient.numericAmount * (servingsToMake / recipe.servings);
 
         final snapshot = await _firestore
             .collection('users')
@@ -64,27 +66,30 @@ class CookingService {
             .get();
 
         if (snapshot.docs.isEmpty) {
-          print('Missing ingredient: ${recipeIngredient.name}');
+          print('⚠️ Missing ingredient: ${recipeIngredient.name}');
           return false;
         }
 
-        final availableAmount =
-            snapshot.docs.first.data()['quantity']?.toDouble() ?? 0;
+        final rawQty = snapshot.docs.first.data()['quantity'];
+        final availableAmount = (rawQty is int)
+            ? rawQty.toDouble()
+            : (rawQty is double ? rawQty : 0.0);
+
         if (availableAmount < requiredAmount) {
           print(
-            'Not enough ${recipeIngredient.name}: need $requiredAmount, have $availableAmount',
+            '⚠️ Not enough ${recipeIngredient.name}: need $requiredAmount, have $availableAmount',
           );
           return false;
         }
       }
       return true;
     } catch (e) {
-      print('Error checking availability: $e');
+      print('❌ Error checking availability: $e');
       return false;
     }
   }
 
-  // ลดสต็อกวัตถุดิบ
+  // ลดสต็อกวัตถุดิบ (ใช้ transaction)
   Future<List<UsedIngredient>> _reduceIngredientStock(
     RecipeModel recipe,
     int servingsToMake,
@@ -97,7 +102,7 @@ class CookingService {
     try {
       for (final recipeIngredient in recipe.ingredients) {
         final requiredAmount =
-            recipeIngredient.amount * (servingsToMake / recipe.servings);
+            recipeIngredient.numericAmount * (servingsToMake / recipe.servings);
 
         final snapshot = await _firestore
             .collection('users')
@@ -108,37 +113,44 @@ class CookingService {
 
         if (snapshot.docs.isNotEmpty) {
           final doc = snapshot.docs.first;
-          final data = doc.data();
-          final currentAmount = data['quantity']?.toDouble() ?? 0;
-          final newAmount = currentAmount - requiredAmount;
 
-          // อัปเดตสต็อก
-          if (newAmount <= 0) {
-            // ลบรายการถ้าหมด
-            await doc.reference.delete();
-          } else {
-            // ลดจำนวน
-            await doc.reference.update({
-              'quantity': newAmount,
-              'updated_at': DateTime.now().toIso8601String(),
-            });
-          }
+          await _firestore.runTransaction((transaction) async {
+            final freshSnap = await transaction.get(doc.reference);
+            if (!freshSnap.exists) return;
 
-          // บันทึกการใช้งาน
-          usedIngredients.add(
-            UsedIngredient(
-              name: recipeIngredient.name,
-              amount: requiredAmount,
-              unit: recipeIngredient.unit,
-              category: data['category'] ?? '',
-              cost: _calculateIngredientCost(data, requiredAmount),
-            ),
-          );
+            final data = freshSnap.data() as Map<String, dynamic>;
+            final rawQty = data['quantity'];
+            final currentAmount = (rawQty is int)
+                ? rawQty.toDouble()
+                : (rawQty is double ? rawQty : 0.0);
+
+            final newAmount = currentAmount - requiredAmount;
+
+            if (newAmount <= 0) {
+              transaction.delete(doc.reference);
+            } else {
+              transaction.update(doc.reference, {
+                'quantity': newAmount,
+                'updated_at': FieldValue.serverTimestamp(), // ✅
+              });
+            }
+
+            // บันทึกการใช้งาน
+            usedIngredients.add(
+              UsedIngredient(
+                name: recipeIngredient.name,
+                amount: requiredAmount,
+                unit: recipeIngredient.unit,
+                category: data['category'] ?? '',
+                cost: _calculateIngredientCost(data, requiredAmount),
+              ),
+            );
+          });
         }
       }
       return usedIngredients;
     } catch (e) {
-      print('Error reducing stock: $e');
+      print('❌ Error reducing stock: $e');
       return [];
     }
   }
@@ -147,15 +159,23 @@ class CookingService {
     Map<String, dynamic> ingredientData,
     double usedAmount,
   ) {
-    final price = ingredientData['price']?.toDouble() ?? 0;
-    final totalQuantity = ingredientData['quantity']?.toDouble() ?? 1;
+    final rawPrice = ingredientData['price'];
+    final rawQty = ingredientData['quantity'];
+
+    final price = (rawPrice is int)
+        ? rawPrice.toDouble()
+        : (rawPrice as double? ?? 0);
+    final totalQuantity = (rawQty is int)
+        ? rawQty.toDouble()
+        : (rawQty as double? ?? 1);
+
     return (price / totalQuantity) * usedAmount;
   }
 
   // บันทึกประวัติการทำอาหาร
   Future<void> _recordCookingHistory(
     RecipeModel recipe, {
-    required int servingsToMade,
+    required int servingsMade, // ✅ fixed name
     required List<UsedIngredient> usedIngredients,
     int rating = 0,
     String? notes,
@@ -170,11 +190,11 @@ class CookingService {
         recipeName: recipe.name,
         recipeCategory: recipe.category,
         cookedAt: DateTime.now(),
-        servingsMade: servingsToMade,
+        servingsMade: servingsMade,
         usedIngredients: usedIngredients,
         totalNutrition: _calculateTotalNutrition(
           recipe.nutrition,
-          servingsToMade,
+          servingsMade,
           recipe.servings,
         ),
         rating: rating,
@@ -187,11 +207,14 @@ class CookingService {
           .doc(user.uid)
           .collection('cooking_history')
           .doc(history.id)
-          .set(history.toFirestore());
+          .set({
+            ...history.toFirestore(),
+            'cooked_at': FieldValue.serverTimestamp(), // ✅ Firestore timestamp
+          });
 
       print('✅ Cooking history recorded');
     } catch (e) {
-      print('Error recording history: $e');
+      print('❌ Error recording history: $e');
     }
   }
 
@@ -225,10 +248,7 @@ class CookingService {
 
       if (limitDays != null) {
         final startDate = DateTime.now().subtract(Duration(days: limitDays));
-        query = query.where(
-          'cooked_at',
-          isGreaterThan: startDate.toIso8601String(),
-        );
+        query = query.where('cooked_at', isGreaterThan: startDate);
       }
 
       final snapshot = await query.get();
@@ -240,7 +260,7 @@ class CookingService {
           )
           .toList();
     } catch (e) {
-      print('Error getting cooking history: $e');
+      print('❌ Error getting cooking history: $e');
       return [];
     }
   }
@@ -257,7 +277,7 @@ class CookingService {
           .collection('users')
           .doc(user.uid)
           .collection('cooking_history')
-          .where('cooked_at', isGreaterThan: oneWeekAgo.toIso8601String())
+          .where('cooked_at', isGreaterThan: oneWeekAgo)
           .get();
 
       Map<String, Map<String, double>> categoryUsage = {};
@@ -268,13 +288,10 @@ class CookingService {
         for (final ingredient in history.usedIngredients) {
           final category = ingredient.category;
 
-          if (!categoryUsage.containsKey(category)) {
-            categoryUsage[category] = {
-              'totalAmount': 0,
-              'totalCost': 0,
-              'itemCount': 0,
-            };
-          }
+          categoryUsage.putIfAbsent(
+            category,
+            () => {'totalAmount': 0, 'totalCost': 0, 'itemCount': 0},
+          );
 
           categoryUsage[category]!['totalAmount'] =
               (categoryUsage[category]!['totalAmount']! + ingredient.amount);
@@ -287,7 +304,7 @@ class CookingService {
 
       return categoryUsage;
     } catch (e) {
-      print('Error getting weekly usage: $e');
+      print('❌ Error getting weekly usage: $e');
       return {};
     }
   }

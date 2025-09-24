@@ -1,5 +1,7 @@
-// lib/models/cooking_history_model.dart
-import 'package:my_app/foodreccom/models/recipe_model.dart';
+// lib/foodreccom/models/cooking_history_model.dart
+import '../utils/date_utils.dart';
+import 'recipe/recipe.dart';
+import 'recipe/used_ingredient.dart';
 
 class CookingHistory {
   final String id;
@@ -23,7 +25,7 @@ class CookingHistory {
     required this.servingsMade,
     required this.usedIngredients,
     required this.totalNutrition,
-    this.rating = 0,
+    required this.rating,
     this.notes,
     required this.userId,
   });
@@ -34,63 +36,31 @@ class CookingHistory {
       recipeId: data['recipe_id'] ?? '',
       recipeName: data['recipe_name'] ?? '',
       recipeCategory: data['recipe_category'] ?? '',
-      cookedAt: DateTime.parse(data['cooked_at']),
+      cookedAt: parseDate(data['cooked_at']),
       servingsMade: data['servings_made'] ?? 0,
       usedIngredients: (data['used_ingredients'] as List? ?? [])
-          .map((i) => UsedIngredient.fromJson(i))
+          .map((i) => UsedIngredient.fromMap(i))
           .toList(),
-      totalNutrition: NutritionInfo.fromJson(data['total_nutrition'] ?? {}),
+      totalNutrition: NutritionInfo.fromMap(data['total_nutrition'] ?? {}),
       rating: data['rating'] ?? 0,
       notes: data['notes'],
       userId: data['user_id'] ?? '',
     );
   }
 
-  Map<String, dynamic> toFirestore() => {
-    'id': id,
-    'recipe_id': recipeId,
-    'recipe_name': recipeName,
-    'recipe_category': recipeCategory,
-    'cooked_at': cookedAt.toIso8601String(),
-    'servings_made': servingsMade,
-    'used_ingredients': usedIngredients.map((i) => i.toJson()).toList(),
-    'total_nutrition': totalNutrition.toJson(),
-    'rating': rating,
-    'notes': notes,
-    'user_id': userId,
-  };
-}
-
-class UsedIngredient {
-  final String name;
-  final double amount;
-  final String unit;
-  final String category;
-  final double cost;
-
-  UsedIngredient({
-    required this.name,
-    required this.amount,
-    required this.unit,
-    required this.category,
-    this.cost = 0.0,
-  });
-
-  factory UsedIngredient.fromJson(Map<String, dynamic> json) {
-    return UsedIngredient(
-      name: json['name'] ?? '',
-      amount: (json['amount'] ?? 0).toDouble(),
-      unit: json['unit'] ?? '',
-      category: json['category'] ?? '',
-      cost: (json['cost'] ?? 0).toDouble(),
-    );
+  Map<String, dynamic> toFirestore() {
+    return {
+      'id': id,
+      'recipe_id': recipeId,
+      'recipe_name': recipeName,
+      'recipe_category': recipeCategory,
+      'cooked_at': cookedAt.toIso8601String(),
+      'servings_made': servingsMade,
+      'used_ingredients': usedIngredients.map((i) => i.toMap()).toList(),
+      'total_nutrition': totalNutrition.toMap(),
+      'rating': rating,
+      'notes': notes,
+      'user_id': userId,
+    };
   }
-
-  Map<String, dynamic> toJson() => {
-    'name': name,
-    'amount': amount,
-    'unit': unit,
-    'category': category,
-    'cost': cost,
-  };
 }
