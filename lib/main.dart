@@ -1,64 +1,62 @@
-// main.dart
 import 'package:camera/camera.dart';
-import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:my_app/foodreccom/providers/recommendation_provider.dart';
-import 'package:provider/provider.dart'; // เพิ่มบรรทัดนี้
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import 'package:my_app/welcomeapp/register.dart';
-import 'package:my_app/welcomeapp/login.dart';
-import 'package:my_app/welcomeapp/registerinfor.dart';
+import 'package:my_app/firebase_options.dart';
+import 'package:my_app/foodreccom/providers/recommendation_provider.dart';
+import 'package:my_app/welcomeapp/login_screen.dart';
+import 'package:my_app/welcomeapp/register_screen.dart';
+import 'package:my_app/welcomeapp/profile_setup_screen.dart';
 import 'package:my_app/welcomeapp/home.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  // Init Firebase with explicit options to avoid platform-specific hangs
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // ตรวจสอบกล้องก่อน
-  try {
-    final cameras = await availableCameras();
-    print('Available cameras: ${cameras.length}');
-  } catch (e) {
-    print('Error getting cameras: $e');
-  }
+  // (ไม่บังคับ) อุ่นเครื่องกล้องแบบไม่บล็อก UI เพื่อลดจอดำ
+  // ไม่ต้องรอให้เสร็จ เพื่อไม่ให้บูตช้า
+  // ignore: unawaited_futures
+  Future(() async {
+    try {
+      await availableCameras();
+    } catch (_) {}
+  });
 
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 
 class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        // กำลังตรวจสอบสถานะการล็อกอิน
-        if (snapshot.connectionState == ConnectionState.waiting) {
+      builder: (_, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
-
-        // ถ้ามีผู้ใช้ล็อกอินอยู่แล้ว → ไป Home
-        if (snapshot.hasData) {
-          return const HomeScreen();
-        } else {
-          return const LoginScreen();
-        }
+        // ล็อกอินค้าง → ไป Home
+        if (snap.hasData) return const HomeScreen();
+        // ยังไม่ล็อกอิน → ไป Login
+        return const LoginScreen();
       },
     );
   }
 }
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
-    return MultiProvider(
-      // เปลี่ยนจาก MaterialApp เป็น MultiProvider
-      providers: [
-        ChangeNotifierProvider(create: (_) => RecommendationProvider()),
-        // เพิ่ม providers อื่นๆ ตามต้องการ
-      ],
+    return ChangeNotifierProvider(
+      create: (_) => RecommendationProvider(),
       child: MaterialApp(
         title: 'ระบบผู้ใช้งาน',
         theme: ThemeData(
@@ -72,12 +70,12 @@ class MyApp extends StatelessWidget {
             centerTitle: true,
           ),
         ),
-        home: AuthGate(),
+        home: const AuthGate(),
         routes: {
-          '/login': (context) => const LoginScreen(),
-          '/register': (context) => const RegisterScreen(),
-          '/registerinfor': (context) => const Registerinfor(),
-          '/home': (context) => const HomeScreen(),
+          '/login': (_) => const LoginScreen(),
+          '/register': (_) => const RegisterScreen(),
+          '/profile-setup': (_) => const ProfileSetupScreen(),
+          '/home': (_) => const HomeScreen(),
         },
         debugShowCheckedModeBanner: false,
       ),

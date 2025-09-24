@@ -1,0 +1,54 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "D:\\fluter\\foodappflutter\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\fluter\\foodappflutter\\lib\\firebase_options.dart||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:lib\\firebase_options.dart||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\fluter\\foodappflutter\\.flutter-plugins-dependencies 3||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:.flutter-plugins-dependencies 3||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "firebase_options.dart",
+              "DocumentMoniker": "D:\\fluter\\foodappflutter\\lib\\firebase_options.dart",
+              "RelativeDocumentMoniker": "lib\\firebase_options.dart",
+              "ToolTip": "D:\\fluter\\foodappflutter\\lib\\firebase_options.dart",
+              "RelativeToolTip": "lib\\firebase_options.dart",
+              "ViewState": "AgIAAC0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2025-09-13T16:21:53.635Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": ".flutter-plugins-dependencies 3",
+              "DocumentMoniker": "D:\\fluter\\foodappflutter\\.flutter-plugins-dependencies 3",
+              "RelativeDocumentMoniker": ".flutter-plugins-dependencies 3",
+              "ToolTip": "D:\\fluter\\foodappflutter\\.flutter-plugins-dependencies 3",
+              "RelativeToolTip": ".flutter-plugins-dependencies 3",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2025-09-13T16:21:43.377Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

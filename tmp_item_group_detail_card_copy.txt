@@ -1,0 +1,222 @@
+﻿// lib/rawmaterial/widgets/item_group_detail_card.dart โ€” เธซเธเนเธฒเนเธชเธ”เธเธฃเธฒเธขเธฅเธฐเน€เธญเธตเธขเธ”เธเธญเธเธเธฅเธธเนเธก (เธเธทเนเธญเธเนเธณ) เนเธเธเน€เธ•เนเธกเธซเธเนเธฒ
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
+import 'package:my_app/rawmaterial/constants/units.dart';
+import 'package:my_app/rawmaterial/constants/categories.dart';
+import 'package:my_app/rawmaterial/models/shopping_item.dart';
+import 'package:my_app/rawmaterial/pages/item_detail_page.dart';
+
+class ItemGroupDetailPage extends StatelessWidget {
+  final String groupName;
+  final List<ShoppingItem> items; // เธชเนเธเธเธฅเธธเนเธกเธ—เธตเนเธฃเธงเธกเธเธทเนเธญเน€เธ”เธตเธขเธงเธเธฑเธเธกเธฒ
+
+  const ItemGroupDetailPage({
+    super.key,
+    required this.groupName,
+    required this.items,
+  });
+
+  int get totalQty => items.fold(0, (s, i) => s + i.quantity);
+  String get unit => items.isNotEmpty ? Units.safe(items.first.unit) : '';
+  String get category =>
+      items.isNotEmpty ? items.first.category : Categories.list.first;
+  bool get anyExpired => items.any(
+    (i) => i.expiryDate != null && i.expiryDate!.isBefore(DateTime.now()),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final headerColor = anyExpired ? Colors.red : Colors.black;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(groupName, style: const TextStyle(color: Colors.black)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.black),
+        actions: [
+          IconButton(
+            tooltip: 'เน€เธเธดเนเธกเธเนเธณเธเธฒเธเธ•เธฑเธงเธญเธขเนเธฒเธ (เธญเธดเธเธ•เธฑเธงเนเธฃเธ)',
+            icon: const Icon(Icons.copy_all_rounded),
+            onPressed: () => _duplicateFromFirst(context),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          // เธชเธฃเธธเธเธเธฅเธธเนเธก
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: Colors.yellow[100],
+                child: Icon(
+                  Categories.iconFor(category),
+                  color: Colors.yellow[800],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'เธฃเธงเธก: $totalQty $unit โ€ข ${items.length} เธฃเธฒเธขเธเธฒเธฃ',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: headerColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Divider(color: Colors.grey[300]),
+          const SizedBox(height: 8),
+
+          // เธฃเธฒเธขเธเธฒเธฃเนเธเธเธฅเธธเนเธก
+          ...items.map((i) => _itemTile(context, i)),
+        ],
+      ),
+    );
+  }
+
+  Widget _itemTile(BuildContext context, ShoppingItem i) {
+    final status = () {
+      if (i.expiryDate == null) return ('-', Colors.grey);
+      final d = i.expiryDate!.difference(DateTime.now()).inDays;
+      if (d < 0) return ('เธซเธกเธ”เธญเธฒเธขเธธ', Colors.red);
+      if (d <= 3) return ('เนเธเธฅเนเธซเธกเธ”เธญเธฒเธขเธธ', Colors.orange);
+      return ('OK', Colors.green);
+    }();
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      elevation: 0.5,
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Colors.grey[100],
+          child: Icon(Categories.iconFor(i.category), color: Colors.grey[700]),
+        ),
+        title: Text(
+          '${i.quantity} ${Units.safe(i.unit)}',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Text(
+          'เธชเธ–เธฒเธเธฐ: ${status.$1}',
+          style: TextStyle(color: status.$2),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: 'เธ—เธณเธเนเธณเธฃเธฒเธขเธเธฒเธฃเธเธตเน',
+              icon: const Icon(Icons.copy_rounded),
+              onPressed: () => _duplicateItem(context, i),
+            ),
+            IconButton(
+              tooltip: 'เธฅเธเธฃเธฒเธขเธเธฒเธฃเธเธตเน',
+              icon: const Icon(Icons.delete_outline, color: Colors.red),
+              onPressed: () => _deleteItem(context, i),
+            ),
+          ],
+        ),
+        onTap: () async {
+          final changed = await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => ItemDetailPage(item: i)),
+          );
+          if (changed == true && context.mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('เธญเธฑเธเน€เธ”เธ•เธฃเธฒเธขเธเธฒเธฃเนเธฅเนเธง')));
+          }
+        },
+      ),
+    );
+  }
+
+  Future<void> _duplicateFromFirst(BuildContext context) async {
+    if (items.isEmpty) return;
+    await _duplicateItem(context, items.first);
+  }
+
+  Future<void> _duplicateItem(BuildContext context, ShoppingItem i) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('raw_materials')
+          .add({
+            'name': i.name,
+            'category': i.category,
+            'quantity': i.quantity,
+            'unit': Units.safe(i.unit),
+            'expiry_date': i.expiryDate != null
+                ? Timestamp.fromDate(i.expiryDate!)
+                : null,
+            'imageUrl': i.imageUrl,
+            'created_at': FieldValue.serverTimestamp(),
+            'updated_at': FieldValue.serverTimestamp(),
+            'user_id': user.uid,
+          });
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('เธ—เธณเธเนเธณเธฃเธฒเธขเธเธฒเธฃเนเธฅเนเธง')));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('เธ—เธณเธเนเธณเนเธกเนเธชเธณเน€เธฃเนเธ: $e')));
+      }
+    }
+  }
+
+  Future<void> _deleteItem(BuildContext context, ShoppingItem i) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('เธฅเธเธงเธฑเธ•เธ–เธธเธ”เธดเธ'),
+        content: Text('เธ•เนเธญเธเธเธฒเธฃเธฅเธ "${i.name}" เนเธเนเธซเธฃเธทเธญเนเธกเน?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('เธขเธเน€เธฅเธดเธ'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('เธฅเธ', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('raw_materials')
+          .doc(i.id)
+          .delete();
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('เธฅเธเนเธฅเนเธง')));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('เธฅเธเนเธกเนเธชเธณเน€เธฃเนเธ: $e')));
+      }
+    }
+  }
+}

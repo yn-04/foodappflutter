@@ -1,0 +1,101 @@
+      // FAB: Write & Scan
+      floatingActionButton: Container(
+        decoration: BoxDecoration(
+          color: Colors.yellow[700],
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextButton.icon(
+              onPressed: _goAddRaw,
+              icon: const Icon(Icons.edit, color: Colors.black),
+              label: const Text(
+                'Write',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: _goScan,
+              icon: const Icon(
+                FontAwesomeIcons.barcode,
+                size: 20,
+                color: Colors.black,
+              ),
+              label: const Text(
+                'Scan',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ===== Small helpers =====
+  Widget _emptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey[400]),
+          const SizedBox(height: 12),
+          Text(
+            'ไม่มีรายการวัตถุดิบ',
+            style: TextStyle(color: Colors.grey[600]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyAfterFilter() {
+    final text = (selectedExpiryFilter != 'ทั้งหมด')
+        ? 'ไม่มีวัตถุดิบที่หมดอายุใน${selectedExpiryFilter == 'กำหนดเอง' ? '$customDays วัน' : selectedExpiryFilter}'
+        : (searchQuery.isNotEmpty ? 'ไม่พบรายการที่ค้นหา' : 'ไม่มีรายการ');
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            selectedExpiryFilter != 'ทั้งหมด'
+                ? Icons.schedule
+                : Icons.search_off,
+            size: 80,
+            color: Colors.grey[400],
+          ),
+          const SizedBox(height: 12),
+          Text(text, style: TextStyle(color: Colors.grey[600])),
+          if (searchQuery.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'คำค้นหา: "$searchQuery"',
+                style: TextStyle(color: Colors.grey[500]),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+

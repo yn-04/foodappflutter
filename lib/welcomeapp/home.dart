@@ -1,4 +1,3 @@
-// home.dart
 import 'package:flutter/material.dart';
 import 'package:my_app/dashboard/dashboard.dart';
 import 'package:my_app/foodreccom/recommendation_page.dart';
@@ -15,6 +14,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
 
+  // สร้างครั้งเดียว เพื่อไม่ให้ state ในแต่ละแท็บหาย
   final List<Widget> _pages = [
     const DashboardTab(),
     ShoppingListScreen(),
@@ -25,7 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _pages[_currentIndex],
+      body: IndexedStack(index: _currentIndex, children: _pages),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           color: Colors.white,
@@ -33,98 +33,40 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: BottomNavigationBar(
           currentIndex: _currentIndex,
-          onTap: (index) {
-            setState(() {
-              _currentIndex = index;
-            });
-          },
+          onTap: (i) => setState(() => _currentIndex = i),
           type: BottomNavigationBarType.fixed,
           backgroundColor: Colors.white,
-          selectedItemColor: Colors.transparent, // ซ่อนสีเดิม
-          unselectedItemColor: Colors.transparent, // ซ่อนสีเดิม
-          selectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w500,
-            fontSize: 0, // ซ่อน label
-          ),
-          unselectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w400,
-            fontSize: 0, // ซ่อน label
-          ),
+          showSelectedLabels: false,
+          showUnselectedLabels: false,
           elevation: 0,
           items: [
-            BottomNavigationBarItem(
-              icon: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: _currentIndex == 0 ? Colors.black : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Icon(
-                  Icons.home,
-                  color: _currentIndex == 0 ? Colors.white : Colors.grey[600],
-                  size: 20,
-                ),
-              ),
-              label: '',
-            ),
-            BottomNavigationBarItem(
-              icon: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: _currentIndex == 1 ? Colors.black : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Icon(
-                  Icons.description,
-                  color: _currentIndex == 1 ? Colors.white : Colors.grey[600],
-                  size: 20,
-                ),
-              ),
-              label: '',
-            ),
-            BottomNavigationBarItem(
-              icon: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: _currentIndex == 2 ? Colors.black : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Icon(
-                  Icons.restaurant_menu,
-                  color: _currentIndex == 2 ? Colors.white : Colors.grey[600],
-                  size: 20,
-                ),
-              ),
-              label: '',
-            ),
-            BottomNavigationBarItem(
-              icon: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: _currentIndex == 3 ? Colors.black : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Icon(
-                  Icons.person,
-                  color: _currentIndex == 3 ? Colors.white : Colors.grey[600],
-                  size: 20,
-                ),
-              ),
-              label: '',
-            ),
+            _navItem(icon: Icons.home, index: 0),
+            _navItem(icon: Icons.description, index: 1),
+            _navItem(icon: Icons.restaurant_menu, index: 2),
+            _navItem(icon: Icons.person, index: 3),
           ],
+        ),
+      ),
+    );
+  }
+
+  BottomNavigationBarItem _navItem({
+    required IconData icon,
+    required int index,
+  }) {
+    final active = _currentIndex == index;
+    return BottomNavigationBarItem(
+      label: '',
+      icon: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? Colors.black : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Icon(
+          icon,
+          color: active ? Colors.white : Colors.grey[600],
+          size: 20,
         ),
       ),
     );
