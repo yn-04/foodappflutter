@@ -5,8 +5,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:my_app/rawmaterial/widgets/search_filter_bar.dart';
-import 'package:my_app/rawmaterial/widgets/category_bar.dart';
 
 import 'package:my_app/rawmaterial/addraw.dart';
 import 'package:my_app/rawmaterial/barcode_scanner.dart'; // ใช้ WorkingBarcodeScanner ภายในไฟล์นี้
@@ -969,12 +967,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
             }
 
             var all = snap.data!.docs
-                .map(
-                  (d) => ShoppingItem.fromMap(
-                    d.data() as Map<String, dynamic>,
-                    d.id,
-                  ),
-                )
+                .map((d) => ShoppingItem.fromMap(d.data(), d.id))
                 .toList(growable: false);
             // ซ่อนรายการที่จำนวนคงเหลือเป็น 0
             all = all.where((it) => it.quantity > 0).toList(growable: false);
