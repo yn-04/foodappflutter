@@ -52,6 +52,7 @@ dependencies:
   provider: ^6.1.5
   shared_preferences: ^2.5.3
   font_awesome_flutter: ^10.5.0
+  flutter_dotenv: ^6.0.0
 
 
 
@@ -78,6 +79,8 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - .env
 
   # To add assets to your application, add an assets section, like this:
   #assets:

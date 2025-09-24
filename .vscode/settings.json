@@ -1,4 +1,5 @@
 {
     "java.configuration.updateBuildConfiguration": "interactive",
-    "cmake.sourceDirectory": "D:/fluter/foodappflutter-4/linux"
+    "cmake.sourceDirectory": "D:/fluter/foodappflutter-4/linux",
+    "cmake.ignoreCMakeListsMissing": true
 }
