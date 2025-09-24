@@ -1,4 +1,4 @@
-// lib/rawmaterial/models/shopping_item.dart
+// lib/rawmaterial/models/shopping_item.dart — โมเดลข้อมูลวัตถุดิบ + แปลงจาก/เป็น Firestore
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ShoppingItem {
@@ -9,7 +9,8 @@ class ShoppingItem {
   final String unit;
   final DateTime? expiryDate;
   final String imageUrl;
-  final bool isExpired;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
 
   ShoppingItem({
     required this.id,
@@ -19,48 +20,81 @@ class ShoppingItem {
     required this.unit,
     this.expiryDate,
     required this.imageUrl,
-    required this.isExpired,
+    this.createdAt,
+    this.updatedAt,
   });
 
+  /// อนุพันธ์: ไม่ต้องเก็บลง Firestore
+  bool get isExpired {
+    if (expiryDate == null) return false;
+    return _dateOnly(expiryDate!).isBefore(_today());
+  }
+
+  /// เหลือกี่วัน (ตัดเวลาออก)
+  int? get daysLeft {
+    if (expiryDate == null) return null;
+    return _dateOnly(expiryDate!).difference(_today()).inDays;
+  }
+
   factory ShoppingItem.fromMap(Map<String, dynamic> map, String id) {
-    DateTime? parsedExpiryDate;
-
-    // ตรวจสอบและแปลงวันหมดอายุ
-    if (map['expiry_date'] != null) {
-      if (map['expiry_date'] is Timestamp) {
-        parsedExpiryDate = (map['expiry_date'] as Timestamp).toDate();
-      } else if (map['expiry_date'] is String) {
-        try {
-          parsedExpiryDate = DateTime.parse(map['expiry_date']);
-        } catch (e) {
-          print('Error parsing expiry_date: $e');
-        }
-      }
-    }
-
     return ShoppingItem(
       id: id,
-      name: map['name'] ?? '',
-      category: map['category'] ?? '',
-      quantity: map['quantity'] ?? 0,
-      unit: map['unit'] ?? '',
-      expiryDate: parsedExpiryDate,
-      imageUrl: map['imageUrl'] ?? '',
-      isExpired: parsedExpiryDate != null
-          ? parsedExpiryDate.isBefore(DateTime.now())
-          : false,
+      name: (map['name'] ?? '').toString(),
+      category: (map['category'] ?? '').toString(),
+      quantity: _toInt(map['quantity']),
+      unit: (map['unit'] ?? '').toString(),
+      expiryDate: _toDateTime(map['expiry_date']),
+      imageUrl: (map['imageUrl'] ?? '').toString(),
+      createdAt: _toDateTime(map['created_at']),
+      updatedAt: _toDateTime(map['updated_at']),
     );
   }
 
+  /// ใช้สำหรับเขียนกลับ Firestore (อย่าบันทึก isExpired)
   Map<String, dynamic> toMap() {
     return {
       'name': name,
       'category': category,
       'quantity': quantity,
       'unit': unit,
-      'expiry_date': expiryDate?.toIso8601String(),
+      // แนะนำให้แปลงเป็น Timestamp ตอนเขียน (ดูตัวอย่างด้านล่าง)
+      'expiry_date': expiryDate,
       'imageUrl': imageUrl,
-      'isExpired': isExpired,
+      'created_at': createdAt,
+      'updated_at': updatedAt,
     };
   }
+
+  // ---------- helpers ----------
+  static int _toInt(dynamic v) {
+    if (v is int) return v;
+    return int.tryParse(v?.toString() ?? '') ?? 0;
+  }
+
+  static DateTime? _toDateTime(dynamic v) {
+    if (v == null) return null;
+    if (v is Timestamp) return v.toDate();
+    if (v is DateTime) return v;
+    if (v is String) {
+      try {
+        return DateTime.parse(v);
+      } catch (_) {
+        return null;
+      }
+    }
+    if (v is int) {
+      // เผื่อเก็บเป็น epoch ms
+      try {
+        return DateTime.fromMillisecondsSinceEpoch(v);
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  static DateTime _today() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 }

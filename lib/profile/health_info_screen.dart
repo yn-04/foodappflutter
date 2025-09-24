@@ -162,86 +162,6 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     );
   }
 
-  Widget _buildProfileSummaryCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.blue.withOpacity(0.1), Colors.blue.withOpacity(0.05)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blue.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 30,
-            backgroundColor: Colors.blue.withOpacity(0.2),
-            child: Text(
-              _currentUser?.firstName.isNotEmpty == true
-                  ? _currentUser!.firstName[0].toUpperCase()
-                  : '?',
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.blue,
-              ),
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _currentUser?.fullName ?? 'ผู้ใช้งาน',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _currentUser != null
-                      ? '${_currentUser!.gender} • ${_currentUser!.age} ปี'
-                      : 'ไม่มีข้อมูล',
-                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                ),
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _currentUser?.profileCompleted == true
-                        ? Colors.green.withOpacity(0.2)
-                        : Colors.orange.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    _currentUser?.profileCompleted == true
-                        ? 'ข้อมูลครบ'
-                        : 'ข้อมูลไม่ครบ',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: _currentUser?.profileCompleted == true
-                          ? Colors.green[700]
-                          : Colors.orange[700],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildBMICard() {
     final bmi = _currentUser?.bmi ?? 0;
     final bmiCategory = _currentUser?.bmiCategory ?? 'ไม่ทราบ';
@@ -403,34 +323,6 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
         ],
       ),
     );
-  }
-
-  // Helper method สำหรับ format วันที่
-  String _formatDate(DateTime date) {
-    const List<String> months = [
-      'ม.ค.',
-      'ก.พ.',
-      'มี.ค.',
-      'เม.ย.',
-      'พ.ค.',
-      'มิ.ย.',
-      'ก.ค.',
-      'ส.ค.',
-      'ก.ย.',
-      'ต.ค.',
-      'พ.ย.',
-      'ธ.ค.',
-    ];
-
-    return '${date.day} ${months[date.month - 1]} ${date.year + 543}';
-  }
-
-  // Helper method สำหรับ format timestamp
-  String _formatTimestamp(dynamic timestamp) {
-    if (timestamp is Timestamp) {
-      return _formatDate(timestamp.toDate());
-    }
-    return 'ไม่ทราบ';
   }
 
   void _showEditHealthDialog() {

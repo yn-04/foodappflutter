@@ -1,0 +1,77 @@
+  final double minHeight;
+  final List<String> categories;
+  final String selected;
+  final ValueChanged<String> onSelect;
+
+  @override
+  double get maxExtent => maxHeight;
+
+  @override
+  double get minExtent => minHeight;
+
+  // ✅ สำคัญ: ต้อง override ให้คืน TickerProvider ที่ส่งเข้ามา
+  @override
+  TickerProvider get vsync => _vsync;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Material(
+      color: Colors.white,
+      elevation: overlapsContent ? 1 : 0,
+      child: SizedBox(
+        height: maxExtent,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: categories.length,
+          itemBuilder: (_, idx) {
+            final c = categories[idx];
+            final isSelected = selected == c;
+            return GestureDetector(
+              onTap: () => onSelect(c),
+              child: Container(
+                margin: const EdgeInsets.only(right: 12, top: 8, bottom: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: isSelected ? Colors.yellow[600] : Colors.grey[200],
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Center(
+                  child: Text(
+                    c,
+                    style: TextStyle(
+                      color: isSelected ? Colors.white : Colors.grey[600],
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  // ทำให้หัวนี้ snap ตอนลอย
+  @override
+  FloatingHeaderSnapConfiguration? get snapConfiguration =>
+      FloatingHeaderSnapConfiguration(vsync);
+
+  @override
+  bool shouldRebuild(covariant _CategoryHeaderDelegate old) {
+    return old.categories != categories ||
+        old.selected != selected ||
+        old.maxHeight != maxHeight ||
+        old.minHeight != minHeight;
+  }
+}

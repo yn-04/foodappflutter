@@ -1,0 +1,502 @@
+// lib/welcomeapp/register_screen.dart
+// เช็คอีเมลซ้ำทั้งแบบเรียลไทม์ และตอนกด "ถัดไป"
+// ถ้าอีเมลถูกใช้งาน → โชว์ error ใต้ช่องและ "ไม่ไปหน้า profile-setup"
+
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+class RegisterScreen extends StatefulWidget {
+  const RegisterScreen({super.key});
+
+  @override
+  State<RegisterScreen> createState() => _RegisterScreenState();
+}
+
+class _RegisterScreenState extends State<RegisterScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _name = TextEditingController();
+  final _email = TextEditingController();
+  final _pass = TextEditingController();
+  final _confirm = TextEditingController();
+
+  // สำหรับ validate แบบเรียลไทม์เฉพาะ field
+  final _passFieldKey = GlobalKey<FormFieldState<String>>();
+  final _confirmFieldKey = GlobalKey<FormFieldState<String>>();
+
+  // สำหรับแสดง error ใต้ช่องอีเมล ถ้าอีเมลถูกใช้งานแล้ว
+  final _emailFocus = FocusNode();
+  String? _emailError;
+  bool _checkingEmail = false; // แสดงสถานะกำลังเช็ค
+
+  // debounce สำหรับเช็คอีเมลตอนพิมพ์
+  Timer? _emailDebounce;
+
+  bool _showPass = false;
+  bool _showConfirm = false;
+  bool _loading = false;
+  bool _accept = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _email.dispose();
+    _pass.dispose();
+    _confirm.dispose();
+    _emailFocus.dispose();
+    _emailDebounce?.cancel();
+    super.dispose();
+  }
+
+  // ===== Validators =====
+  String? _validateName(String? v) {
+    if (v == null || v.trim().isEmpty) return 'กรุณากรอกชื่อ-นามสกุล';
+    final parts = v.trim().split(' ').where((e) => e.isNotEmpty).toList();
+    if (parts.length < 2) return 'กรุณากรอกทั้งชื่อและนามสกุล';
+    if (parts.any((p) => p.length < 2))
+      return 'ชื่อ-นามสกุลต้องมีอย่างน้อย 2 ตัวอักษร';
+    return null;
+  }
+
+  String? _validateEmailFormat(String? v) {
+    if (v == null || v.isEmpty) return 'กรุณากรอกอีเมล';
+    final re = RegExp(r'^[\w\-\.]+@([\w\-]+\.)+[\w\-]{2,4}$');
+    return re.hasMatch(v) ? null : 'รูปแบบอีเมลไม่ถูกต้อง';
+  }
+
+  String? _validatePass(String? v) {
+    if (v == null || v.isEmpty) return 'กรุณากรอกรหัสผ่าน';
+    if (v.length < 8) return 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร';
+    if (!RegExp(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)').hasMatch(v)) {
+      return 'ต้องมีตัวพิมพ์เล็ก/ใหญ่ และตัวเลข';
+    }
+    return null;
+  }
+
+  String? _validateConfirm(String? v) {
+    if (v == null || v.isEmpty) return 'กรุณายืนยันรหัสผ่าน';
+    if (v != _pass.text) return 'รหัสผ่านไม่ตรงกัน';
+    return null;
+  }
+
+  // ===== Email check (reuse ได้ทั้ง onChanged และตอนกดถัดไป) =====
+  Future<bool> _checkEmailInUse({bool showSnackOnError = false}) async {
+    final email = _email.text.trim();
+    // เช็ครูปแบบก่อน (ถ้า format ไม่ผ่าน ไม่ต้องยิง network)
+    final formatError = _validateEmailFormat(email);
+    if (formatError != null) {
+      setState(() {
+        _emailError = formatError;
+      });
+      return false;
+    }
+
+    setState(() {
+      _checkingEmail = true;
+      _emailError = null; // เคลียร์ก่อน
+    });
+
+    try {
+      final methods = await FirebaseAuth.instance.fetchSignInMethodsForEmail(
+        email,
+      );
+      if (methods.isNotEmpty) {
+        // มีบัญชีอยู่แล้ว
+        setState(() {
+          _emailError = 'อีเมลนี้มีผู้ใช้งานแล้ว';
+        });
+        if (showSnackOnError) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('อีเมลนี้มีผู้ใช้งานแล้ว'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        _emailFocus.requestFocus();
+        return false;
+      }
+      // ไม่ซ้ำ
+      setState(() {
+        _emailError = null;
+      });
+      return true;
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'invalid-email') {
+        setState(() => _emailError = 'รูปแบบอีเมลไม่ถูกต้อง');
+        _emailFocus.requestFocus();
+      } else {
+        if (showSnackOnError) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('ตรวจสอบอีเมลไม่สำเร็จ: ${e.message}')),
+          );
+        }
+      }
+      return false;
+    } catch (e) {
+      if (showSnackOnError) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('ตรวจสอบอีเมลไม่สำเร็จ: $e')));
+      }
+      return false;
+    } finally {
+      if (mounted) setState(() => _checkingEmail = false);
+    }
+  }
+
+  // ===== Next =====
+  Future<void> _next() async {
+    // validate ฟอร์ม (ชื่อ/อีเมลฟอร์แมต/รหัสผ่าน)
+    if (!_formKey.currentState!.validate()) return;
+
+    if (!_accept) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('กรุณายอมรับเงื่อนไขการใช้งาน'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _loading = true);
+
+    // ✅ บังคับเช็คอีเมลซ้ำก่อนจะไปหน้าโปรไฟล์
+    final ok = await _checkEmailInUse(showSnackOnError: true);
+    if (!ok) {
+      setState(() => _loading = false);
+      return;
+    } // 👈 หยุด
+    if (_emailError != null) {
+      setState(() => _loading = false);
+      _emailFocus.requestFocus();
+      return;
+    }
+
+    // ✅ guard อีกชั้น ถ้า state มี error อยู่ก็ไม่ไป
+    if (_emailError != null) {
+      if (mounted) setState(() => _loading = false);
+      _emailFocus.requestFocus();
+      return;
+    }
+
+    // ผ่านทั้งหมด → ไปหน้า Profile Setup
+    await Navigator.pushNamed(
+      context,
+      '/profile-setup',
+      arguments: {
+        'name': _name.text.trim(),
+        'email': _email.text.trim(),
+        'password': _pass.text,
+      },
+    );
+
+    if (mounted) setState(() => _loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.black87,
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 20),
+                Text(
+                  'สร้างบัญชีผู้ใช้',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'กรอกข้อมูลเพื่อเริ่มต้นใช้งาน',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 40),
+
+                // ชื่อ-นามสกุล
+                TextFormField(
+                  controller: _name,
+                  validator: _validateName,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  textInputAction: TextInputAction.next,
+                  keyboardType: TextInputType.name,
+                  decoration: InputDecoration(
+                    labelText: 'ชื่อ-นามสกุล',
+                    hintText: 'เช่น สมชาย ใจดี',
+                    prefixIcon: const Icon(Icons.person_outline),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
+                    focusedBorder: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
+                      borderSide: BorderSide(color: Colors.blue, width: 2),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // อีเมล (เช็คซ้ำแบบเรียลไทม์)
+                TextFormField(
+                  controller: _email,
+                  validator: _validateEmailFormat,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  textInputAction: TextInputAction.next,
+                  keyboardType: TextInputType.emailAddress,
+                  focusNode: _emailFocus,
+                  onChanged: (_) {
+                    // เคลียร์ error ทันทีเมื่อพิมพ์ใหม่
+                    if (_emailError != null) {
+                      setState(() => _emailError = null);
+                    }
+                    // debounce เช็คอีเมลซ้ำหลังหยุดพิมพ์ 500ms
+                    _emailDebounce?.cancel();
+                    _emailDebounce = Timer(
+                      const Duration(milliseconds: 500),
+                      () async {
+                        // ถ้ายังโฟกัสอยู่หรือเพิ่งพิมพ์ แล้วรูปแบบถูกต้อง → เช็ค
+                        if (!mounted) return;
+                        final formatOk =
+                            _validateEmailFormat(_email.text) == null;
+                        if (formatOk) {
+                          await _checkEmailInUse();
+                        }
+                      },
+                    );
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'อีเมล',
+                    hintText: 'example@email.com',
+                    prefixIcon: const Icon(Icons.email_outlined),
+                    suffixIcon: _checkingEmail
+                        ? const Padding(
+                            padding: EdgeInsets.only(right: 12),
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : null,
+                    errorText: _emailError, // ✅ แสดง error อีเมลซ้ำใต้ช่อง
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
+                    focusedBorder: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
+                      borderSide: BorderSide(color: Colors.blue, width: 2),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // รหัสผ่าน
+                TextFormField(
+                  key: _passFieldKey,
+                  controller: _pass,
+                  validator: _validatePass,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  onChanged: (_) {
+                    // ให้ช่องยืนยันรหัสผ่าน revalidate ทันที
+                    _confirmFieldKey.currentState?.validate();
+                    setState(() {});
+                  },
+                  textInputAction: TextInputAction.next,
+                  obscureText: !_showPass,
+                  decoration: InputDecoration(
+                    labelText: 'รหัสผ่าน',
+                    hintText:
+                        'อย่างน้อย 8 ตัวอักษร + ตัวพิมพ์เล็ก/ใหญ่ + ตัวเลข',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _showPass ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: () => setState(() => _showPass = !_showPass),
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
+                    focusedBorder: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
+                      borderSide: BorderSide(color: Colors.blue, width: 2),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // ยืนยันรหัสผ่าน
+                TextFormField(
+                  key: _confirmFieldKey,
+                  controller: _confirm,
+                  validator: _validateConfirm,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  onChanged: (_) => _confirmFieldKey.currentState?.validate(),
+                  obscureText: !_showConfirm,
+                  decoration: InputDecoration(
+                    labelText: 'ยืนยันรหัสผ่าน',
+                    hintText: 'กรอกรหัสผ่านอีกครั้ง',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _showConfirm ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: () =>
+                          setState(() => _showConfirm = !_showConfirm),
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
+                    focusedBorder: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
+                      borderSide: BorderSide(color: Colors.blue, width: 2),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Terms
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _accept,
+                      onChanged: (v) => setState(() => _accept = v ?? false),
+                      activeColor: Colors.blue,
+                    ),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() => _accept = !_accept),
+                        child: Text.rich(
+                          TextSpan(
+                            text: 'ฉันยอมรับ',
+                            style: TextStyle(color: Colors.grey[700]),
+                            children: const [
+                              TextSpan(
+                                text: 'เงื่อนไขการใช้งาน',
+                                style: TextStyle(
+                                  color: Colors.blue,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                              TextSpan(text: ' และ '),
+                              TextSpan(
+                                text: 'นโยบายความเป็นส่วนตัว',
+                                style: TextStyle(
+                                  color: Colors.blue,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 30),
+
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: SizedBox(
+                    width: 120,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _loading ? null : _next,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 2,
+                      ),
+                      child: _loading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
+                              ),
+                            )
+                          : const Text(
+                              'ถัดไป',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'มีบัญชีแล้ว? ',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                    GestureDetector(
+                      onTap: () => Navigator.pushNamed(context, '/login'),
+                      child: const Text(
+                        'เข้าสู่ระบบ',
+                        style: TextStyle(
+                          color: Colors.blue,
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

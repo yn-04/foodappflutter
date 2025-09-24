@@ -1,0 +1,1191 @@
+﻿// lib/rawmaterial/screens/shopping_list_screen.dart โ€” เธฃเธฒเธขเธเธฒเธฃเธงเธฑเธ•เธ–เธธเธ”เธดเธ: เธเนเธเธซเธฒ/เธเธฃเธญเธ/เธซเธกเธงเธ”/เธชเนเธเธ/เน€เธเธดเนเธก (เธเธฃเธญเธเธเธฑเนเธเนเธญเธเธฅเธ”เธเธฑเธเธซเธฒ index)
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+
+import 'package:my_app/rawmaterial/addraw.dart';
+import 'package:my_app/rawmaterial/barcode_scanner.dart'; // เนเธเน WorkingBarcodeScanner เธ เธฒเธขเนเธเนเธเธฅเนเธเธตเน
+
+import 'package:my_app/rawmaterial/constants/categories.dart';
+import 'package:my_app/rawmaterial/models/shopping_item.dart';
+
+import 'package:my_app/rawmaterial/pages/item_detail_page.dart';
+import 'package:my_app/rawmaterial/widgets/item_group_detail_card.dart';
+
+import 'package:my_app/rawmaterial/widgets/shopping_item_card.dart';
+import 'package:my_app/rawmaterial/widgets/grouped_item_card.dart';
+
+// เนเธเนเธเนเธฒเธเธตเนเน€เธเนเธ single source of truth เธชเธณเธซเธฃเธฑเธเธเนเธฒเธข "เธ—เธฑเนเธเธซเธกเธ”"
+const String _ALL = Categories.allLabel;
+
+class ShoppingListScreen extends StatefulWidget {
+  const ShoppingListScreen({Key? key}) : super(key: key);
+
+  @override
+  State<ShoppingListScreen> createState() => _ShoppingListScreenState();
+}
+
+class _ShoppingListScreenState extends State<ShoppingListScreen> {
+  final _firestore = FirebaseFirestore.instance;
+  final _auth = FirebaseAuth.instance;
+
+  final _searchCtrl = TextEditingController();
+  final _customDaysCtrl = TextEditingController();
+
+  // debounce
+  Timer? _searchDebounce;
+
+  String searchQuery = ''; // เน€เธเนเธเน€เธเนเธ lower-case เน€เธชเธกเธญ
+  String selectedCategory = _ALL;
+
+  String selectedExpiryFilter = 'เธ—เธฑเนเธเธซเธกเธ”';
+  int? customDays;
+
+  List<String> availableCategories = [_ALL];
+
+  static const List<String> _expiryOptions = <String>[
+    'เธ—เธฑเนเธเธซเธกเธ”',
+    '1 เธงเธฑเธ',
+    '2 เธงเธฑเธ',
+    '3 เธงเธฑเธ',
+    '7 เธงเธฑเธ',
+    '14 เธงเธฑเธ',
+    'เธเธณเธซเธเธ”เน€เธญเธโ€ฆ',
+  ];
+
+  User? get currentUser => _auth.currentUser;
+
+  // เนเธเน NestedScrollView + SliverAppBar เนเธ—เธเธเธฒเธฃเธเธงเธเธเธธเธกเน€เธฅเธทเนเธญเธเน€เธญเธ
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAvailableCategories();
+    // เนเธเน NestedScrollView เธเธฑเธ”เธเธฒเธฃเนเธ–เธเน€เธฅเธทเนเธญเธเนเธเธ snap/floating
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchCtrl.dispose();
+    _customDaysCtrl.dispose();
+    // เนเธกเนเธกเธตเธ•เธฑเธงเธเธงเธเธเธธเธกเน€เธฅเธทเนเธญเธเธ—เธตเนเธ•เนเธญเธเธฅเนเธฒเธเนเธฅเนเธง
+    super.dispose();
+  }
+
+  Future<void> _loadAvailableCategories() async {
+    if (currentUser == null) return;
+    try {
+      final qs = await _firestore
+          .collection('users')
+          .doc(currentUser!.uid)
+          .collection('raw_materials')
+          .get();
+
+      final set = <String>{_ALL};
+      for (final d in qs.docs) {
+        final cat = (d.data()['category'] ?? '').toString();
+        if (cat.isNotEmpty) set.add(cat);
+      }
+      if (!mounted) return;
+      setState(() {
+        availableCategories = set.toList();
+        if (!availableCategories.contains(selectedCategory)) {
+          selectedCategory = _ALL;
+        }
+      });
+    } catch (e) {
+      debugPrint('Load categories error: $e');
+    }
+  }
+
+  // ===== Quick use sheet =====
+  void _showQuickUseSheet(ShoppingItem item) {
+    final qtyCtrl = TextEditingController();
+    String note = '';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.5,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          builder: (context, scrollCtrl) {
+            return Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
+                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 12)],
+              ),
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  top: 12,
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                ),
+                child: SingleChildScrollView(
+                  controller: scrollCtrl,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 44,
+                          height: 5,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[300],
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                      ),
+                      Text(
+                        'เนเธเนเธงเธฑเธ•เธ–เธธเธ”เธดเธ: ${item.name}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: qtyCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                labelText: 'เธเธณเธเธงเธเธ—เธตเนเนเธเน',
+                                isDense: true,
+                                filled: true,
+                                fillColor: Colors.grey[50],
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey[300]!,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.grey[300]!),
+                            ),
+                            child: Text(
+                              item.unit,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        onChanged: (v) => note = v,
+                        decoration: InputDecoration(
+                          labelText: 'เธซเธกเธฒเธขเน€เธซเธ•เธธ (เนเธกเนเธเธฑเธเธเธฑเธ)',
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.grey[50],
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: Colors.grey[300]!),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.yellow[300],
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 0,
+                          ),
+                          onPressed: () async {
+                            final useQty =
+                                int.tryParse(qtyCtrl.text.trim()) ?? 0;
+                            if (useQty <= 0) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'เธเธฃเธธเธ“เธฒเนเธชเนเธเธณเธเธงเธเธ—เธตเนเนเธเนเนเธซเนเธ–เธนเธเธ•เนเธญเธ',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+
+                            try {
+                              final user = _auth.currentUser;
+                              if (user == null) return;
+
+                              final docRef = _firestore
+                                  .collection('users')
+                                  .doc(user.uid)
+                                  .collection('raw_materials')
+                                  .doc(item.id);
+
+                              await docRef.collection('usage_logs').add({
+                                'quantity': useQty,
+                                'unit': item.unit,
+                                'note': note,
+                                'used_at': FieldValue.serverTimestamp(),
+                              });
+
+                              final newQty = (item.quantity - useQty) < 0
+                                  ? 0
+                                  : (item.quantity - useQty);
+                              await docRef.update({
+                                'quantity': newQty,
+                                'updated_at': FieldValue.serverTimestamp(),
+                              });
+
+                              if (!mounted) return;
+                              Navigator.pop(context, true);
+
+                              Future.microtask(() {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'เธเธฑเธเธ—เธถเธเธเธฒเธฃเนเธเนเนเธฅเนเธง - เน€เธซเธฅเธทเธญ $newQty ${item.unit}',
+                                      ),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                }
+                              });
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('เธเธฑเธเธ—เธถเธเนเธกเนเธชเธณเน€เธฃเนเธ: $e'),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          child: const Text(
+                            'เธเธฑเธเธ—เธถเธเธเธฒเธฃเนเธเน',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(() {
+      qtyCtrl.dispose();
+    });
+  }
+
+  // ===== Custom days dialog =====
+  void _showCustomDaysDialog() {
+    _customDaysCtrl.text = (customDays ?? 0).toString();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.yellow[300]!.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      Icons.edit_calendar_rounded,
+                      size: 28,
+                      color: Colors.yellow[700],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'เธเธณเธซเธเธ”เธเธณเธเธงเธเธงเธฑเธ',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                          ),
+                        ),
+                        Text(
+                          'เธฃเธฐเธเธธเธเธณเธเธงเธเธงเธฑเธเธ—เธตเนเธ•เนเธญเธเธเธฒเธฃ',
+                          style: TextStyle(color: Colors.black54),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey[50],
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.grey[200]!),
+                ),
+                child: TextField(
+                  controller: _customDaysCtrl,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: '0',
+                    hintStyle: TextStyle(color: Colors.grey[400], fontSize: 24),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 20,
+                    ),
+                    suffixIcon: Padding(
+                      padding: const EdgeInsets.only(right: 20),
+                      child: Center(
+                        child: Text(
+                          'เธงเธฑเธ',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  autofocus: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [1, 3, 7, 14, 30].map((d) {
+                  return InkWell(
+                    onTap: () => _customDaysCtrl.text = d.toString(),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.yellow[300]!.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.yellow[400]!),
+                      ),
+                      child: Text(
+                        '$d เธงเธฑเธ',
+                        style: TextStyle(
+                          color: Colors.yellow[700],
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.grey[100],
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'เธขเธเน€เธฅเธดเธ',
+                        style: TextStyle(
+                          color: Colors.black54,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final days = int.tryParse(_customDaysCtrl.text);
+                        if (days != null && days > 0) {
+                          setState(() {
+                            customDays = days;
+                            selectedExpiryFilter = 'เธเธณเธซเธเธ”เน€เธญเธ';
+                          });
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Row(
+                                children: [
+                                  Icon(Icons.check_circle, color: Colors.white),
+                                  SizedBox(width: 8),
+                                  Text('เธเธฃเธญเธเธงเธฑเธ•เธ–เธธเธ”เธดเธเธ•เธฒเธกเธงเธฑเธเธ—เธตเนเธเธณเธซเธเธ”เน€เธญเธเนเธฅเนเธง'),
+                                ],
+                              ),
+                              backgroundColor: Colors.green[600],
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              margin: const EdgeInsets.all(16),
+                            ),
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Row(
+                                children: [
+                                  Icon(Icons.error, color: Colors.white),
+                                  SizedBox(width: 8),
+                                  Text('เธเธฃเธธเธ“เธฒเนเธชเนเธเธณเธเธงเธเธงเธฑเธเธ—เธตเนเธ–เธนเธเธ•เนเธญเธ'),
+                                ],
+                              ),
+                              backgroundColor: Colors.red[600],
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              margin: const EdgeInsets.all(16),
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.yellow[300],
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.check_rounded),
+                          SizedBox(width: 8),
+                          Text(
+                            'เธขเธทเธเธขเธฑเธ',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ===== Navigation =====
+  void _goAddRaw() {
+    if (currentUser == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddRawMaterialPage()),
+    ).then((_) {
+      _loadAvailableCategories();
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _goScan() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => WorkingBarcodeScanner()),
+    );
+    if (result is Map<String, dynamic>) {
+      final barcode = result['barcode'] ?? '';
+      final Map<String, dynamic>? productData = result['productData'];
+      // ignore: use_build_context_synchronously
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AddRawMaterialPage(
+            scannedBarcode: barcode,
+            scannedProductData: productData,
+          ),
+        ),
+      ).then((_) {
+        _loadAvailableCategories();
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  // ===== Streams (เธ—เธณ filter เธ—เธตเน server) =====
+  Stream<QuerySnapshot> _streamItems() {
+    if (currentUser == null) return const Stream.empty();
+    // เธ”เธถเธเธ—เธฑเนเธเธซเธกเธ” เนเธฅเนเธงเธเธฃเธญเธ/เน€เธฃเธตเธขเธเธ—เธตเนเธเธฑเนเธเนเธญเธ เนเธเนเธเธฑเธเธซเธฒเธเธ”เน€เธฅเธทเธญเธเธซเธกเธงเธ”เธซเธกเธนเนเนเธฅเนเธงเธงเนเธฒเธเธเธฒเธ composite index
+    return _firestore
+        .collection('users')
+        .doc(currentUser!.uid)
+        .collection('raw_materials')
+        .snapshots();
+  }
+
+  Stream<QuerySnapshot> _streamCount() {
+    if (currentUser == null) return const Stream.empty();
+    return _firestore
+        .collection('users')
+        .doc(currentUser!.uid)
+        .collection('raw_materials')
+        .snapshots();
+  }
+
+  // ===== Mutations =====
+  Future<void> _deleteGroupItems(List<ShoppingItem> items) async {
+    if (currentUser == null || items.isEmpty) return;
+    try {
+      // Firestore เธเธณเธเธฑเธ” ~500 ops เธ•เนเธญ batch โ’ เนเธเนเธเธเนเธญเธเธเธฑเธเธเธฅเธฒเธ”
+      const chunkSize = 450;
+      for (var i = 0; i < items.length; i += chunkSize) {
+        final chunk = items.sublist(i, (i + chunkSize).clamp(0, items.length));
+        var batch = _firestore.batch();
+        for (final it in chunk) {
+          final ref = _firestore
+              .collection('users')
+              .doc(currentUser!.uid)
+              .collection('raw_materials')
+              .doc(it.id);
+          batch.delete(ref);
+        }
+        await batch.commit();
+      }
+
+      await _loadAvailableCategories();
+      if (mounted) {
+        setState(() {});
+        final removed = items.length;
+        final preview = items.take(3).map((e) => e.name).join(', ');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              removed <= 3
+                  ? 'เธฅเธเธเธฅเธธเนเธกเนเธฅเนเธง: $preview'
+                  : 'เธฅเธเธเธฅเธธเนเธกเนเธฅเนเธง $removed เธฃเธฒเธขเธเธฒเธฃ (เน€เธเนเธ $preview...)',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('เธฅเธเธเธฅเธธเนเธกเนเธกเนเธชเธณเน€เธฃเนเธ: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteItem(String id) async {
+    if (currentUser == null) return;
+    try {
+      await _firestore
+          .collection('users')
+          .doc(currentUser!.uid)
+          .collection('raw_materials')
+          .doc(id)
+          .delete();
+      await _loadAvailableCategories();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('เน€เธเธดเธ”เธเนเธญเธเธดเธ”เธเธฅเธฒเธ”เนเธเธเธฒเธฃเธฅเธเธฃเธฒเธขเธเธฒเธฃ'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // ===== Build =====
+  @override
+  Widget build(BuildContext context) {
+    final themeGrey = Colors.grey[100];
+
+    return Scaffold(
+      backgroundColor: themeGrey,
+      
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerScrolled) => [
+          SliverAppBar(
+            backgroundColor: Colors.white,
+            elevation: 0,
+            pinned: true,
+            floating: true,
+            snap: true,
+            title: Row(
+              children: [
+                const Text(
+                  'เธงเธฑเธ•เธ–เธธเธ”เธดเธ',
+                  style: TextStyle(color: Colors.black, fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                StreamBuilder<QuerySnapshot>(
+                  stream: _streamCount(),
+                  builder: (_, s) {
+                    final cnt = s.hasData ? s.data!.docs.length : 0;
+                    return Text('$cnt เธเธดเนเธ', style: TextStyle(color: Colors.grey[600], fontSize: 16));
+                  },
+                ),
+              ],
+            ),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(120),
+              child: Column(
+                children: [
+          // ===== เธเนเธเธซเธฒ + เธ•เธฑเธงเธเธฃเธญเธเธซเธกเธ”เธญเธฒเธขเธธ =====
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchCtrl,
+                    keyboardType: TextInputType.text,
+                    textInputAction: TextInputAction.search,
+                    style: const TextStyle(fontSize: 14),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'เธเนเธเธซเธฒเธงเธฑเธ•เธ–เธธเธ”เธดเธ',
+                      hintStyle: TextStyle(color: Colors.grey[400]),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search,
+                        color: Colors.grey[400],
+                        size: 20,
+                      ),
+                      suffixIcon: searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(
+                                Icons.clear,
+                                color: Colors.grey[400],
+                                size: 20,
+                              ),
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                setState(() => searchQuery = '');
+                              },
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: Colors.grey[50],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(22),
+                        borderSide: BorderSide(color: Colors.yellow[600]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(22),
+                        borderSide: BorderSide(
+                          color: Colors.yellow[700]!,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                    onChanged: (v) {
+                      _searchDebounce?.cancel();
+                      _searchDebounce = Timer(
+                        const Duration(milliseconds: 250),
+                        () {
+                          if (!mounted) return;
+                          setState(() => searchQuery = v.trim().toLowerCase());
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // เธเธธเนเธกเธ•เธฑเธงเธเธฃเธญเธเธงเธฑเธเธซเธกเธ”เธญเธฒเธขเธธ
+                Container(
+                  decoration: BoxDecoration(
+                    color: selectedExpiryFilter == 'เธ—เธฑเนเธเธซเธกเธ”'
+                        ? Colors.grey[100]
+                        : Colors.yellow[300],
+                    border: Border.all(
+                      color: selectedExpiryFilter == 'เธ—เธฑเนเธเธซเธกเธ”'
+                          ? Colors.grey[400]!
+                          : Colors.yellow[600]!,
+                      width: 1.5,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: PopupMenuButton<String>(
+                    tooltip: 'เธเธฃเธญเธเธ•เธฒเธกเธงเธฑเธเธซเธกเธ”เธญเธฒเธขเธธ (เธเธฐเนเธชเธ”เธเน€เธฃเธตเธขเธเนเธเธฅเนเธซเธกเธ”เธญเธฒเธขเธธเธเนเธญเธ)',
+                    offset: const Offset(0, 40),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.schedule_rounded,
+                            color: selectedExpiryFilter == 'เธ—เธฑเนเธเธซเธกเธ”'
+                                ? Colors.grey[600]
+                                : Colors.black,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            selectedExpiryFilter == 'เธ—เธฑเนเธเธซเธกเธ”'
+                                ? 'เธซเธกเธ”เธญเธฒเธขเธธ'
+                                : (selectedExpiryFilter == 'เธเธณเธซเธเธ”เน€เธญเธ'
+                                      ? 'เธซเธกเธ”เธญเธฒเธขเธธ (${customDays ?? 0} เธงเธฑเธ)'
+                                      : 'เธซเธกเธ”เธญเธฒเธขเธธ: $selectedExpiryFilter'),
+                            style: TextStyle(
+                              color: selectedExpiryFilter == 'เธ—เธฑเนเธเธซเธกเธ”'
+                                  ? Colors.grey[600]
+                                  : Colors.black,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Icon(
+                            Icons.arrow_drop_down,
+                            color: selectedExpiryFilter == 'เธ—เธฑเนเธเธซเธกเธ”'
+                                ? Colors.grey[600]
+                                : Colors.black,
+                          ),
+                        ],
+                      ),
+                    ),
+                    itemBuilder: (_) => _expiryOptions.map((opt) {
+                      final isCustom = opt == 'เธเธณเธซเธเธ”เน€เธญเธโ€ฆ';
+                      final isSelected = isCustom
+                          ? selectedExpiryFilter == 'เธเธณเธซเธเธ”เน€เธญเธ'
+                          : selectedExpiryFilter == opt;
+                      final label =
+                          (isCustom &&
+                              selectedExpiryFilter == 'เธเธณเธซเธเธ”เน€เธญเธ' &&
+                              customDays != null)
+                          ? 'เธเธณเธซเธเธ”เน€เธญเธ (${customDays} เธงเธฑเธ)'
+                          : opt;
+                      return PopupMenuItem<String>(
+                        value: opt,
+                        child: Row(
+                          children: [
+                            if (isSelected)
+                              const Icon(
+                                Icons.check,
+                                size: 18,
+                                color: Colors.black,
+                              )
+                            else
+                              const SizedBox(width: 18),
+                            const SizedBox(width: 6),
+                            Text(label),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                    onSelected: (val) {
+                      if (val == 'เธเธณเธซเธเธ”เน€เธญเธโ€ฆ') {
+                        _showCustomDaysDialog();
+                      } else {
+                        setState(() {
+                          selectedExpiryFilter = val;
+                          if (val != 'เธเธณเธซเธเธ”เน€เธญเธ') customDays = null;
+                        });
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ===== เนเธ–เธง 2: เธซเธกเธงเธ”เธซเธกเธนเน =====
+          SizedBox(
+            height: 56,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: availableCategories.length,
+              itemBuilder: (_, idx) {
+                final c = availableCategories[idx];
+                final isSelected = selectedCategory == c;
+                return GestureDetector(
+                  onTap: () => setState(() => selectedCategory = c),
+                  child: Container(
+                    margin: const EdgeInsets.only(right: 12, top: 8, bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isSelected ? Colors.yellow[600] : Colors.grey[200],
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Center(
+                      child: Text(
+                        c,
+                        style: TextStyle(
+                          color: isSelected ? Colors.white : Colors.grey[600],
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          // ===== เธฃเธฒเธขเธเธฒเธฃ (เธฃเธงเธกเธเธทเนเธญเธเนเธณ) =====
+                ],
+              ),
+            ),
+          ),
+        ],
+        body: StreamBuilder<QuerySnapshot>(
+              stream: _streamItems(),
+              builder: (_, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snap.hasError) {
+                  return Center(
+                    child: Text(
+                      'เน€เธเธดเธ”เธเนเธญเธเธดเธ”เธเธฅเธฒเธ”: ${snap.error}',
+                      style: const TextStyle(color: Colors.red),
+                      textAlign: TextAlign.center,
+                    ),
+                  );
+                }
+                if (!snap.hasData || snap.data!.docs.isEmpty) {
+                  return _emptyState();
+                }
+
+                var all = snap.data!.docs
+                    .map(
+                      (d) => ShoppingItem.fromMap(
+                        d.data() as Map<String, dynamic>,
+                        d.id,
+                      ),
+                    )
+                    .toList(growable: false);
+                // เธเนเธญเธเธฃเธฒเธขเธเธฒเธฃเธ—เธตเนเธเธณเธเธงเธเธเธเน€เธซเธฅเธทเธญเน€เธเนเธ 0
+                all = all.where((it) => it.quantity > 0).toList(growable: false);
+
+                // ===== เธเธฃเธญเธเธ—เธตเนเธเธฑเนเธเนเธญเธ เน€เธเธทเนเธญเธฅเธ”เธเธฑเธเธซเธฒ composite index =====
+                List<ShoppingItem> filtered = List.of(all);
+
+                // เธเธฃเธญเธเธซเธกเธงเธ”เธซเธกเธนเน
+                if (selectedCategory != _ALL) {
+                  filtered = filtered
+                      .where((it) => (it.category) == selectedCategory)
+                      .toList();
+                }
+
+                // เธเธฃเธญเธเธเธณเธเนเธเธซเธฒ
+                if (searchQuery.isNotEmpty) {
+                  filtered = filtered
+                      .where(
+                        (it) => it.name.toLowerCase().contains(searchQuery),
+                      )
+                      .toList();
+                }
+
+                // เธเธฃเธญเธเธงเธฑเธเธซเธกเธ”เธญเธฒเธขเธธ
+                DateTime strip(DateTime d) => DateTime(d.year, d.month, d.day);
+                final today = strip(DateTime.now());
+                DateTime? from;
+                DateTime? to;
+
+                switch (selectedExpiryFilter) {
+                  case '1 เธงเธฑเธ':
+                    from = today;
+                    to = today.add(const Duration(days: 1));
+                    break;
+                  case '2 เธงเธฑเธ':
+                    from = today;
+                    to = today.add(const Duration(days: 2));
+                    break;
+                  case '3 เธงเธฑเธ':
+                    from = today;
+                    to = today.add(const Duration(days: 3));
+                    break;
+                  case '7 เธงเธฑเธ':
+                    from = today.add(const Duration(days: 4));
+                    to = today.add(const Duration(days: 7));
+                    break;
+                  case '14 เธงเธฑเธ':
+                    from = today.add(const Duration(days: 8));
+                    to = today.add(const Duration(days: 14));
+                    break;
+                  case 'เธเธณเธซเธเธ”เน€เธญเธ':
+                    if (customDays != null) {
+                      from = today.add(Duration(days: customDays!));
+                      to = from;
+                    }
+                    break;
+                  default:
+                    break; // 'เธ—เธฑเนเธเธซเธกเธ”'
+                }
+
+                if (from != null && to != null) {
+                  filtered = filtered.where((it) {
+                    final ed = it.expiryDate;
+                    if (ed == null) return false;
+                    final only = strip(ed);
+                    final geFrom = !only.isBefore(from!);
+                    final leTo = !only.isAfter(to!);
+                    return geFrom && leTo;
+                  }).toList();
+                }
+
+                // เน€เธฃเธตเธขเธเนเธเธฅเนเธซเธกเธ”เธญเธฒเธขเธธเธเนเธญเธ (null เนเธเธ—เนเธฒเธข)
+                filtered.sort((a, b) {
+                  final ad = a.expiryDate;
+                  final bd = b.expiryDate;
+                  if (ad == null && bd == null) return 0;
+                  if (ad == null) return 1;
+                  if (bd == null) return -1;
+                  return ad.compareTo(bd);
+                });
+
+                if (filtered.isEmpty) {
+                  return _emptyAfterFilter();
+                }
+
+                // เธเธฅเธธเนเธกเธ•เธฒเธกเธเธทเนเธญ (key เน€เธเนเธ lower-case เน€เธเธทเนเธญเธฃเธงเธกเธเธทเนเธญเธเนเธณ)
+                final Map<String, List<ShoppingItem>> grouped = {};
+                for (final it in filtered) {
+                  final key = it.name.trim().toLowerCase();
+                  grouped.putIfAbsent(key, () => []).add(it);
+                }
+
+                final entries = grouped.entries.toList(growable: false);
+
+                return ListView.builder(
+                  
+                  padding: const EdgeInsets.only(bottom: 120),
+                  itemCount: entries.length,
+                  cacheExtent: 600,
+                  itemBuilder: (_, idx) {
+                    final e = entries[idx];
+                    final groupItems = e.value;
+                    if (groupItems.length == 1) {
+                      final item = groupItems.first;
+                      return KeyedSubtree(
+                        key: ValueKey(item.id),
+                        child: ShoppingItemCard(
+                          item: item,
+                          onDelete: () => _deleteItem(item.id),
+                          onTap: () async {
+                            final changed = await Navigator.push<bool>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ItemDetailPage(item: item),
+                              ),
+                            );
+                            if (changed == true && mounted) setState(() {});
+                          },
+                          onQuickUse: () => _showQuickUseSheet(item),
+                        ),
+                      );
+                    } else {
+                      final displayName = groupItems.first.name;
+                      return KeyedSubtree(
+                        key: ValueKey('group-${e.key}'),
+                        child: GroupedItemCard(
+                          name: displayName,
+                          items: groupItems,
+                          onTap: () async {
+                            final changed = await showModalBottomSheet<bool>(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => SizedBox(
+                                height: MediaQuery.of(context).size.height * 0.9,
+                                child: ItemGroupDetailSheet(
+                                  groupName: displayName,
+                                  items: groupItems,
+                                ),
+                              ),
+                            );
+                            if (changed == true && mounted) setState(() {});
+                          },
+                          // โ… เธเธนเธเธเธฒเธฃเธฅเธเธ—เธฑเนเธเธเธฅเธธเนเธก
+                          onDeleteGroup: () => _deleteGroupItems(groupItems),
+                        ),
+                      );
+                    }
+                  },
+                );
+              },
+              ),
+            ),
+          ),
+        ],
+      ),
+
+      // FAB: Write & Scan
+      floatingActionButton: Container(
+        decoration: BoxDecoration(
+          color: Colors.yellow[700],
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextButton.icon(
+              onPressed: _goAddRaw,
+              icon: const Icon(Icons.edit, color: Colors.black),
+              label: const Text(
+                'Write',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: _goScan,
+              icon: const Icon(
+                FontAwesomeIcons.barcode,
+                size: 20,
+                color: Colors.black,
+              ),
+              label: const Text(
+                'Scan',
+                style: TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ===== Small helpers =====
+  Widget _emptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.inventory_2_outlined, size: 80, color: Colors.grey[400]),
+          const SizedBox(height: 12),
+          Text(
+            'เนเธกเนเธกเธตเธฃเธฒเธขเธเธฒเธฃเธงเธฑเธ•เธ–เธธเธ”เธดเธ',
+            style: TextStyle(color: Colors.grey[600]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyAfterFilter() {
+    final text = (selectedExpiryFilter != 'เธ—เธฑเนเธเธซเธกเธ”')
+        ? 'เนเธกเนเธกเธตเธงเธฑเธ•เธ–เธธเธ”เธดเธเธ—เธตเนเธซเธกเธ”เธญเธฒเธขเธธเนเธ${selectedExpiryFilter == 'เธเธณเธซเธเธ”เน€เธญเธ' ? '$customDays เธงเธฑเธ' : selectedExpiryFilter}'
+        : (searchQuery.isNotEmpty ? 'เนเธกเนเธเธเธฃเธฒเธขเธเธฒเธฃเธ—เธตเนเธเนเธเธซเธฒ' : 'เนเธกเนเธกเธตเธฃเธฒเธขเธเธฒเธฃ');
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            selectedExpiryFilter != 'เธ—เธฑเนเธเธซเธกเธ”'
+                ? Icons.schedule
+                : Icons.search_off,
+            size: 80,
+            color: Colors.grey[400],
+          ),
+          const SizedBox(height: 12),
+          Text(text, style: TextStyle(color: Colors.grey[600])),
+          if (searchQuery.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'เธเธณเธเนเธเธซเธฒ: "$searchQuery"',
+                style: TextStyle(color: Colors.grey[500]),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}

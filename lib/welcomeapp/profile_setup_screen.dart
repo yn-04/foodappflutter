@@ -1,48 +1,18 @@
-import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+// lib/welcomeapp/profile_setup_screen.dart
+// หน้า Profile Setup (UI และการทำงานตามแบบเดิมของ Registerinfor)
+
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:my_app/welcomeapp/home.dart';
-import 'package:my_app/welcomeapp/register.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  runApp(MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'ลงทะเบียน',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        fontFamily: 'Kanit',
-        useMaterial3: true,
-      ),
-
-      // กำหนดหน้าเริ่มต้น
-      initialRoute: '/register',
-
-      // เพิ่ม routes ทั้งหมด
-      routes: {
-        '/register': (context) => RegisterScreen(),
-        '/registerinfor': (context) => Registerinfor(),
-        '/home': (context) => HomeScreen(), // หน้าหลักหลังลงทะเบียนเสร็จ
-      },
-    );
-  }
-}
-
-class Registerinfor extends StatefulWidget {
-  const Registerinfor({Key? key}) : super(key: key);
+class ProfileSetupScreen extends StatefulWidget {
+  const ProfileSetupScreen({super.key});
 
   @override
-  _RegistrationPageState createState() => _RegistrationPageState();
+  State<ProfileSetupScreen> createState() => _ProfileSetupScreenState();
 }
 
-class _RegistrationPageState extends State<Registerinfor> {
+class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _firestore = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
@@ -71,7 +41,7 @@ class _RegistrationPageState extends State<Registerinfor> {
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    // รับข้อมูลจากหน้าก่อนหน้า
+    // รับข้อมูลจากหน้า RegisterScreen (arguments: name, email, password, (optional) phoneNumber)
     final args =
         ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     if (args != null) {
@@ -80,7 +50,6 @@ class _RegistrationPageState extends State<Registerinfor> {
       _name = args['name'];
       _phoneNumber = args['phoneNumber'];
 
-      // ตั้งค่าชื่อและเบอร์โทรจากหน้าก่อนหน้า
       if (_name != null && _name!.isNotEmpty) {
         _fullNameController.text = _name!;
       }
@@ -100,7 +69,7 @@ class _RegistrationPageState extends State<Registerinfor> {
     super.dispose();
   }
 
-  // ฟังก์ชันสำหรับแสดงปฏิทินแบบ ค.ศ.
+  // ปฏิทินวันเกิด (ค.ศ.)
   Future<void> _selectDate(BuildContext context) async {
     try {
       final DateTime? picked = await showDatePicker(
@@ -134,7 +103,6 @@ class _RegistrationPageState extends State<Registerinfor> {
         });
       }
     } catch (e) {
-      print('Error selecting date: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('ไม่สามารถเปิดปฏิทินได้ กรุณาลองใหม่'),
@@ -144,7 +112,6 @@ class _RegistrationPageState extends State<Registerinfor> {
     }
   }
 
-  // ฟังก์ชันสำหรับ format วันที่เป็น ค.ศ.
   String _formatDate(DateTime date) {
     final day = date.day.toString().padLeft(2, '0');
     final month = date.month.toString().padLeft(2, '0');
@@ -152,9 +119,13 @@ class _RegistrationPageState extends State<Registerinfor> {
     return '$day/$month/$year';
   }
 
-  // ฟังก์ชันแยกชื่อและนามสกุล
+  // แยกชื่อ-นามสกุล
   Map<String, String> _splitFullName(String fullName) {
-    List<String> nameParts = fullName.trim().split(' ');
+    List<String> nameParts = fullName
+        .trim()
+        .split(' ')
+        .where((p) => p.isNotEmpty)
+        .toList();
 
     if (nameParts.length == 1) {
       return {'firstName': nameParts[0], 'lastName': ''};
@@ -169,9 +140,7 @@ class _RegistrationPageState extends State<Registerinfor> {
   }
 
   Future<void> _submitRegistration() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
 
     if (_email == null || _password == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -183,31 +152,29 @@ class _RegistrationPageState extends State<Registerinfor> {
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
-      // แยกชื่อและนามสกุล
-      Map<String, String> nameData = _splitFullName(_fullNameController.text);
-      String firstName = nameData['firstName']!;
-      String lastName = nameData['lastName']!;
+      // แยกชื่อ
+      final nameData = _splitFullName(_fullNameController.text.trim());
+      final firstName = nameData['firstName']!;
+      final lastName = nameData['lastName']!;
 
-      // สร้างบัญชีผู้ใช้ใน Firebase Authentication
-      UserCredential userCredential = await _auth
-          .createUserWithEmailAndPassword(email: _email!, password: _password!);
+      // ✅ สร้างผู้ใช้ใน Firebase Auth
+      final userCredential = await _auth.createUserWithEmailAndPassword(
+        email: _email!,
+        password: _password!,
+      );
 
-      print('สร้างบัญชีผู้ใช้สำเร็จ UID: ${userCredential.user!.uid}');
-
-      // อัปเดตชื่อในโปรไฟล์ Firebase Authentication
+      // อัปเดต displayName
       await userCredential.user!.updateDisplayName(
         _fullNameController.text.trim(),
       );
 
-      // ส่งอีเมลยืนยันตัวตน
-      await userCredential.user!.sendEmailVerification();
+      // (ออปชัน) ส่งอีเมลยืนยันตัวตน
+      // await userCredential.user!.sendEmailVerification();
 
-      // บันทึกข้อมูลเพิ่มเติมใน Firestore
+      // ✅ เซฟข้อมูลลง Firestore
       await _firestore.collection('users').doc(userCredential.user!.uid).set({
         'email': _email,
         'firstName': firstName,
@@ -225,17 +192,16 @@ class _RegistrationPageState extends State<Registerinfor> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('ลงทะเบียนสำเร็จ! กรุณาตรวจสอบอีเมลเพื่อยืนยันตัวตน'),
+          content: Text('ลงทะเบียนสำเร็จ!'),
           backgroundColor: Colors.green,
-          duration: Duration(seconds: 3),
+          duration: Duration(seconds: 2),
         ),
       );
 
-      // นำทางไปหน้าหลักหลังลงทะเบียนเสร็จ
-      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+      // ➜ ไปหน้า Home (ถ้าอยากให้กลับไป Login แทน ให้เปลี่ยนเป็น '/login')
+      Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
     } on FirebaseAuthException catch (e) {
       String errorMessage = 'เกิดข้อผิดพลาดในการลงทะเบียน';
-
       if (e.code == 'weak-password') {
         errorMessage = 'รหัสผ่านไม่รัดกุมเพียงพอ';
       } else if (e.code == 'email-already-in-use') {
@@ -245,32 +211,22 @@ class _RegistrationPageState extends State<Registerinfor> {
       } else if (e.code == 'network-request-failed') {
         errorMessage = 'มีปัญหาเกี่ยวกับการเชื่อมต่อเครือข่าย';
       }
-
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
-        ),
+        SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('เกิดข้อผิดพลาด: ${e.toString()}'),
+          content: Text('เกิดข้อผิดพลาด: $e'),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
         ),
       );
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _goBack() {
-    Navigator.pop(context);
-  }
+  void _goBack() => Navigator.pop(context);
 
   @override
   Widget build(BuildContext context) {
@@ -295,7 +251,7 @@ class _RegistrationPageState extends State<Registerinfor> {
             children: [
               const SizedBox(height: 20),
 
-              // Full Name Field (ชื่อ-นามสกุล)
+              // Full Name
               TextFormField(
                 controller: _fullNameController,
                 decoration: InputDecoration(
@@ -318,18 +274,16 @@ class _RegistrationPageState extends State<Registerinfor> {
                   hintText: 'เช่น ภาสกร จิรวัฒน์',
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
+                  if (value == null || value.isEmpty)
                     return 'กรุณากรอกชื่อ-นามสกุล';
-                  }
-                  if (value.trim().split(' ').length < 2) {
+                  if (value.trim().split(' ').length < 2)
                     return 'กรุณากรอกทั้งชื่อและนามสกุล';
-                  }
                   return null;
                 },
               ),
               const SizedBox(height: 16),
 
-              // Phone Number Field (ไม่บังคับ)
+              // Phone
               TextFormField(
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
@@ -353,9 +307,8 @@ class _RegistrationPageState extends State<Registerinfor> {
                   hintText: 'เช่น 081-234-5678',
                 ),
                 validator: (value) {
-                  // ไม่บังคับกรอก แต่ถ้ากรอกต้องถูกต้อง
                   if (value != null && value.isNotEmpty) {
-                    String cleaned = value.replaceAll(RegExp(r'[^\d]'), '');
+                    final cleaned = value.replaceAll(RegExp(r'[^\d]'), '');
                     if (cleaned.length != 10 || !cleaned.startsWith('0')) {
                       return 'กรุณากรอกเบอร์โทรที่ถูกต้อง (10 หลัก)';
                     }
@@ -386,21 +339,15 @@ class _RegistrationPageState extends State<Registerinfor> {
                   filled: true,
                   fillColor: Colors.grey[50],
                 ),
-                items: _genderOptions.map((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (String? newValue) {
-                  setState(() {
-                    _selectedGender = newValue!;
-                  });
-                },
+                items: _genderOptions
+                    .map((v) => DropdownMenuItem(value: v, child: Text(v)))
+                    .toList(),
+                onChanged: (v) =>
+                    setState(() => _selectedGender = v ?? 'ไม่ระบุ'),
               ),
               const SizedBox(height: 16),
 
-              // Birth Date - แสดงเป็น ค.ศ.
+              // Birth date (ค.ศ.)
               InkWell(
                 onTap: () => _selectDate(context),
                 child: InputDecorator(
@@ -430,7 +377,7 @@ class _RegistrationPageState extends State<Registerinfor> {
                     ),
                   ),
                   child: Text(
-                    _formatDate(_selectedDate), // แสดงเป็น ค.ศ.
+                    _formatDate(_selectedDate),
                     style: const TextStyle(fontSize: 16),
                   ),
                 ),
@@ -463,9 +410,7 @@ class _RegistrationPageState extends State<Registerinfor> {
                   fillColor: Colors.grey[50],
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'กรุณากรอกน้ำหนัก';
-                  }
+                  if (value == null || value.isEmpty) return 'กรุณากรอกน้ำหนัก';
                   final weight = double.tryParse(value);
                   if (weight == null || weight <= 0 || weight > 300) {
                     return 'กรุณากรอกน้ำหนักที่ถูกต้อง (1-300 กก.)';
@@ -498,9 +443,7 @@ class _RegistrationPageState extends State<Registerinfor> {
                   fillColor: Colors.grey[50],
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'กรุณากรอกส่วนสูง';
-                  }
+                  if (value == null || value.isEmpty) return 'กรุณากรอกส่วนสูง';
                   final height = double.tryParse(value);
                   if (height == null || height <= 0 || height > 250) {
                     return 'กรุณากรอกส่วนสูงที่ถูกต้อง (1-250 ซม.)';

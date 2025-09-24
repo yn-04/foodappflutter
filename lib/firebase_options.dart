@@ -64,7 +64,8 @@ class DefaultFirebaseOptions {
     messagingSenderId: '1064590405120',
     projectId: 'food-stock-management-app',
     storageBucket: 'food-stock-management-app.firebasestorage.app',
-    iosClientId: '1064590405120-rb2qjah2918uhk98srbgl2fk3n8f7cu2.apps.googleusercontent.com',
+    iosClientId:
+        '1064590405120-rb2qjah2918uhk98srbgl2fk3n8f7cu2.apps.googleusercontent.com',
     iosBundleId: 'com.example.myApp',
   );
 
@@ -74,7 +75,8 @@ class DefaultFirebaseOptions {
     messagingSenderId: '1064590405120',
     projectId: 'food-stock-management-app',
     storageBucket: 'food-stock-management-app.firebasestorage.app',
-    iosClientId: '1064590405120-rb2qjah2918uhk98srbgl2fk3n8f7cu2.apps.googleusercontent.com',
+    iosClientId:
+        '1064590405120-rb2qjah2918uhk98srbgl2fk3n8f7cu2.apps.googleusercontent.com',
     iosBundleId: 'com.example.myApp',
   );
 

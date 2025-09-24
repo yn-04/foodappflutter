@@ -1,0 +1,184 @@
+StreamBuilder<QuerySnapshot>(
+              stream: _streamItems(),
+              builder: (_, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snap.hasError) {
+                  return Center(
+                    child: Text(
+                      'เกิดข้อผิดพลาด: ${snap.error}',
+                      style: const TextStyle(color: Colors.red),
+                      textAlign: TextAlign.center,
+                    ),
+                  );
+                }
+                if (!snap.hasData || snap.data!.docs.isEmpty) {
+                  return _emptyState();
+                }
+
+                var all = snap.data!.docs
+                    .map(
+                      (d) => ShoppingItem.fromMap(
+                        d.data() as Map<String, dynamic>,
+                        d.id,
+                      ),
+                    )
+                    .toList(growable: false);
+                // ซ่อนรายการที่จำนวนคงเหลือเป็น 0
+                all = all.where((it) => it.quantity > 0).toList(growable: false);
+
+                // ===== กรองที่ฝั่งแอป เพื่อลดปัญหา composite index =====
+                List<ShoppingItem> filtered = List.of(all);
+
+                // กรองหมวดหมู่
+                if (selectedCategory != _ALL) {
+                  filtered = filtered
+                      .where((it) => (it.category) == selectedCategory)
+                      .toList();
+                }
+
+                // กรองคำค้นหา
+                if (searchQuery.isNotEmpty) {
+                  filtered = filtered
+                      .where(
+                        (it) => it.name.toLowerCase().contains(searchQuery),
+                      )
+                      .toList();
+                }
+
+                // กรองวันหมดอายุ
+                DateTime strip(DateTime d) => DateTime(d.year, d.month, d.day);
+                final today = strip(DateTime.now());
+                DateTime? from;
+                DateTime? to;
+
+                switch (selectedExpiryFilter) {
+                  case '1 วัน':
+                    from = today;
+                    to = today.add(const Duration(days: 1));
+                    break;
+                  case '2 วัน':
+                    from = today;
+                    to = today.add(const Duration(days: 2));
+                    break;
+                  case '3 วัน':
+                    from = today;
+                    to = today.add(const Duration(days: 3));
+                    break;
+                  case '7 วัน':
+                    from = today.add(const Duration(days: 4));
+                    to = today.add(const Duration(days: 7));
+                    break;
+                  case '14 วัน':
+                    from = today.add(const Duration(days: 8));
+                    to = today.add(const Duration(days: 14));
+                    break;
+                  case 'กำหนดเอง':
+                    if (customDays != null) {
+                      from = today.add(Duration(days: customDays!));
+                      to = from;
+                    }
+                    break;
+                  default:
+                    break; // 'ทั้งหมด'
+                }
+
+                if (from != null && to != null) {
+                  filtered = filtered.where((it) {
+                    final ed = it.expiryDate;
+                    if (ed == null) return false;
+                    final only = strip(ed);
+                    final geFrom = !only.isBefore(from!);
+                    final leTo = !only.isAfter(to!);
+                    return geFrom && leTo;
+                  }).toList();
+                }
+
+                // เรียงใกล้หมดอายุก่อน (null ไปท้าย)
+                filtered.sort((a, b) {
+                  final ad = a.expiryDate;
+                  final bd = b.expiryDate;
+                  if (ad == null && bd == null) return 0;
+                  if (ad == null) return 1;
+                  if (bd == null) return -1;
+                  return ad.compareTo(bd);
+                });
+
+                if (filtered.isEmpty) {
+                  return _emptyAfterFilter();
+                }
+
+                // กลุ่มตามชื่อ (key เป็น lower-case เพื่อรวมชื่อซ้ำ)
+                final Map<String, List<ShoppingItem>> grouped = {};
+                for (final it in filtered) {
+                  final key = it.name.trim().toLowerCase();
+                  grouped.putIfAbsent(key, () => []).add(it);
+                }
+
+                final entries = grouped.entries.toList(growable: false);
+
+                return ListView.builder(
+                  controller: _listCtrl,
+                  padding: const EdgeInsets.only(bottom: 120),
+                  itemCount: entries.length,
+                  cacheExtent: 600,
+                  itemBuilder: (_, idx) {
+                    final e = entries[idx];
+                    final groupItems = e.value;
+                    if (groupItems.length == 1) {
+                      final item = groupItems.first;
+                      return KeyedSubtree(
+                        key: ValueKey(item.id),
+                        child: ShoppingItemCard(
+                          item: item,
+                          onDelete: () => _deleteItem(item.id),
+                          onTap: () async {
+                            final changed = await Navigator.push<bool>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ItemDetailPage(item: item),
+                              ),
+                            );
+                            if (changed == true && mounted) setState(() {});
+                          },
+                          onQuickUse: () => _showQuickUseSheet(item),
+                        ),
+                      );
+                    } else {
+                      final displayName = groupItems.first.name;
+                      return KeyedSubtree(
+                        key: ValueKey('group-${e.key}'),
+                        child: GroupedItemCard(
+                          name: displayName,
+                          items: groupItems,
+                          onTap: () async {
+                            final changed = await showModalBottomSheet<bool>(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => SizedBox(
+                                height: MediaQuery.of(context).size.height * 0.9,
+                                child: ItemGroupDetailSheet(
+                                  groupName: displayName,
+                                  items: groupItems,
+                                ),
+                              ),
+                            );
+                            if (changed == true && mounted) setState(() {});
+                          },
+                          // ✅ ผูกการลบทั้งกลุ่ม
+                          onDeleteGroup: () => _deleteGroupItems(groupItems),
+                        ),
+                      );
+                    }
+                  },
+                );
+              },
+              ),
+            ),
+          ),
+        ],
+      ),
+
+

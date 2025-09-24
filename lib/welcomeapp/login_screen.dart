@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
+// ignore_for_file: use_build_context_synchronously
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -10,46 +11,37 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _isPasswordVisible = false;
-  bool _isLoading = false;
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  bool _showPass = false;
+  bool _loading = false;
 
   @override
   void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
+    _email.dispose();
+    _password.dispose();
     super.dispose();
   }
 
-  Future<void> _handleLogin() async {
+  Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-
+    setState(() => _loading = true);
     try {
       await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+        email: _email.text.trim(),
+        password: _password.text.trim(),
       );
-
-      // หากเข้าสู่ระบบสำเร็จ → ไป Home และล้าง stack
-      Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+      Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
     } on FirebaseAuthException catch (e) {
-      String message = 'เข้าสู่ระบบไม่สำเร็จ';
-      if (e.code == 'user-not-found') {
-        message = 'ไม่พบบัญชีผู้ใช้';
-      } else if (e.code == 'wrong-password') {
-        message = 'รหัสผ่านไม่ถูกต้อง';
-      } else if (e.code == 'invalid-email') {
-        message = 'อีเมลไม่ถูกต้อง';
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: Colors.red),
-      );
+      var msg = 'เข้าสู่ระบบไม่สำเร็จ';
+      if (e.code == 'user-not-found') msg = 'ไม่พบบัญชีผู้ใช้';
+      if (e.code == 'wrong-password') msg = 'รหัสผ่านไม่ถูกต้อง';
+      if (e.code == 'invalid-email') msg = 'อีเมลไม่ถูกต้อง';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -60,7 +52,6 @@ class _LoginScreenState extends State<LoginScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.black87,
-        elevation: 0,
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -71,7 +62,6 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 30),
-
                 Text(
                   'ยินดีต้อนรับ!',
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
@@ -88,9 +78,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 40),
 
-                // Email
                 TextFormField(
-                  controller: _emailController,
+                  controller: _email,
                   decoration: InputDecoration(
                     labelText: 'อีเมล',
                     prefixIcon: const Icon(Icons.email_outlined),
@@ -104,30 +93,23 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  validator: (value) =>
-                      value == null || value.isEmpty ? 'กรุณากรอกอีเมล' : null,
                   keyboardType: TextInputType.emailAddress,
+                  validator: (v) =>
+                      (v == null || v.isEmpty) ? 'กรุณากรอกอีเมล' : null,
                 ),
                 const SizedBox(height: 16),
 
-                // Password
                 TextFormField(
-                  controller: _passwordController,
-                  obscureText: !_isPasswordVisible,
+                  controller: _password,
+                  obscureText: !_showPass,
                   decoration: InputDecoration(
                     labelText: 'รหัสผ่าน',
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _isPasswordVisible
-                            ? Icons.visibility_off
-                            : Icons.visibility,
+                        _showPass ? Icons.visibility_off : Icons.visibility,
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _isPasswordVisible = !_isPasswordVisible;
-                        });
-                      },
+                      onPressed: () => setState(() => _showPass = !_showPass),
                     ),
                     filled: true,
                     fillColor: Colors.white,
@@ -139,17 +121,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  validator: (value) => value == null || value.isEmpty
-                      ? 'กรุณากรอกรหัสผ่าน'
-                      : null,
+                  validator: (v) =>
+                      (v == null || v.isEmpty) ? 'กรุณากรอกรหัสผ่าน' : null,
                 ),
                 const SizedBox(height: 30),
 
-                // Login Button
                 SizedBox(
                   height: 56,
                   child: ElevatedButton(
-                    onPressed: _isLoading ? null : _handleLogin,
+                    onPressed: _loading ? null : _login,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue,
                       foregroundColor: Colors.white,
@@ -157,7 +137,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: _isLoading
+                    child: _loading
                         ? const CircularProgressIndicator(
                             color: Colors.white,
                             strokeWidth: 2,
@@ -173,7 +153,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // Register link
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -182,9 +161,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: TextStyle(color: Colors.grey[600]),
                     ),
                     GestureDetector(
-                      onTap: () {
-                        Navigator.pushNamed(context, '/register');
-                      },
+                      onTap: () => Navigator.pushNamed(context, '/register'),
                       child: const Text(
                         'ลงทะเบียน',
                         style: TextStyle(

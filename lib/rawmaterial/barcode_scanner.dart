@@ -1,7 +1,6 @@
-// ไฟล์ lib/rawmaterial/working_barcode_scanner.dart
-// วิธีแก้ที่แน่นอน - ใช้ image_picker แทน camera stream + แปลงหน่วยอัตโนมัติ
+// lib/rawmaterial/barcode_scanner.dart — สแกนบาร์โค้ดด้วย ML Kit + Image Picker
+// หน้าที่: เลือกรูป/ถ่ายรูป -> อ่านบาร์โค้ด -> ดึงข้อมูลสินค้า/เติมฟอร์ม
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
@@ -210,7 +209,7 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
 
   // แปลงหน่วยและปริมาณจากข้อมูล OpenFoodFacts
   Map<String, dynamic> _parseQuantityAndUnit(Map<String, dynamic> product) {
-    String quantityStr = product['quantity']?.toString()?.toLowerCase() ?? '';
+    String quantityStr = product['quantity']?.toString().toLowerCase() ?? '';
 
     // ลบช่องว่างและจัดรูปแบบ
     quantityStr = quantityStr.replaceAll(' ', '');
@@ -875,8 +874,8 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      const Color.fromARGB(255, 245, 245, 245)!,
-                      const Color.fromARGB(255, 245, 245, 245)!,
+                      const Color.fromARGB(255, 245, 245, 245),
+                      const Color.fromARGB(255, 245, 245, 245),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,

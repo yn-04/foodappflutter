@@ -1,328 +1,221 @@
-// lib/widgets/shopping_item_card.dart
+// lib/rawmaterial/widgets/shopping_item_card.dart การ์ดแสดงรายการวัตถุดิบ (เดี่ยว/กลุ่ม)
 import 'package:flutter/material.dart';
-import '../models/shopping_item.dart';
+import 'package:my_app/rawmaterial/constants/categories.dart';
+import 'package:my_app/rawmaterial/constants/units.dart';
+import 'package:my_app/rawmaterial/models/shopping_item.dart';
 
 class ShoppingItemCard extends StatelessWidget {
   final ShoppingItem item;
-  final Function(int) onQuantityChanged;
-  final VoidCallback onDelete;
-  final String searchQuery;
+  final VoidCallback? onTap;
+  final Future<void> Function()? onDelete; // รองรับ async
+  final VoidCallback? onQuickUse;
+
+  /// ====== โหมดกลุ่ม (ออปชัน) ======
+  /// จำนวนรวมทั้งหมดในกลุ่ม (ถ้า null จะใช้ item.quantity)
+  final int? groupTotalQuantity;
+
+  /// หน่วยของกลุ่ม (ถ้า null จะใช้ item.unit)
+  final String? groupUnit;
+
+  /// หมวดหมู่ของกลุ่ม (ถ้า null จะใช้ item.category)
+  final String? groupCategory;
+
+  /// วันหมดอายุที่ "ใกล้ที่สุด" ในกลุ่ม (ถ้า null จะใช้ item.expiryDate)
+  final DateTime? groupEarliestExpiry;
 
   const ShoppingItemCard({
     Key? key,
     required this.item,
-    required this.onQuantityChanged,
-    required this.onDelete,
-    this.searchQuery = '',
+    this.onTap,
+    this.onDelete,
+    this.onQuickUse,
+    this.groupTotalQuantity,
+    this.groupUnit,
+    this.groupCategory,
+    this.groupEarliestExpiry,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    // คำนวณสถานะการหมดอายุ
-    Color statusColor = Colors.green;
-    String statusText = 'ยังไม่หมดอายุ';
+    // ====== เลือกค่าที่จะแสดง (โหมดกลุ่ม > เดี่ยว) ======
+    final int displayQty = groupTotalQuantity ?? item.quantity;
+    final String displayUnit = Units.safe(groupUnit ?? item.unit);
+    final String displayCategory = groupCategory ?? item.category;
+    final DateTime? displayExpiry = groupEarliestExpiry ?? item.expiryDate;
 
-    if (item.expiryDate != null) {
-      final now = DateTime.now();
-      final daysUntilExpiry = item.expiryDate!.difference(now).inDays;
-
-      if (daysUntilExpiry < 0) {
-        statusColor = Colors.red;
-        statusText = 'หมดอายุแล้ว';
-      } else if (daysUntilExpiry <= 3) {
-        statusColor = Colors.orange;
-        statusText = 'ใกล้หมดอายุ';
-      }
+    // คำนวณต่างวันแบบ day-precision (ตัดเวลาออก)
+    int? d;
+    if (displayExpiry != null) {
+      final today = DateTime.now();
+      final onlyToday = DateTime(today.year, today.month, today.day);
+      final onlyExpiry = DateTime(
+        displayExpiry.year,
+        displayExpiry.month,
+        displayExpiry.day,
+      );
+      d = onlyExpiry.difference(onlyToday).inDays;
     }
 
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            blurRadius: 5,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ListTile(
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            width: 50,
-            height: 50,
-            color: Colors.grey[200],
-            child: item.imageUrl.isNotEmpty
-                ? Image.network(
-                    item.imageUrl,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Icon(
-                        Icons.image_not_supported,
-                        color: Colors.grey,
-                      );
-                    },
-                  )
-                : Icon(_getCategoryIcon(item.category), color: Colors.grey),
-          ),
+    // ---- สถานะวันหมดอายุ (สี/ข้อความ) ----
+    Color? statusColor;
+    String? statusText;
+
+    if (d == null) {
+      statusColor = Colors.grey;
+      statusText = 'ไม่ระบุวันหมดอายุ';
+    } else if (d < 0) {
+      // หมดอายุแล้ว -> ไม่แสดงสถานะ/วันที่
+      statusColor = null;
+      statusText = null;
+    } else if (d == 0) {
+      statusColor = Colors.red;
+      statusText = 'หมดอายุวันนี้';
+    } else if (d == 1) {
+      statusColor = Colors.red;
+      statusText = 'หมดอายุในอีก 1 วัน';
+    } else if (d == 2 || d == 3) {
+      statusColor = Colors.orange;
+      statusText = 'หมดอายุในอีก $d วัน';
+    } else {
+      statusColor = Colors.green;
+      statusText = 'หมดอายุในอีก $d วัน';
+    }
+
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
         ),
-        title: _buildHighlightedText(item.name, searchQuery),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: _buildHighlightedText(
-                    item.category,
-                    searchQuery,
-                    TextStyle(
-                      color: statusColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                SizedBox(width: 8),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    statusText,
-                    style: TextStyle(
-                      color: statusColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
+            CircleAvatar(
+              backgroundColor: Colors.grey[200],
+              child: Icon(
+                Categories.iconFor(displayCategory),
+                color: Colors.grey[700],
+              ),
             ),
-            SizedBox(height: 4),
-            Text(
-              item.expiryDate != null
-                  ? 'หมดอายุ: ${_formatDate(item.expiryDate!)}'
-                  : 'ไม่มีวันหมดอายุ',
-              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+            const SizedBox(width: 12),
+
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ---- ชื่อวัตถุดิบ: ตัดบรรทัด + ใส่ ... ----
+                  Text(
+                    item.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+
+                  // บรรทัดสรุปจำนวนรวม + หน่วย + หมวดหมู่ (รองรับกลุ่ม/เดี่ยว)
+                  Text(
+                    '$displayQty $displayUnit • $displayCategory',
+                    style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                  ),
+                  const SizedBox(height: 4),
+
+                  // ---- แสดงสถานะ/วันที่ตามเงื่อนไข ----
+                  if (statusText != null && statusColor != null)
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            // ignore: deprecated_member_use
+                            color: statusColor.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            statusText,
+                            style: TextStyle(
+                              color: statusColor,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+
+            // ปุ่มลบ (มียืนยันก่อนลบ)
+            IconButton(
+              icon: Icon(Icons.delete_outline, color: Colors.grey[700]),
+              tooltip: 'ลบรายการ',
+              onPressed: onDelete == null
+                  ? null
+                  : () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('ลบรายการ'),
+                          content: Text('ต้องการลบ "${item.name}" ใช่หรือไม่?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('ยกเลิก'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: Text(
+                                'ลบ',
+                                style: TextStyle(color: Colors.grey[700]),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (ok == true) {
+                        await onDelete!();
+                      }
+                    },
+            ),
+            const SizedBox(width: 8),
+
+            // ปุ่ม "ใช้เลย"
+            SizedBox(
+              height: 30,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  backgroundColor: const Color.fromARGB(255, 255, 255, 255),
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: BorderSide(color: Colors.grey[700]!),
+                  ),
+                ),
+                // ใช้ไอคอนธีมทำอาหาร สีเทา
+                icon: Icon(
+                  Icons.restaurant_menu,
+                  size: 16,
+                  color: Colors.grey[700],
+                ),
+                label: const Text(
+                  'ใช้',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                onPressed: onQuickUse,
+              ),
             ),
           ],
         ),
-        // แก้ไข trailing เพื่อป้องกัน RenderFlex overflow
-        trailing: SizedBox(
-          width: 112, // กำหนดความกว้างสูงสุด
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // ปุ่มลบ - ลดขนาด
-              Container(
-                width: 28, // ลดจาก 32 เป็น 28
-                height: 28,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  icon: Icon(
-                    Icons.remove_circle_outline,
-                    color: Colors.red,
-                    size: 18, // ลดขนาดไอคอน
-                  ),
-                  onPressed: () {
-                    if (item.quantity > 1) {
-                      onQuantityChanged(item.quantity - 1);
-                    } else {
-                      _showDeleteConfirmDialog(context);
-                    }
-                  },
-                ),
-              ),
-
-              // แสดงจำนวน - ลดขนาด
-              Container(
-                width: 28, // ลดจาก 40 เป็น 28
-                child: Center(
-                  child: Text(
-                    '${item.quantity}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14, // ลดขนาดฟอนต์
-                    ),
-                  ),
-                ),
-              ),
-
-              // ปุ่มเพิ่ม - ลดขนาด
-              Container(
-                width: 28, // ลดจาก 32 เป็น 28
-                height: 28,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  icon: Icon(
-                    Icons.add_circle_outline,
-                    color: Colors.green,
-                    size: 18, // ลดขนาดไอคอน
-                  ),
-                  onPressed: () {
-                    onQuantityChanged(item.quantity + 1);
-                  },
-                ),
-              ),
-
-              // ไอคอนถังขยะ - ลดขนาด
-              Container(
-                width: 28, // ลดจาก 32 เป็น 28
-                height: 28,
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  icon: Icon(
-                    Icons.delete_outline,
-                    color: Colors.grey[600],
-                    size: 18, // ลดขนาดไอคอน
-                  ),
-                  onPressed: () {
-                    _showDeleteDialog(context);
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-        onLongPress: () {
-          _showDeleteDialog(context);
-        },
-      ),
-    );
-  }
-
-  // สร้างข้อความที่ไฮไลต์คำค้นหา
-  Widget _buildHighlightedText(String text, String query, [TextStyle? style]) {
-    if (query.isEmpty) {
-      return Text(
-        text,
-        style: style ?? TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-      );
-    }
-
-    final lowerText = text.toLowerCase();
-    final lowerQuery = query.toLowerCase();
-    final index = lowerText.indexOf(lowerQuery);
-
-    if (index == -1) {
-      return Text(
-        text,
-        style: style ?? TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-      );
-    }
-
-    final beforeMatch = text.substring(0, index);
-    final match = text.substring(index, index + query.length);
-    final afterMatch = text.substring(index + query.length);
-
-    return RichText(
-      text: TextSpan(
-        style:
-            style ??
-            TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: Colors.black,
-            ),
-        children: [
-          TextSpan(text: beforeMatch),
-          TextSpan(
-            text: match,
-            style: TextStyle(
-              backgroundColor: Colors.yellow[300],
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          TextSpan(text: afterMatch),
-        ],
-      ),
-    );
-  }
-
-  IconData _getCategoryIcon(String category) {
-    switch (category) {
-      case 'เนื้อสัตว์':
-        return Icons.set_meal;
-      case 'ผัก':
-        return Icons.eco;
-      case 'ผลไม้':
-        return Icons.apple;
-      case 'เครื่องเทศ':
-        return Icons.grain;
-      case 'แป้ง':
-        return Icons.bakery_dining;
-      case 'น้ำมัน':
-        return Icons.opacity;
-      case 'เครื่องดื่ม':
-        return Icons.local_drink;
-      case 'ของแห้ง':
-        return Icons.inventory_2;
-      case 'ของแช่แข็ง':
-        return Icons.ac_unit;
-      default:
-        return Icons.fastfood;
-    }
-  }
-
-  String _formatDate(DateTime date) {
-    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${(date.year + 543).toString().substring(2)}';
-  }
-
-  void _showDeleteConfirmDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('ลบรายการ'),
-        content: Text(
-          'จำนวน ${item.name} จะเป็น 0 ต้องการลบรายการนี้ออกใช่หรือไม่?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('ยกเลิก'),
-          ),
-          TextButton(
-            onPressed: () {
-              onQuantityChanged(0); // ส่ง 0 เพื่อลบรายการ
-              Navigator.pop(context);
-            },
-            child: Text('ลบ', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showDeleteDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('ลบรายการ'),
-        content: Text('คุณต้องการลบ ${item.name} ใช่หรือไม่?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('ยกเลิก'),
-          ),
-          TextButton(
-            onPressed: () {
-              onDelete();
-              Navigator.pop(context);
-            },
-            child: Text('ลบ', style: TextStyle(color: Colors.red)),
-          ),
-        ],
       ),
     );
   }
