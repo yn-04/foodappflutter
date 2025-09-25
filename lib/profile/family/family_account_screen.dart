@@ -9,6 +9,8 @@ import 'widgets/family_settings_card.dart';
 import 'widgets/emergency_contacts_card.dart';
 import 'dialogs/family_options_dialog.dart';
 import 'dialogs/add_member_options_dialog.dart';
+import 'dialogs/add_member_dialog.dart';
+import 'dialogs/qr_code_dialog.dart';
 import 'services/family_service.dart';
 
 class FamilyAccountScreen extends StatefulWidget {
@@ -153,7 +155,7 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
     AddMemberOptionsDialog.show(
       context: context,
       onAddManually: _showAddMemberDialog,
-      onScanQR: _showQRScannerDialog,
+      onScanQR: _showQRCodeDialog,
       onShareLink: _shareInviteLink,
     );
   }
@@ -249,22 +251,53 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
 
   // Placeholder methods for dialogs that will be implemented in separate files
   void _showAddMemberDialog() {
-    // Will be implemented in dialogs/add_member_dialog.dart
-    _showSuccessSnackBar('เพิ่มสมาชิกสำเร็จ (จำลอง)');
+    AddMemberDialog.show(
+      context: context,
+      onAddMember: (memberData) => _addMember(memberData),
+    );
   }
 
-  void _showQRScannerDialog() {
-    // Will be implemented in dialogs/qr_scanner_dialog.dart
-    _showSuccessSnackBar('สแกน QR Code สำเร็จ (จำลอง)');
+  Future<void> _addMember(Map<String, dynamic> memberData) async {
+    final name = (memberData['name'] as String? ?? '').trim();
+    final email = (memberData['email'] as String? ?? '').trim();
+    final phone = (memberData['phone'] as String? ?? '').trim();
+    final age = memberData['age'] as int?;
+    final gender = (memberData['gender'] as String? ?? 'ไม่ระบุ').trim();
+    final relationship = (memberData['relationship'] as String? ?? 'สมาชิก')
+        .trim();
+
+    if (name.isEmpty) {
+      throw 'กรุณากรอกชื่อสมาชิก';
+    }
+    if (email.isNotEmpty && !_familyService.isValidEmail(email)) {
+      throw 'อีเมลไม่ถูกต้อง';
+    }
+    if (phone.isNotEmpty && !_familyService.isValidPhone(phone)) {
+      throw 'เบอร์โทรศัพท์ไม่ถูกต้อง';
+    }
+    if (age != null && !_familyService.isValidAge(age)) {
+      throw 'อายุไม่ถูกต้อง';
+    }
+
+    await _familyService.addFamilyMember(
+      name: name,
+      email: email,
+      phone: phone,
+      age: age,
+      gender: gender,
+      relationship: relationship,
+    );
+
+    await _loadFamilyData();
+    if (!mounted) return;
+    _showSuccessSnackBar('เพิ่มสมาชิก "$name" สำเร็จ');
   }
 
   void _showQRCodeDialog() {
-    // Will be implemented in dialogs/qr_code_dialog.dart
-    _showSuccessSnackBar('แสดง QR Code (จำลอง)');
+    QRCodeDialog.show(context: context, familyId: _familyService.familyId);
   }
 
   void _showPermissionsDialog() {
-    // Will be implemented in dialogs/permissions_dialog.dart
     _showSuccessSnackBar('บันทึกสิทธิ์สำเร็จ (จำลอง)');
   }
 
@@ -379,8 +412,12 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
 
   // Action Methods
   void _shareInviteLink() async {
-    await _familyService.shareInviteLink();
-    _showSuccessSnackBar('แชร์ลิงก์เชิญสำเร็จ');
+    try {
+      await _familyService.shareInviteLink();
+      _showSuccessSnackBar('แชร์ลิงก์เชิญสำเร็จ');
+    } catch (e) {
+      _showErrorSnackBar('ไม่สามารถแชร์ลิงก์ได้');
+    }
   }
 
   void _callEmergencyContact(String phoneNumber) {

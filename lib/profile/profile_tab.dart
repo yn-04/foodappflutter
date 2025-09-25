@@ -1,4 +1,5 @@
 // profile_tab.dart (Main Profile Tab)
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:my_app/profile/account_details/account_details_screen.dart';
@@ -37,8 +38,33 @@ class _ProfileTabState extends State<ProfileTab> {
         await user.reload();
         final updatedUser = FirebaseAuth.instance.currentUser;
 
+        String? displayFromFs;
+        try {
+          final doc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(updatedUser!.uid)
+              .get();
+
+          if (doc.exists) {
+            final data = doc.data();
+            // ✅ ใช้ username เป็นหลัก
+            displayFromFs = (data?['username'] as String?)?.trim();
+
+            // fallback เผื่อยังไม่มี username
+            displayFromFs ??= (data?['firstName'] as String?)?.trim();
+            displayFromFs ??= (data?['fullName'] as String?)?.trim();
+          }
+        } catch (_) {
+          // เงียบไว้ไม่ให้ล่มหาก Firestore ยังไม่พร้อม
+        }
+
         setState(() {
-          _updatedDisplayName = updatedUser?.displayName;
+          _updatedDisplayName = (displayFromFs?.isNotEmpty == true)
+              ? displayFromFs
+              : (updatedUser?.displayName?.trim().isNotEmpty == true
+                    ? updatedUser!.displayName
+                    : (updatedUser?.email?.split('@').first ?? 'ผู้ใช้'));
+
           if (updatedUser?.photoURL != null) {
             _selectedImage = null;
           }

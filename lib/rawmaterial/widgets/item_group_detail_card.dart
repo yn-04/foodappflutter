@@ -8,6 +8,7 @@ import 'package:my_app/rawmaterial/constants/units.dart';
 import 'package:my_app/rawmaterial/models/shopping_item.dart';
 import 'package:my_app/rawmaterial/pages/item_detail_page.dart';
 import 'package:my_app/rawmaterial/widgets/shopping_item_card.dart';
+import 'package:my_app/rawmaterial/widgets/quick_use_sheet.dart'; // ✅ เพิ่มบรรทัดนี้
 
 class ItemGroupDetailSheet extends StatefulWidget {
   final String groupName;
@@ -126,7 +127,9 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
                             Navigator.pop(context, true);
                         },
                         onDelete: () => _deleteItem(context, i),
-                        onQuickUse: null, // ในชีตนี้ปิดปุ่ม Quick use อยู่แล้ว
+                        onQuickUse: () => _showQuickUseSheet(
+                          i,
+                        ), // ในชีตนี้ปิดปุ่ม Quick use อยู่แล้ว
                       );
                     },
                   ),
@@ -218,5 +221,85 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  void _showQuickUseSheet(ShoppingItem item) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white, // ทึบ
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      builder: (_) {
+        return QuickUseSheet(
+          itemName: item.name,
+          unit: item.unit,
+          currentQty: item.quantity,
+          onSave: (useQty, note) async {
+            // กันกรอกเกิน/น้อยเกิน
+            if (useQty <= 0 || useQty > item.quantity) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('จำนวนที่ใช้ต้องอยู่ระหว่าง 1 ถึงจำนวนคงเหลือ'),
+                ),
+              );
+              return;
+            }
+
+            try {
+              final user = FirebaseAuth.instance.currentUser;
+              if (user == null) return;
+
+              final docRef = FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(user.uid)
+                  .collection('raw_materials')
+                  .doc(item.id);
+
+              await docRef.collection('usage_logs').add({
+                'quantity': useQty,
+                'unit': item.unit,
+                'note': note,
+                'used_at': FieldValue.serverTimestamp(),
+              });
+
+              final newQty = (item.quantity - useQty) < 0
+                  ? 0
+                  : (item.quantity - useQty);
+              await docRef.update({
+                'quantity': newQty,
+                'updated_at': FieldValue.serverTimestamp(),
+              });
+
+              if (!mounted) return;
+              Navigator.pop(context, true); // ปิด QuickUseSheet
+
+              // ปิดชีตรายละเอียดกลุ่มเพื่อรีเฟรชหน้าหลัก
+              Future.microtask(() {
+                if (mounted) {
+                  Navigator.pop(context, true);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'บันทึกการใช้แล้ว - เหลือ $newQty ${item.unit}',
+                      ),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              });
+            } catch (e) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('บันทึกไม่สำเร็จ: $e')));
+            }
+          },
+        );
+      },
+    );
   }
 }

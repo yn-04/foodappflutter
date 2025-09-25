@@ -14,6 +14,7 @@ import 'package:my_app/rawmaterial/models/shopping_item.dart';
 
 import 'package:my_app/rawmaterial/pages/item_detail_page.dart';
 import 'package:my_app/rawmaterial/widgets/item_group_detail_card.dart';
+import 'package:my_app/rawmaterial/widgets/quick_use_sheet.dart';
 
 import 'package:my_app/rawmaterial/widgets/shopping_item_card.dart';
 import 'package:my_app/rawmaterial/widgets/grouped_item_card.dart';
@@ -34,6 +35,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
   final _searchCtrl = TextEditingController();
   final _customDaysCtrl = TextEditingController();
+  final _searchFocusNode = FocusNode();
 
   // debounce
   Timer? _searchDebounce;
@@ -61,6 +63,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   @override
   void initState() {
     super.initState();
+    _searchFocusNode.addListener(_onSearchFocusChange);
     _loadAvailableCategories();
   }
 
@@ -69,6 +72,8 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     _searchDebounce?.cancel();
     _searchCtrl.dispose();
     _customDaysCtrl.dispose();
+    _searchFocusNode.removeListener(_onSearchFocusChange);
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -98,209 +103,103 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     }
   }
 
-  // ===== Quick use sheet =====
-  void _showQuickUseSheet(ShoppingItem item) {
-    final qtyCtrl = TextEditingController();
-    String note = '';
+  void _clearSearch() {
+    final hadText = _searchCtrl.text.isNotEmpty;
+    final hadQuery = searchQuery.isNotEmpty;
+    if (!hadText && !hadQuery) return;
 
+    _searchDebounce?.cancel();
+    if (hadText) {
+      _searchCtrl.clear();
+    }
+    if (hadQuery && mounted) {
+      setState(() => searchQuery = '');
+    }
+  }
+
+  void _onSearchFocusChange() {
+    if (!_searchFocusNode.hasFocus) {
+      _clearSearch();
+    }
+  }
+
+  void _handleOutsideTap() {
+    if (_searchFocusNode.hasFocus) {
+      _searchFocusNode.unfocus();
+    } else {
+      _clearSearch();
+    }
+  }
+
+  void _showQuickUseSheet(ShoppingItem item) {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      isScrollControlled: true, // ⬅️ สำคัญเพื่อยกแผ่นตามคีย์บอร์ด
+      backgroundColor: Colors.transparent, // ขอบโค้งสวย
       builder: (_) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.5,
-          minChildSize: 0.4,
-          maxChildSize: 0.9,
-          builder: (context, scrollCtrl) {
-            return Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(20),
-                ),
-                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 12)],
-              ),
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 16,
-                  right: 16,
-                  top: 12,
-                  bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-                ),
-                child: SingleChildScrollView(
-                  controller: scrollCtrl,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 44,
-                          height: 5,
-                          margin: const EdgeInsets.only(bottom: 12),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[300],
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                        ),
+        return QuickUseSheet(
+          itemName: item.name,
+          unit: item.unit,
+          currentQty: item.quantity,
+          onSave: (useQty, note) async {
+            if (useQty <= 0) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('กรุณาใส่จำนวนที่ใช้ให้ถูกต้อง')),
+              );
+              return;
+            }
+            try {
+              final user = _auth.currentUser;
+              if (user == null) return;
+
+              final docRef = _firestore
+                  .collection('users')
+                  .doc(user.uid)
+                  .collection('raw_materials')
+                  .doc(item.id);
+
+              await docRef.collection('usage_logs').add({
+                'quantity': useQty,
+                'unit': item.unit,
+                'note': note,
+                'used_at': FieldValue.serverTimestamp(),
+              });
+
+              final newQty = (item.quantity - useQty) < 0
+                  ? 0
+                  : (item.quantity - useQty);
+              await docRef.update({
+                'quantity': newQty,
+                'updated_at': FieldValue.serverTimestamp(),
+              });
+
+              if (!mounted) return;
+              Navigator.pop(context, true);
+
+              Future.microtask(() {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'บันทึกการใช้แล้ว - เหลือ $newQty ${item.unit}',
                       ),
-                      Text(
-                        'ใช้วัตถุดิบ: ${item.name}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: qtyCtrl,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                labelText: 'จำนวนที่ใช้',
-                                isDense: true,
-                                filled: true,
-                                fillColor: Colors.grey[50],
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  borderSide: BorderSide(
-                                    color: Colors.grey[300]!,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[100],
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey[300]!),
-                            ),
-                            child: Text(
-                              item.unit,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        onChanged: (v) => note = v,
-                        decoration: InputDecoration(
-                          labelText: 'หมายเหตุ (ไม่บังคับ)',
-                          isDense: true,
-                          filled: true,
-                          fillColor: Colors.grey[50],
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(color: Colors.grey[300]!),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.yellow[300],
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            elevation: 0,
-                          ),
-                          onPressed: () async {
-                            final useQty =
-                                int.tryParse(qtyCtrl.text.trim()) ?? 0;
-                            if (useQty <= 0) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'กรุณาใส่จำนวนที่ใช้ให้ถูกต้อง',
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
-
-                            try {
-                              final user = _auth.currentUser;
-                              if (user == null) return;
-
-                              final docRef = _firestore
-                                  .collection('users')
-                                  .doc(user.uid)
-                                  .collection('raw_materials')
-                                  .doc(item.id);
-
-                              await docRef.collection('usage_logs').add({
-                                'quantity': useQty,
-                                'unit': item.unit,
-                                'note': note,
-                                'used_at': FieldValue.serverTimestamp(),
-                              });
-
-                              final newQty = (item.quantity - useQty) < 0
-                                  ? 0
-                                  : (item.quantity - useQty);
-                              await docRef.update({
-                                'quantity': newQty,
-                                'updated_at': FieldValue.serverTimestamp(),
-                              });
-
-                              if (!mounted) return;
-                              Navigator.pop(context, true);
-
-                              Future.microtask(() {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'บันทึกการใช้แล้ว - เหลือ $newQty ${item.unit}',
-                                      ),
-                                      behavior: SnackBarBehavior.floating,
-                                    ),
-                                  );
-                                }
-                              });
-                            } catch (e) {
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('บันทึกไม่สำเร็จ: $e'),
-                                  ),
-                                );
-                              }
-                            }
-                          },
-                          child: const Text(
-                            'บันทึกการใช้',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              });
+              setState(() {}); // รีเฟรชลิสต์
+            } catch (e) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('บันทึกไม่สำเร็จ: $e')));
+            }
           },
         );
       },
-    ).whenComplete(() {
-      qtyCtrl.dispose();
-    });
+    );
   }
 
   // ===== Custom days dialog =====
@@ -664,461 +563,483 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
     return Scaffold(
       backgroundColor: themeGrey,
-      body: NestedScrollView(
-        floatHeaderSlivers: true,
-        headerSliverBuilder: (context, innerScrolled) => [
-          // 1) AppBar + แถวค้นหา/กรอง (ตรึงไว้ตลอด)
-          SliverAppBar(
-            backgroundColor: Colors.white,
-            surfaceTintColor: Colors.transparent,
-            scrolledUnderElevation: 0,
-            elevation: 0,
-            pinned: true,
-            floating: false,
-            snap: false,
-            title: Row(
-              children: [
-                const Text(
-                  'วัตถุดิบ',
-                  style: TextStyle(
-                    color: Colors.black,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: _streamCount(),
-                  builder: (_, s) {
-                    final cnt = s.hasData ? s.data!.docs.length : 0;
-                    return Text(
-                      '$cnt ชิ้น',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 16),
-                    );
-                  },
-                ),
-              ],
-            ),
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(72), // เฉพาะค้นหา/กรอง
-              child: Column(
+      body: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) =>
+            _handleOutsideTap(), // ✅ แตะที่ไหนก็เลิกค้นหา/ซ่อนคีย์บอร์ด
+        child: NestedScrollView(
+          floatHeaderSlivers: true,
+          headerSliverBuilder: (context, innerScrolled) => [
+            // 1) AppBar + แถวค้นหา/กรอง (ตรึงไว้ตลอด)
+            SliverAppBar(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              scrolledUnderElevation: 0,
+              elevation: 0,
+              pinned: true,
+              floating: false,
+              snap: false,
+              title: Row(
                 children: [
-                  // ===== ค้นหา + ตัวกรองหมดอายุ =====
-                  Container(
-                    color: Colors.white,
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _searchCtrl,
-                            keyboardType: TextInputType.text,
-                            textInputAction: TextInputAction.search,
-                            style: const TextStyle(fontSize: 14),
-                            decoration: InputDecoration(
-                              isDense: true,
-                              hintText: 'ค้นหาวัตถุดิบ',
-                              hintStyle: TextStyle(color: Colors.grey[400]),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
-                              ),
-                              prefixIcon: Icon(
-                                Icons.search,
-                                color: Colors.grey[400],
-                                size: 20,
-                              ),
-                              suffixIcon: searchQuery.isNotEmpty
-                                  ? IconButton(
-                                      icon: Icon(
-                                        Icons.clear,
-                                        color: Colors.grey[400],
-                                        size: 20,
-                                      ),
-                                      onPressed: () {
-                                        _searchCtrl.clear();
-                                        setState(() => searchQuery = '');
-                                      },
-                                    )
-                                  : null,
-                              filled: true,
-                              fillColor: Colors.grey[50],
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(22),
-                                borderSide: BorderSide(
-                                  color: Colors.yellow[600]!,
+                  const Text(
+                    'วัตถุดิบ',
+                    style: TextStyle(
+                      color: Colors.black,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: _streamCount(),
+                    builder: (_, s) {
+                      final cnt = s.hasData ? s.data!.docs.length : 0;
+                      return Text(
+                        '$cnt ชิ้น',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 16),
+                      );
+                    },
+                  ),
+                ],
+              ),
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(72), // เฉพาะค้นหา/กรอง
+                child: Column(
+                  children: [
+                    // ===== ค้นหา + ตัวกรองหมดอายุ =====
+                    Container(
+                      color: Colors.white,
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _searchCtrl,
+                              focusNode: _searchFocusNode,
+                              keyboardType: TextInputType.text,
+                              textInputAction: TextInputAction.search,
+                              style: const TextStyle(fontSize: 14),
+                              decoration: InputDecoration(
+                                isDense: true,
+                                hintText: 'ค้นหาวัตถุดิบ',
+                                hintStyle: TextStyle(color: Colors.grey[400]),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
                                 ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(22),
-                                borderSide: BorderSide(
-                                  color: Colors.yellow[700]!,
-                                  width: 2,
+                                prefixIcon: Icon(
+                                  Icons.search,
+                                  color: Colors.grey[400],
+                                  size: 20,
                                 ),
-                              ),
-                            ),
-                            onChanged: (v) {
-                              _searchDebounce?.cancel();
-                              _searchDebounce = Timer(
-                                const Duration(milliseconds: 250),
-                                () {
-                                  if (!mounted) return;
-                                  setState(
-                                    () => searchQuery = v.trim().toLowerCase(),
-                                  );
-                                },
-                              );
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        // ปุ่มตัวกรองวันหมดอายุ (ทึบ ไม่โปร่ง)
-                        Material(
-                          color: selectedExpiryFilter == 'ทั้งหมด'
-                              ? Colors.grey[100]!
-                              : Colors.yellow[300]!,
-                          surfaceTintColor:
-                              Colors.transparent, // กัน M3 แต้มทินต์ให้ดูซีด
-                          shape: StadiumBorder(
-                            side: BorderSide(
-                              color: selectedExpiryFilter == 'ทั้งหมด'
-                                  ? Colors.grey[400]!
-                                  : Colors.yellow[600]!,
-                              width: 1.5,
-                            ),
-                          ),
-                          clipBehavior: Clip
-                              .antiAlias, // ให้ ripple/ink โค้งตามเส้นรอบรูป
-                          child: PopupMenuButton<String>(
-                            color: Colors.white, // ✅ พื้นเมนูทึบ
-                            tooltip:
-                                'กรองตามวันหมดอายุ (จะแสดงเรียงใกล้หมดอายุก่อน)',
-                            offset: const Offset(0, 40),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            itemBuilder: (_) => _expiryOptions.map((opt) {
-                              final isCustom = opt == 'กำหนดเอง…';
-                              final isSelected = isCustom
-                                  ? selectedExpiryFilter == 'กำหนดเอง'
-                                  : selectedExpiryFilter == opt;
-                              final label =
-                                  (isCustom &&
-                                      selectedExpiryFilter == 'กำหนดเอง' &&
-                                      customDays != null)
-                                  ? 'กำหนดเอง (${customDays} วัน)'
-                                  : opt;
-                              return PopupMenuItem<String>(
-                                value: opt,
-                                child: Row(
-                                  children: [
-                                    if (isSelected)
-                                      const Icon(
-                                        Icons.check,
-                                        size: 18,
-                                        color: Colors.black,
+                                suffixIcon: searchQuery.isNotEmpty
+                                    ? IconButton(
+                                        icon: Icon(
+                                          Icons.clear,
+                                          color: Colors.grey[400],
+                                          size: 20,
+                                        ),
+                                        onPressed: _clearSearch,
                                       )
-                                    else
-                                      const SizedBox(width: 18),
-                                    const SizedBox(width: 6),
-                                    Text(label),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                            onSelected: (val) {
-                              if (val == 'กำหนดเอง…') {
-                                _showCustomDaysDialog();
-                              } else {
-                                setState(() {
-                                  selectedExpiryFilter = val;
-                                  if (val != 'กำหนดเอง') customDays = null;
-                                });
-                              }
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 8,
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.schedule_rounded,
-                                    color: selectedExpiryFilter == 'ทั้งหมด'
-                                        ? Colors.grey[600]
-                                        : Colors.black,
-                                    size: 18,
+                                    : null,
+                                filled: true,
+                                fillColor: Colors.grey[50],
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(22),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey[300]!,
+                                    width: 1.3,
                                   ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    selectedExpiryFilter == 'ทั้งหมด'
-                                        ? 'หมดอายุ'
-                                        : (selectedExpiryFilter == 'กำหนดเอง'
-                                              ? 'หมดอายุ (${customDays ?? 0} วัน)'
-                                              : 'หมดอายุ: $selectedExpiryFilter'),
-                                    style: TextStyle(
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(22),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey[300]!,
+                                    width: 1.3,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(22),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey[400]!,
+                                    width: 1.5,
+                                  ),
+                                ),
+                              ),
+                              onChanged: (v) {
+                                _searchDebounce?.cancel();
+                                _searchDebounce = Timer(
+                                  const Duration(milliseconds: 250),
+                                  () {
+                                    if (!mounted) return;
+                                    setState(
+                                      () =>
+                                          searchQuery = v.trim().toLowerCase(),
+                                    );
+                                  },
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          // ปุ่มตัวกรองวันหมดอายุ (ทึบ ไม่โปร่ง)
+                          Material(
+                            color: selectedExpiryFilter == 'ทั้งหมด'
+                                ? Colors.grey[100]!
+                                : Colors.yellow[300]!,
+                            surfaceTintColor:
+                                Colors.transparent, // กัน M3 แต้มทินต์ให้ดูซีด
+                            shape: StadiumBorder(
+                              side: BorderSide(
+                                color: selectedExpiryFilter == 'ทั้งหมด'
+                                    ? Colors.grey[400]!
+                                    : Colors.yellow[600]!,
+                                width: 1.5,
+                              ),
+                            ),
+                            clipBehavior: Clip
+                                .antiAlias, // ให้ ripple/ink โค้งตามเส้นรอบรูป
+                            child: PopupMenuButton<String>(
+                              color: Colors.white, // ✅ พื้นเมนูทึบ
+                              tooltip:
+                                  'กรองตามวันหมดอายุ (จะแสดงเรียงใกล้หมดอายุก่อน)',
+                              offset: const Offset(0, 40),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              itemBuilder: (_) => _expiryOptions.map((opt) {
+                                final isCustom = opt == 'กำหนดเอง…';
+                                final isSelected = isCustom
+                                    ? selectedExpiryFilter == 'กำหนดเอง'
+                                    : selectedExpiryFilter == opt;
+                                final label =
+                                    (isCustom &&
+                                        selectedExpiryFilter == 'กำหนดเอง' &&
+                                        customDays != null)
+                                    ? 'กำหนดเอง (${customDays} วัน)'
+                                    : opt;
+                                return PopupMenuItem<String>(
+                                  value: opt,
+                                  child: Row(
+                                    children: [
+                                      if (isSelected)
+                                        const Icon(
+                                          Icons.check,
+                                          size: 18,
+                                          color: Colors.black,
+                                        )
+                                      else
+                                        const SizedBox(width: 18),
+                                      const SizedBox(width: 6),
+                                      Text(label),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                              onSelected: (val) {
+                                if (val == 'กำหนดเอง…') {
+                                  _showCustomDaysDialog();
+                                } else {
+                                  setState(() {
+                                    selectedExpiryFilter = val;
+                                    if (val != 'กำหนดเอง') customDays = null;
+                                  });
+                                }
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.schedule_rounded,
                                       color: selectedExpiryFilter == 'ทั้งหมด'
                                           ? Colors.grey[600]
                                           : Colors.black,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
+                                      size: 18,
                                     ),
-                                  ),
-                                  Icon(
-                                    Icons.arrow_drop_down,
-                                    color: selectedExpiryFilter == 'ทั้งหมด'
-                                        ? Colors.grey[600]
-                                        : Colors.black,
-                                  ),
-                                ],
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      selectedExpiryFilter == 'ทั้งหมด'
+                                          ? 'หมดอายุ'
+                                          : (selectedExpiryFilter == 'กำหนดเอง'
+                                                ? 'หมดอายุ (${customDays ?? 0} วัน)'
+                                                : 'หมดอายุ: $selectedExpiryFilter'),
+                                      style: TextStyle(
+                                        color: selectedExpiryFilter == 'ทั้งหมด'
+                                            ? Colors.grey[600]
+                                            : Colors.black,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.arrow_drop_down,
+                                      color: selectedExpiryFilter == 'ทั้งหมด'
+                                          ? Colors.grey[600]
+                                          : Colors.black,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // หมวดหมู่ย้ายไป SliverAppBar ที่ลอย (ด้านล่าง)
+                  ],
+                ),
+              ),
+            ),
+
+            // 2) แถบหมวดหมู่แบบลอย (ซ่อนเมื่อเลื่อนลง โผล่เมื่อเลื่อนขึ้น)
+            SliverAppBar(
+              primary: false,
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              scrolledUnderElevation: 0,
+              elevation: 0,
+              pinned: false,
+              floating: true,
+              snap: true,
+              toolbarHeight: 0,
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(56),
+                child: SizedBox(
+                  height: 56,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: availableCategories.length,
+                    itemBuilder: (_, idx) {
+                      final c = availableCategories[idx];
+                      final isSelected = selectedCategory == c;
+                      return GestureDetector(
+                        onTap: () => setState(() => selectedCategory = c),
+                        child: Container(
+                          margin: const EdgeInsets.only(
+                            right: 12,
+                            top: 8,
+                            bottom: 8,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Colors.yellow[600]
+                                : Colors.grey[200],
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Center(
+                            child: Text(
+                              c,
+                              style: TextStyle(
+                                color: isSelected
+                                    ? Colors.white
+                                    : Colors.grey[600],
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
                               ),
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
-                  // หมวดหมู่ย้ายไป SliverAppBar ที่ลอย (ด้านล่าง)
-                ],
+                ),
               ),
             ),
-          ),
+          ],
+          body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _streamItems(),
+            builder: (_, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snap.hasError) {
+                return Center(
+                  child: Text(
+                    'เกิดข้อผิดพลาด: ${snap.error}',
+                    style: const TextStyle(color: Colors.red),
+                    textAlign: TextAlign.center,
+                  ),
+                );
+              }
+              if (!snap.hasData || snap.data!.docs.isEmpty) {
+                return _emptyState();
+              }
 
-          // 2) แถบหมวดหมู่แบบลอย (ซ่อนเมื่อเลื่อนลง โผล่เมื่อเลื่อนขึ้น)
-          SliverAppBar(
-            primary: false,
-            backgroundColor: Colors.white,
-            surfaceTintColor: Colors.transparent,
-            scrolledUnderElevation: 0,
-            elevation: 0,
-            pinned: false,
-            floating: true,
-            snap: true,
-            toolbarHeight: 0,
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(56),
-              child: SizedBox(
-                height: 56,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: availableCategories.length,
-                  itemBuilder: (_, idx) {
-                    final c = availableCategories[idx];
-                    final isSelected = selectedCategory == c;
-                    return GestureDetector(
-                      onTap: () => setState(() => selectedCategory = c),
-                      child: Container(
-                        margin: const EdgeInsets.only(
-                          right: 12,
-                          top: 8,
-                          bottom: 8,
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? Colors.yellow[600]
-                              : Colors.grey[200],
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Center(
-                          child: Text(
-                            c,
-                            style: TextStyle(
-                              color: isSelected
-                                  ? Colors.white
-                                  : Colors.grey[600],
-                              fontWeight: isSelected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
+              var all = snap.data!.docs
+                  .map((d) => ShoppingItem.fromMap(d.data(), d.id))
+                  .toList(growable: false);
+              // ซ่อนรายการที่จำนวนคงเหลือเป็น 0
+              all = all.where((it) => it.quantity > 0).toList(growable: false);
+              // ✅ เพิ่ม: ซ่อนวัตถุดิบที่ “หมดอายุแล้ว” เสมอ (เทียบวันที่ล้วน ไม่แคร์เวลา)
+              DateTime _strip(DateTime d) => DateTime(d.year, d.month, d.day);
+              final DateTime _today = _strip(DateTime.now());
+              all = all
+                  .where((it) {
+                    final ed = it.expiryDate;
+                    if (ed == null) return true; // ถ้าไม่มีวันหมดอายุ โชว์ได้
+                    return !_strip(
+                      ed,
+                    ).isBefore(_today); // ก่อนวันนี้ = หมดอายุ → ตัดออก
+                  })
+                  .toList(growable: false);
+              // ===== กรองที่ฝั่งแอป เพื่อลดปัญหา composite index =====
+              List<ShoppingItem> filtered = List.of(all);
+
+              // กรองหมวดหมู่
+              if (selectedCategory != _ALL) {
+                filtered = filtered
+                    .where((it) => (it.category) == selectedCategory)
+                    .toList();
+              }
+
+              // กรองคำค้นหา
+              if (searchQuery.isNotEmpty) {
+                filtered = filtered
+                    .where((it) => it.name.toLowerCase().contains(searchQuery))
+                    .toList();
+              }
+
+              // กรองวันหมดอายุ
+              DateTime strip(DateTime d) => DateTime(d.year, d.month, d.day);
+              final today = strip(DateTime.now());
+              DateTime? from;
+              DateTime? to;
+
+              switch (selectedExpiryFilter) {
+                case '1 วัน':
+                  from = today;
+                  to = today.add(const Duration(days: 1));
+                  break;
+                case '2 วัน':
+                  from = today;
+                  to = today.add(const Duration(days: 2));
+                  break;
+                case '3 วัน':
+                  from = today;
+                  to = today.add(const Duration(days: 3));
+                  break;
+                case '7 วัน':
+                  from = today.add(const Duration(days: 4));
+                  to = today.add(const Duration(days: 7));
+                  break;
+                case '14 วัน':
+                  from = today.add(const Duration(days: 8));
+                  to = today.add(const Duration(days: 14));
+                  break;
+                case 'กำหนดเอง':
+                  if (customDays != null) {
+                    from = today.add(Duration(days: customDays!));
+                    to = from;
+                  }
+                  break;
+                default:
+                  break; // 'ทั้งหมด'
+              }
+
+              if (from != null && to != null) {
+                filtered = filtered.where((it) {
+                  final ed = it.expiryDate;
+                  if (ed == null) return false;
+                  final only = strip(ed);
+                  final geFrom = !only.isBefore(from!);
+                  final leTo = !only.isAfter(to!);
+                  return geFrom && leTo;
+                }).toList();
+              }
+
+              // เรียงใกล้หมดอายุก่อน (null ไปท้าย)
+              filtered.sort((a, b) {
+                final ad = a.expiryDate;
+                final bd = b.expiryDate;
+                if (ad == null && bd == null) return 0;
+                if (ad == null) return 1;
+                if (bd == null) return -1;
+                return ad.compareTo(bd);
+              });
+
+              if (filtered.isEmpty) {
+                return _emptyAfterFilter();
+              }
+
+              // กลุ่มตามชื่อ (key เป็น lower-case เพื่อรวมชื่อซ้ำ)
+              final Map<String, List<ShoppingItem>> grouped = {};
+              for (final it in filtered) {
+                final key = it.name.trim().toLowerCase();
+                grouped.putIfAbsent(key, () => []).add(it);
+              }
+
+              final entries = grouped.entries.toList(growable: false);
+
+              return ListView.builder(
+                padding: const EdgeInsets.only(bottom: 120),
+                itemCount: entries.length,
+                cacheExtent: 600,
+                itemBuilder: (_, idx) {
+                  final e = entries[idx];
+                  final groupItems = e.value;
+                  if (groupItems.length == 1) {
+                    final item = groupItems.first;
+                    return KeyedSubtree(
+                      key: ValueKey(item.id),
+                      child: ShoppingItemCard(
+                        item: item,
+                        onDelete: () => _deleteItem(item.id),
+                        onTap: () async {
+                          final changed = await Navigator.push<bool>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ItemDetailPage(item: item),
                             ),
-                          ),
-                        ),
+                          );
+                          if (changed == true && mounted) setState(() {});
+                        },
+                        onQuickUse: () => _showQuickUseSheet(item),
                       ),
                     );
-                  },
-                ),
-              ),
-            ),
-          ),
-        ],
-        body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _streamItems(),
-          builder: (_, snap) {
-            if (snap.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snap.hasError) {
-              return Center(
-                child: Text(
-                  'เกิดข้อผิดพลาด: ${snap.error}',
-                  style: const TextStyle(color: Colors.red),
-                  textAlign: TextAlign.center,
-                ),
-              );
-            }
-            if (!snap.hasData || snap.data!.docs.isEmpty) {
-              return _emptyState();
-            }
-
-            var all = snap.data!.docs
-                .map((d) => ShoppingItem.fromMap(d.data(), d.id))
-                .toList(growable: false);
-            // ซ่อนรายการที่จำนวนคงเหลือเป็น 0
-            all = all.where((it) => it.quantity > 0).toList(growable: false);
-
-            // ===== กรองที่ฝั่งแอป เพื่อลดปัญหา composite index =====
-            List<ShoppingItem> filtered = List.of(all);
-
-            // กรองหมวดหมู่
-            if (selectedCategory != _ALL) {
-              filtered = filtered
-                  .where((it) => (it.category) == selectedCategory)
-                  .toList();
-            }
-
-            // กรองคำค้นหา
-            if (searchQuery.isNotEmpty) {
-              filtered = filtered
-                  .where((it) => it.name.toLowerCase().contains(searchQuery))
-                  .toList();
-            }
-
-            // กรองวันหมดอายุ
-            DateTime strip(DateTime d) => DateTime(d.year, d.month, d.day);
-            final today = strip(DateTime.now());
-            DateTime? from;
-            DateTime? to;
-
-            switch (selectedExpiryFilter) {
-              case '1 วัน':
-                from = today;
-                to = today.add(const Duration(days: 1));
-                break;
-              case '2 วัน':
-                from = today;
-                to = today.add(const Duration(days: 2));
-                break;
-              case '3 วัน':
-                from = today;
-                to = today.add(const Duration(days: 3));
-                break;
-              case '7 วัน':
-                from = today.add(const Duration(days: 4));
-                to = today.add(const Duration(days: 7));
-                break;
-              case '14 วัน':
-                from = today.add(const Duration(days: 8));
-                to = today.add(const Duration(days: 14));
-                break;
-              case 'กำหนดเอง':
-                if (customDays != null) {
-                  from = today.add(Duration(days: customDays!));
-                  to = from;
-                }
-                break;
-              default:
-                break; // 'ทั้งหมด'
-            }
-
-            if (from != null && to != null) {
-              filtered = filtered.where((it) {
-                final ed = it.expiryDate;
-                if (ed == null) return false;
-                final only = strip(ed);
-                final geFrom = !only.isBefore(from!);
-                final leTo = !only.isAfter(to!);
-                return geFrom && leTo;
-              }).toList();
-            }
-
-            // เรียงใกล้หมดอายุก่อน (null ไปท้าย)
-            filtered.sort((a, b) {
-              final ad = a.expiryDate;
-              final bd = b.expiryDate;
-              if (ad == null && bd == null) return 0;
-              if (ad == null) return 1;
-              if (bd == null) return -1;
-              return ad.compareTo(bd);
-            });
-
-            if (filtered.isEmpty) {
-              return _emptyAfterFilter();
-            }
-
-            // กลุ่มตามชื่อ (key เป็น lower-case เพื่อรวมชื่อซ้ำ)
-            final Map<String, List<ShoppingItem>> grouped = {};
-            for (final it in filtered) {
-              final key = it.name.trim().toLowerCase();
-              grouped.putIfAbsent(key, () => []).add(it);
-            }
-
-            final entries = grouped.entries.toList(growable: false);
-
-            return ListView.builder(
-              padding: const EdgeInsets.only(bottom: 120),
-              itemCount: entries.length,
-              cacheExtent: 600,
-              itemBuilder: (_, idx) {
-                final e = entries[idx];
-                final groupItems = e.value;
-                if (groupItems.length == 1) {
-                  final item = groupItems.first;
-                  return KeyedSubtree(
-                    key: ValueKey(item.id),
-                    child: ShoppingItemCard(
-                      item: item,
-                      onDelete: () => _deleteItem(item.id),
-                      onTap: () async {
-                        final changed = await Navigator.push<bool>(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ItemDetailPage(item: item),
-                          ),
-                        );
-                        if (changed == true && mounted) setState(() {});
-                      },
-                      onQuickUse: () => _showQuickUseSheet(item),
-                    ),
-                  );
-                } else {
-                  final displayName = groupItems.first.name;
-                  return KeyedSubtree(
-                    key: ValueKey('group-${e.key}'),
-                    child: GroupedItemCard(
-                      name: displayName,
-                      items: groupItems,
-                      onTap: () async {
-                        final changed = await showModalBottomSheet<bool>(
-                          context: context,
-                          isScrollControlled: true,
-                          backgroundColor: Colors.transparent,
-                          builder: (_) => SizedBox(
-                            height: MediaQuery.of(context).size.height * 0.9,
-                            child: ItemGroupDetailSheet(
-                              groupName: displayName,
-                              items: groupItems,
+                  } else {
+                    final displayName = groupItems.first.name;
+                    return KeyedSubtree(
+                      key: ValueKey('group-${e.key}'),
+                      child: GroupedItemCard(
+                        name: displayName,
+                        items: groupItems,
+                        onTap: () async {
+                          final changed = await showModalBottomSheet<bool>(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (_) => SizedBox(
+                              height: MediaQuery.of(context).size.height * 0.9,
+                              child: ItemGroupDetailSheet(
+                                groupName: displayName,
+                                items: groupItems,
+                              ),
                             ),
-                          ),
-                        );
-                        if (changed == true && mounted) setState(() {});
-                      },
-                      // ✅ ผูกการลบทั้งกลุ่ม
-                      onDeleteGroup: () => _deleteGroupItems(groupItems),
-                    ),
-                  );
-                }
-              },
-            );
-          },
+                          );
+                          if (changed == true && mounted) setState(() {});
+                        },
+                        // ✅ ผูกการลบทั้งกลุ่ม
+                        onDeleteGroup: () => _deleteGroupItems(groupItems),
+                      ),
+                    );
+                  }
+                },
+              );
+            },
+          ),
         ),
       ),
-
       // FAB: Write & Scan
       floatingActionButton: Container(
         decoration: BoxDecoration(

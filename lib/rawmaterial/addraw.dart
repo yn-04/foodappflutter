@@ -54,10 +54,15 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
   List<String> _nameSuggestions = []; // ที่กรองตามข้อความ ณ ตอนพิมพ์
 
   // หน้าตาโทนเทา
-  static const _greyBorder = Colors.black; // กรอบโทนเข้ม (ยังดูมินิมอล)
-  static final _hintGrey = Colors.grey[500];
-  static final _chipGreyBg = Colors.grey[200];
-  static final _chipGreyText = Colors.grey[800];
+  static const _greyBorder = Color.fromARGB(
+    255,
+    123,
+    121,
+    121,
+  ); // กรอบโทนเข้ม (ยังดูมินิมอล)
+  static Color? get _hintGrey => Colors.grey[500];
+  static Color? get _chipGreyBg => Colors.grey[200];
+  static Color? get _chipGreyText => Colors.grey[800];
 
   @override
   void initState() {
@@ -311,11 +316,16 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
   }
 
   Future<void> _pickCustomDate() async {
+    final now = DateTime.now();
+    final initialDate =
+        (_customExpiryDate != null && _customExpiryDate!.isAfter(now))
+        ? _customExpiryDate!
+        : now;
     final picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now().add(const Duration(days: 7)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDate: initialDate,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(

@@ -72,11 +72,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   // ปฏิทินวันเกิด (ค.ศ.)
   Future<void> _selectDate(BuildContext context) async {
     try {
+      final now = DateTime.now();
       final DateTime? picked = await showDatePicker(
         context: context,
         initialDate: _selectedDate,
         firstDate: DateTime(1900),
-        lastDate: DateTime.now(),
+        lastDate: now,
         helpText: 'เลือกวันเกิด',
         cancelText: 'ยกเลิก',
         confirmText: 'เลือก',
