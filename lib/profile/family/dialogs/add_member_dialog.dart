@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 class AddMemberDialog {
   static void show({
     required BuildContext context,
-    required Function(Map<String, dynamic>) onAddMember,
+    required Future<void> Function(Map<String, dynamic>) onAddMember,
   }) {
     showDialog(
       context: context,
@@ -16,7 +16,7 @@ class AddMemberDialog {
 }
 
 class _AddMemberDialogContent extends StatefulWidget {
-  final Function(Map<String, dynamic>) onAddMember;
+  final Future<void> Function(Map<String, dynamic>) onAddMember;
 
   const _AddMemberDialogContent({required this.onAddMember});
 
@@ -339,20 +339,10 @@ class _AddMemberDialogContentState extends State<_AddMemberDialogContent> {
         'relationship': _selectedRelationship,
       };
 
-      // Simulate API call
-      await Future.delayed(const Duration(seconds: 1));
-
-      widget.onAddMember(memberData);
+      await widget.onAddMember(memberData);
 
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('เพิ่มสมาชิก "${memberData['name']}" สำเร็จ'),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
       }
     } catch (e) {
       if (mounted) {

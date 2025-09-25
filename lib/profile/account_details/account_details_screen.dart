@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:my_app/profile/account_settings/services/user_service.dart';
-import 'package:my_app/profile/my_user.dart';
+import 'package:my_app/profile/model/my_user.dart';
 
 class ModernAccountDetailsScreen extends StatefulWidget {
   const ModernAccountDetailsScreen({super.key});
@@ -92,15 +92,13 @@ class _ModernAccountDetailsScreenState
   // ใช้ showDatePicker มาตรฐาน (ค.ศ.)
   Future<void> _selectBirthDate() async {
     try {
-      DateTime initialDate =
-          _selectedBirthDate ??
-          DateTime.now().subtract(const Duration(days: 365 * 25));
+      final now = DateTime.now();
 
       final DateTime? picked = await showDatePicker(
         context: context,
-        initialDate: initialDate,
+        initialDate: _selectedBirthDate ?? now,
         firstDate: DateTime(1900),
-        lastDate: DateTime.now(),
+        lastDate: now,
         helpText: 'เลือกวันเกิด',
         cancelText: 'ยกเลิก',
         confirmText: 'เลือก',

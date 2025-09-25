@@ -1,8 +1,8 @@
-// screens/health_info_screen.dart
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+// lib/profile/health_info_screen.dart — หน้าข้อมูลสุขภาพ (ดีไซน์ให้สอดคล้องกับ Account Detail)
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:my_app/profile/my_user.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:my_app/profile/model/my_user.dart';
 
 class HealthInfoScreen extends StatefulWidget {
   const HealthInfoScreen({super.key});
@@ -12,10 +12,29 @@ class HealthInfoScreen extends StatefulWidget {
 }
 
 class _HealthInfoScreenState extends State<HealthInfoScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final User? _user = FirebaseAuth.instance.currentUser;
+
   bool _isLoading = true;
+  bool _isEditing = false;
+  bool _isSaving = false;
+
   MyUser? _currentUser;
   Map<String, dynamic>? _additionalHealthData;
-  final user = FirebaseAuth.instance.currentUser;
+
+  final TextEditingController _heightController = TextEditingController();
+  final TextEditingController _weightController = TextEditingController();
+  final TextEditingController _allergiesController = TextEditingController();
+  final TextEditingController _bloodTypeController = TextEditingController();
+  final TextEditingController _medicationsController = TextEditingController();
+  final TextEditingController _smokingStatusController =
+      TextEditingController();
+  final TextEditingController _alcoholConsumptionController =
+      TextEditingController();
+  final TextEditingController _exerciseFrequencyController =
+      TextEditingController();
+  final TextEditingController _sleepHoursController = TextEditingController();
+  final TextEditingController _waterIntakeController = TextEditingController();
 
   @override
   void initState() {
@@ -23,174 +42,496 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     _loadHealthData();
   }
 
+  @override
+  void dispose() {
+    _heightController.dispose();
+    _weightController.dispose();
+    _allergiesController.dispose();
+    _bloodTypeController.dispose();
+    _medicationsController.dispose();
+    _smokingStatusController.dispose();
+    _alcoholConsumptionController.dispose();
+    _exerciseFrequencyController.dispose();
+    _sleepHoursController.dispose();
+    _waterIntakeController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadHealthData() async {
-    setState(() {
-      _isLoading = true;
-    });
+    if (_user == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    setState(() => _isLoading = true);
 
     try {
-      if (user != null) {
-        // ดึงข้อมูลจาก users collection (MyUser model)
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user!.uid)
-            .get();
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_user.uid)
+          .get();
 
-        if (userDoc.exists) {
-          setState(() {
-            _currentUser = MyUser.fromFirestore(userDoc);
-          });
+      MyUser? currentUser;
+      Map<String, dynamic>? extras;
+
+      if (userDoc.exists) {
+        currentUser = MyUser.fromFirestore(userDoc);
+        final data = userDoc.data();
+        final rawExtras = data?['healthProfile'];
+        if (rawExtras is Map<String, dynamic>) {
+          extras = Map<String, dynamic>.from(rawExtras);
         }
+      }
 
-        // ดึงข้อมูลสุขภาพเพิ่มเติมจาก health_profiles (ถ้ามี)
-        final healthDoc = await FirebaseFirestore.instance
+      if (extras == null || extras.isEmpty) {
+        final legacyDoc = await FirebaseFirestore.instance
             .collection('health_profiles')
-            .doc(user!.uid)
+            .doc(_user.uid)
             .get();
-
-        if (healthDoc.exists) {
-          setState(() {
-            _additionalHealthData = healthDoc.data();
-          });
+        if (legacyDoc.exists) {
+          extras = legacyDoc.data();
         }
       }
+
+      if (!mounted) return;
+
+      setState(() {
+        _currentUser = currentUser;
+        _additionalHealthData = extras == null || extras.isEmpty
+            ? null
+            : Map<String, dynamic>.from(extras);
+      });
+      _populateControllers();
     } catch (e) {
-      print('Error loading health data: $e');
+      if (!mounted) return;
+      _showSnackBar('ไม่สามารถโหลดข้อมูลได้', success: false);
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _populateControllers() {
+    final height = _currentUser?.height ?? 0;
+    final weight = _currentUser?.weight ?? 0;
+    final allergies = _currentUser?.allergies ?? '';
+    final extras = _additionalHealthData ?? const {};
+
+    _heightController.text = height > 0 ? height.toStringAsFixed(0) : '';
+    _weightController.text = weight > 0 ? weight.toStringAsFixed(1) : '';
+    _allergiesController.text = allergies;
+
+    _bloodTypeController.text = _stringFromExtras(extras, 'bloodType');
+    _medicationsController.text = _stringFromExtras(extras, 'medications');
+    _smokingStatusController.text = _stringFromExtras(extras, 'smokingStatus');
+    _alcoholConsumptionController.text = _stringFromExtras(
+      extras,
+      'alcoholConsumption',
+    );
+    _exerciseFrequencyController.text = _stringFromExtras(
+      extras,
+      'exerciseFrequency',
+    );
+    _sleepHoursController.text = _stringFromExtras(extras, 'sleepHours');
+    _waterIntakeController.text = _stringFromExtras(extras, 'waterIntake');
+  }
+
+  void _toggleEditMode() {
+    if (_isSaving) return;
+    setState(() {
+      if (_isEditing) {
+        _populateControllers();
+      }
+      _isEditing = !_isEditing;
+    });
+  }
+
+  String _stringFromExtras(Map<String, dynamic> data, String key) {
+    final value = data[key];
+    if (value == null) return '';
+    if (value is String) return value;
+    if (value is List) {
+      return value.isEmpty ? '' : value.join(', ');
+    }
+    return value.toString();
+  }
+
+  double? _effectiveHeight() {
+    final editingValue = double.tryParse(_heightController.text.trim());
+    if (_isEditing && editingValue != null && editingValue > 0) {
+      return editingValue;
+    }
+    final dataValue = _currentUser?.height ?? 0;
+    return dataValue > 0 ? dataValue : null;
+  }
+
+  double? _effectiveWeight() {
+    final editingValue = double.tryParse(_weightController.text.trim());
+    if (_isEditing && editingValue != null && editingValue > 0) {
+      return editingValue;
+    }
+    final dataValue = _currentUser?.weight ?? 0;
+    return dataValue > 0 ? dataValue : null;
+  }
+
+  double? _calculateBMI() {
+    final height = _effectiveHeight();
+    final weight = _effectiveWeight();
+    if (height == null || weight == null || height == 0) return null;
+    final meters = height / 100;
+    return weight / (meters * meters);
+  }
+
+  String _bmiCategory(double bmi) {
+    if (bmi < 18.5) return 'น้ำหนักน้อย';
+    if (bmi < 25) return 'ปกติ';
+    if (bmi < 30) return 'น้ำหนักเกิน';
+    return 'อ้วน';
+  }
+
+  Color _bmiColor(double bmi) {
+    if (bmi < 18.5) return Colors.blue;
+    if (bmi < 25) return Colors.green;
+    if (bmi < 30) return Colors.orange;
+    return Colors.red;
+  }
+
+  String _additionalValue(String key, {String fallback = 'ไม่ระบุ'}) {
+    final value = _stringFromExtras(
+      _additionalHealthData ?? const {},
+      key,
+    ).trim();
+    return value.isEmpty ? fallback : value;
+  }
+
+  Future<void> _saveHealthData() async {
+    final currentUser = _currentUser;
+    final user = _user;
+    if (currentUser == null || user == null) return;
+    if (!_formKey.currentState!.validate()) return;
+
+    final height = double.tryParse(_heightController.text.trim()) ?? 0;
+    final weight = double.tryParse(_weightController.text.trim()) ?? 0;
+    final allergies = _allergiesController.text.trim();
+
+    setState(() => _isSaving = true);
+
+    try {
+      final healthProfile = <String, dynamic>{};
+
+      void capture(String key, TextEditingController controller) {
+        final value = controller.text.trim();
+        if (value.isNotEmpty) {
+          healthProfile[key] = value;
+        }
+      }
+
+      capture('bloodType', _bloodTypeController);
+      capture('medications', _medicationsController);
+      capture('smokingStatus', _smokingStatusController);
+      capture('alcoholConsumption', _alcoholConsumptionController);
+      capture('exerciseFrequency', _exerciseFrequencyController);
+      capture('sleepHours', _sleepHoursController);
+      capture('waterIntake', _waterIntakeController);
+
+      final updates = <String, dynamic>{
+        'height': height,
+        'weight': weight,
+        'allergies': allergies,
+      };
+      if (healthProfile.isEmpty) {
+        updates['healthProfile'] = FieldValue.delete();
+      } else {
+        updates['healthProfile'] = healthProfile;
+      }
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update(updates);
+
+      if (!mounted) return;
+      setState(() {
+        _currentUser = currentUser.copyWith(
+          height: height,
+          weight: weight,
+          allergies: allergies,
+        );
+        _additionalHealthData = healthProfile.isEmpty
+            ? null
+            : Map<String, dynamic>.from(healthProfile);
+        _populateControllers();
+        _isEditing = false;
+      });
+      _showSnackBar('บันทึกข้อมูลสำเร็จ');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar('เกิดข้อผิดพลาด: $e', success: false);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  void _showSnackBar(String message, {bool success = true}) {
+    final color = success ? Colors.green[600] : Colors.red[600];
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              success ? Icons.check_circle : Icons.error,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final scaffoldColor = Colors.grey[50];
+    final notesValue = _additionalValue('notes', fallback: '');
+
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: scaffoldColor,
       appBar: AppBar(
-        backgroundColor: Colors.grey[100],
+        backgroundColor: scaffoldColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           'ข้อมูลสุขภาพ',
           style: TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.w600,
+            color: Colors.black87,
             fontSize: 18,
+            fontWeight: FontWeight.w600,
           ),
         ),
-        centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.edit, color: Colors.black),
-            onPressed: () {
-              _showEditHealthDialog();
-            },
-          ),
+          if (!_isLoading)
+            TextButton(
+              onPressed: _toggleEditMode,
+              child: Text(
+                _isEditing ? 'ยกเลิก' : 'แก้ไข',
+                style: TextStyle(
+                  color: _isEditing ? Colors.red[600] : Colors.blue[600],
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.black))
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  // BMI Card
-                  _buildBMICard(),
-                  const SizedBox(height: 16),
-
-                  // ข้อมูลร่างกายพื้นฐาน
-                  _buildHealthCard('ข้อมูลร่างกายพื้นฐาน', [
-                    _buildHealthInfoRow(
-                      Icons.height,
-                      'ส่วนสูง',
-                      _currentUser != null && _currentUser!.height > 0
-                          ? '${_currentUser!.height.toStringAsFixed(0)} ซม.'
-                          : 'ไม่ระบุ',
-                    ),
-                    _buildHealthInfoRow(
-                      Icons.monitor_weight,
-                      'น้ำหนัก',
-                      _currentUser != null && _currentUser!.weight > 0
-                          ? '${_currentUser!.weight.toStringAsFixed(1)} กก.'
-                          : 'ไม่ระบุ',
-                    ),
-                    _buildHealthInfoRow(
-                      Icons.warning_amber,
-                      'อาหารที่แพ้',
-                      _currentUser?.allergies.isEmpty == true
-                          ? 'ไม่มีอาหารที่แพ้'
-                          : _currentUser?.allergies ?? 'ไม่ระบุ',
-                    ),
-                  ]),
-
-                  const SizedBox(height: 16),
-
-                  // ข้อมูลสุขภาพเพิ่มเติม
-                  _buildHealthCard('ข้อมูลสุขภาพเพิ่มเติม', [
-                    _buildHealthInfoRow(
-                      Icons.bloodtype,
-                      'กรุ๊ปเลือด',
-                      _additionalHealthData?['bloodType'] ?? 'ไม่ระบุ',
-                    ),
-                    _buildHealthInfoRow(
-                      Icons.smoking_rooms,
-                      'สถานะการสูบบุหรี่',
-                      _additionalHealthData?['smokingStatus'] ?? 'ไม่ระบุ',
-                    ),
-                    _buildHealthInfoRow(
-                      Icons.wine_bar,
-                      'การดื่มแอลกอฮอล์',
-                      _additionalHealthData?['alcoholConsumption'] ?? 'ไม่ระบุ',
-                    ),
-                    _buildHealthInfoRow(
-                      Icons.medication,
-                      'ยาที่ใช้ประจำ',
-                      _additionalHealthData?['medications']?.isNotEmpty == true
-                          ? _additionalHealthData!['medications']
-                          : 'ไม่มี',
-                    ),
-                  ]),
-                ],
+          ? const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.grey),
+              ),
+            )
+          : _currentUser == null
+          ? const Center(child: Text('ไม่พบข้อมูลผู้ใช้'))
+          : Form(
+              key: _formKey,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    _buildBMICard(),
+                    const SizedBox(height: 16),
+                    _buildSection('ข้อมูลร่างกาย', [
+                      _buildEditableItem(
+                        icon: Icons.height,
+                        label: 'ส่วนสูง (ซม.)',
+                        controller: _heightController,
+                        keyboardType: TextInputType.number,
+                        hintText: 'กรอกส่วนสูง',
+                        enabled: _isEditing,
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return null;
+                          }
+                          final parsed = double.tryParse(value.trim());
+                          if (parsed == null || parsed <= 0) {
+                            return 'กรุณากรอกตัวเลขที่ถูกต้อง';
+                          }
+                          return null;
+                        },
+                      ),
+                      _buildEditableItem(
+                        icon: Icons.monitor_weight,
+                        label: 'น้ำหนัก (กก.)',
+                        controller: _weightController,
+                        keyboardType: TextInputType.number,
+                        hintText: 'กรอกน้ำหนัก',
+                        enabled: _isEditing,
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return null;
+                          }
+                          final parsed = double.tryParse(value.trim());
+                          if (parsed == null || parsed <= 0) {
+                            return 'กรุณากรอกตัวเลขที่ถูกต้อง';
+                          }
+                          return null;
+                        },
+                      ),
+                      _buildReadOnlyItem(
+                        icon: Icons.monitor_heart,
+                        label: 'ค่า BMI',
+                        value: (() {
+                          final bmi = _calculateBMI();
+                          return bmi != null
+                              ? bmi.toStringAsFixed(1)
+                              : 'ไม่ทราบ';
+                        })(),
+                      ),
+                      _buildReadOnlyItem(
+                        icon: Icons.emoji_emotions_outlined,
+                        label: 'สถานะน้ำหนัก',
+                        value: (() {
+                          final bmi = _calculateBMI();
+                          return bmi != null ? _bmiCategory(bmi) : 'ไม่ทราบ';
+                        })(),
+                      ),
+                    ]),
+                    const SizedBox(height: 16),
+                    _buildSection('ข้อมูลสุขภาพทั่วไป', [
+                      _buildEditableItem(
+                        icon: Icons.warning_amber_outlined,
+                        label: 'อาหารที่แพ้',
+                        controller: _allergiesController,
+                        hintText: 'ไม่มีอาหารที่แพ้',
+                        enabled: _isEditing,
+                        maxLines: 2,
+                      ),
+                      _buildEditableItem(
+                        icon: Icons.bloodtype,
+                        label: 'กรุ๊ปเลือด',
+                        controller: _bloodTypeController,
+                        hintText: 'กรอกกรุ๊ปเลือด (เช่น A, B, O, AB)',
+                        enabled: _isEditing,
+                      ),
+                      _buildEditableItem(
+                        icon: Icons.medication_outlined,
+                        label: 'ยาที่ใช้ประจำ',
+                        controller: _medicationsController,
+                        hintText: 'ไม่มี',
+                        enabled: _isEditing,
+                        maxLines: 2,
+                      ),
+                    ]),
+                    const SizedBox(height: 16),
+                    _buildSection('พฤติกรรมการใช้ชีวิต', [
+                      _buildEditableItem(
+                        icon: Icons.smoking_rooms,
+                        label: 'สถานะการสูบบุหรี่',
+                        controller: _smokingStatusController,
+                        hintText: 'ไม่สูบ',
+                        enabled: _isEditing,
+                      ),
+                      _buildEditableItem(
+                        icon: Icons.wine_bar,
+                        label: 'การดื่มแอลกอฮอล์',
+                        controller: _alcoholConsumptionController,
+                        hintText: 'ไม่ดื่ม',
+                        enabled: _isEditing,
+                      ),
+                      _buildEditableItem(
+                        icon: Icons.fitness_center,
+                        label: 'ความถี่การออกกำลังกาย',
+                        controller: _exerciseFrequencyController,
+                        hintText: 'เช่น 3 ครั้ง/สัปดาห์',
+                        enabled: _isEditing,
+                      ),
+                      _buildEditableItem(
+                        icon: Icons.bedtime,
+                        label: 'ชั่วโมงการนอน',
+                        controller: _sleepHoursController,
+                        hintText: 'เช่น 7 ชั่วโมง/คืน',
+                        enabled: _isEditing,
+                      ),
+                      _buildEditableItem(
+                        icon: Icons.water_drop_outlined,
+                        label: 'ปริมาณการดื่มน้ำ',
+                        controller: _waterIntakeController,
+                        hintText: 'เช่น 8 แก้ว/วัน',
+                        enabled: _isEditing,
+                      ),
+                    ]),
+                    const SizedBox(height: 16),
+                    if (notesValue.trim().isNotEmpty)
+                      _buildSection('บันทึกเพิ่มเติม', [
+                        _buildReadOnlyParagraph(
+                          icon: Icons.note_alt_outlined,
+                          label: 'หมายเหตุ',
+                          value: notesValue.trim(),
+                        ),
+                      ]),
+                    if (_isEditing) ...[
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: _isSaving ? null : _saveHealthData,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.black87,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: _isSaving
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                )
+                              : const Text(
+                                  'บันทึกข้อมูล',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 32),
+                  ],
+                ),
               ),
             ),
     );
   }
 
   Widget _buildBMICard() {
-    final bmi = _currentUser?.bmi ?? 0;
-    final bmiCategory = _currentUser?.bmiCategory ?? 'ไม่ทราบ';
-
-    Color bmiColor = Colors.grey;
-    if (bmi > 0) {
-      if (bmi < 18.5) {
-        bmiColor = Colors.blue;
-      } else if (bmi < 25) {
-        bmiColor = Colors.green;
-      } else if (bmi < 30) {
-        bmiColor = Colors.orange;
-      } else {
-        bmiColor = Colors.red;
-      }
-    }
+    final bmi = _calculateBMI();
+    final bmiValue = bmi != null ? bmi.toStringAsFixed(1) : 'ไม่ทราบ';
+    final category = bmi != null ? _bmiCategory(bmi) : 'ไม่ทราบ';
+    final color = bmi != null ? _bmiColor(bmi) : Colors.blueGrey;
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [bmiColor.withOpacity(0.1), bmiColor.withOpacity(0.05)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: bmiColor.withOpacity(0.3)),
+        color: color.withAlpha((255 * 0.08).round()),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withAlpha((255 * 0.2).round())),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -199,7 +540,7 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
                 'ดัชนีมวลกาย (BMI)',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
-              Icon(Icons.health_and_safety, color: bmiColor),
+              Icon(Icons.health_and_safety, color: color),
             ],
           ),
           const SizedBox(height: 12),
@@ -207,11 +548,11 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                bmi > 0 ? bmi.toStringAsFixed(1) : 'ไม่ทราบ',
+                bmiValue,
                 style: TextStyle(
-                  fontSize: 32,
+                  fontSize: 34,
                   fontWeight: FontWeight.bold,
-                  color: bmiColor,
+                  color: color,
                 ),
               ),
               Container(
@@ -220,78 +561,134 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: bmiColor.withOpacity(0.1),
+                  color: color.withAlpha((255 * 0.15).round()),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  bmiCategory,
-                  style: TextStyle(
-                    color: bmiColor,
-                    fontWeight: FontWeight.w500,
-                  ),
+                  category,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w600),
                 ),
               ),
             ],
           ),
-          if (bmi > 0) ...[
-            const SizedBox(height: 12),
-            Text(
-              _getBMIAdvice(bmi),
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-              textAlign: TextAlign.center,
-            ),
-          ],
+          const SizedBox(height: 12),
+          Text(
+            bmi != null
+                ? _getBMIAdvice(bmi)
+                : 'กรอกน้ำหนักและส่วนสูงเพื่อคำนวณ BMI',
+            style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+          ),
         ],
       ),
     );
   }
 
-  String _getBMIAdvice(double bmi) {
-    if (bmi < 18.5) {
-      return 'แนะนำให้เพิ่มน้ำหนักและรับประทานอาหารที่มีประโยชน์';
-    } else if (bmi < 25) {
-      return 'น้ำหนักของคุณอยู่ในเกณฑ์ปกติ ควรรักษาไว้';
-    } else if (bmi < 30) {
-      return 'แนะนำให้ลดน้ำหนักและออกกำลังกายสม่ำเสมอ';
-    } else {
-      return 'ควรปรึกษาแพทย์เพื่อวางแผนลดน้ำหนักอย่างถูกต้อง';
-    }
-  }
-
-  Widget _buildHealthCard(String title, List<Widget> children) {
+  Widget _buildSection(String title, List<Widget> children) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 1,
-            blurRadius: 3,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Text(
               title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
             ),
           ),
           ...children,
-          const SizedBox(height: 8),
         ],
       ),
     );
   }
 
-  Widget _buildHealthInfoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+  Widget _buildEditableItem({
+    required IconData icon,
+    required String label,
+    required TextEditingController controller,
+    TextInputType keyboardType = TextInputType.text,
+    String? hintText,
+    String? Function(String?)? validator,
+    int maxLines = 1,
+    bool enabled = false,
+  }) {
+    final displayText = controller.text.trim();
+    final showPlaceholder = displayText.isEmpty;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        crossAxisAlignment: maxLines > 1 && enabled
+            ? CrossAxisAlignment.start
+            : CrossAxisAlignment.center,
+        children: [
+          Icon(icon, size: 20, color: Colors.grey[600]),
+          const SizedBox(width: 12),
+          Expanded(
+            child: enabled
+                ? TextFormField(
+                    controller: controller,
+                    keyboardType: keyboardType,
+                    maxLines: maxLines,
+                    validator: validator,
+                    decoration: InputDecoration(
+                      hintText: hintText,
+                      labelText: label,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        showPlaceholder ? (hintText ?? 'ไม่ระบุ') : displayText,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: showPlaceholder
+                              ? Colors.grey[500]
+                              : Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReadOnlyItem({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    final display = value.trim().isEmpty ? 'ไม่ระบุ' : value;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
           Icon(icon, size: 20, color: Colors.grey[600]),
@@ -308,11 +705,11 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 Text(
-                  value,
+                  display,
                   style: const TextStyle(
-                    fontSize: 15,
+                    fontSize: 14,
                     fontWeight: FontWeight.w500,
                     color: Colors.black87,
                   ),
@@ -325,100 +722,56 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     );
   }
 
-  void _showEditHealthDialog() {
-    final TextEditingController heightController = TextEditingController(
-      text: _currentUser?.height != null && _currentUser!.height > 0
-          ? _currentUser!.height.toString()
-          : '',
-    );
-    final TextEditingController weightController = TextEditingController(
-      text: _currentUser?.weight != null && _currentUser!.weight > 0
-          ? _currentUser!.weight.toString()
-          : '',
-    );
-    final TextEditingController allergiesController = TextEditingController(
-      text: _currentUser?.allergies ?? '',
-    );
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('แก้ไขข้อมูลสุขภาพ'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: heightController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'ส่วนสูง (ซม.)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: weightController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'น้ำหนัก (กก.)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: allergiesController,
-                decoration: const InputDecoration(
-                  labelText: 'อาหารที่แพ้',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ยกเลิก'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                final height = double.tryParse(heightController.text) ?? 0;
-                final weight = double.tryParse(weightController.text) ?? 0;
-
-                // อัปเดตข้อมูลใน users collection
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(user!.uid)
-                    .update({
-                      'height': height,
-                      'weight': weight,
-                      'allergies': allergiesController.text,
-                    });
-
-                Navigator.pop(context);
-                _loadHealthData();
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('บันทึกข้อมูลสำเร็จ'),
-                    backgroundColor: Colors.green,
+  Widget _buildReadOnlyParagraph({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: Colors.grey[600]),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
                   ),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('เกิดข้อผิดพลาด: $e'),
-                    backgroundColor: Colors.red,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.black87,
                   ),
-                );
-              }
-            },
-            child: const Text('บันทึก'),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
+  }
+
+  String _getBMIAdvice(double bmi) {
+    if (bmi < 18.5) {
+      return 'แนะนำให้เพิ่มน้ำหนักและรับประทานอาหารที่มีประโยชน์';
+    } else if (bmi < 25) {
+      return 'น้ำหนักของคุณอยู่ในเกณฑ์ปกติ ควรรักษาไว้';
+    } else if (bmi < 30) {
+      return 'แนะนำให้ลดน้ำหนักและออกกำลังกายสม่ำเสมอ';
+    } else {
+      return 'ควรปรึกษาแพทย์เพื่อวางแผนลดน้ำหนักอย่างถูกต้อง';
+    }
   }
 }

@@ -1,4 +1,4 @@
-// lib/rawmaterial/widgets/search_filter_bar.dart — แถบค้นหา + ตัวกรองวันหมดอายุ
+﻿// lib/rawmaterial/widgets/search_filter_bar.dart — แถบค้นหา + ตัวกรองวันหมดอายุ
 import 'package:flutter/material.dart';
 
 class SearchFilterBar extends StatelessWidget {
@@ -67,14 +67,15 @@ class SearchFilterBar extends StatelessWidget {
                 fillColor: Colors.grey[50],
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(22),
-                  borderSide: BorderSide(color: Colors.yellow[600]!),
+                  borderSide: BorderSide(color: Colors.grey[300]!, width: 1.3),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(22),
+                  borderSide: BorderSide(color: Colors.grey[300]!, width: 1.3),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(22),
-                  borderSide: const BorderSide(
-                    color: Color(0xFFF59E0B),
-                    width: 2,
-                  ),
+                  borderSide: BorderSide(color: Colors.grey[400]!, width: 1.5),
                 ),
               ),
               onChanged: (v) => onSearchChanged(v),

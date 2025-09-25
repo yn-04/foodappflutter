@@ -63,25 +63,23 @@ class GroupedItemCard extends StatelessWidget {
     final status = _status(days);
 
     const radius = 15.0;
-    const frontHeight = 115.0; // ความสูงการ์ดหน้า
+    const frontHeight = 118.0; // ความสูงการ์ดหน้า
 
     // ===== การ์ดซ้อน (stacked แบบเลื่อนลง + แผ่นหลังแคบกว่า) =====
     return Stack(
       clipBehavior: Clip.none,
       children: [
         // แผ่นหลัง: เลื่อนลงเล็กน้อย และแคบกว่าการ์ดหน้า
-        // แผ่นหลัง: เลื่อนลงเล็กน้อย และแคบกว่าการ์ดหน้า
         Transform.translate(
           offset: const Offset(0, 10),
           child: IgnorePointer(
             child: Container(
-              // เดิม: EdgeInsets.fromLTRB(24, 6, 24, 6),
               margin: const EdgeInsets.fromLTRB(
                 24,
                 6,
                 24,
                 15,
-              ), // 👈 เพิ่มระยะห่างด้านล่าง
+              ), // แคบ + เว้นด้านล่างให้การ์ดอื่น
               height: frontHeight,
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -132,42 +130,54 @@ class GroupedItemCard extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // ชื่อกลุ่ม (อนุญาต 2 บรรทัด)
                           Text(
                             name,
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
+                            softWrap: true,
                             style: const TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 16,
                             ),
                           ),
                           const SizedBox(height: 4),
+
+                          // รายละเอียด: ตัดด้วย ellipsis เสมอ กัน overflow แนวนอน
                           Text(
                             hasSingleUnit
                                 ? '$totalQty $displayUnit • $category • ${items.length} รายการ'
                                 : '$category • ${items.length} รายการ (หลายหน่วย)',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: false,
                             style: TextStyle(
                               color: Colors.grey[700],
                               fontSize: 13,
                             ),
                           ),
                           const SizedBox(height: 6),
+
+                          // สถานะวันหมดอายุ
                           if (status.color != null && status.text != null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: status.color!.withOpacity(0.12),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                status.text!,
-                                style: TextStyle(
-                                  color: status.color,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: status.color!.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  status.text!,
+                                  style: TextStyle(
+                                    color: status.color,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
                                 ),
                               ),
                             ),

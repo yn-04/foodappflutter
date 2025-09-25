@@ -1,0 +1,160 @@
+diff --git a/lib/dashboard/dashboard.dart b/lib/dashboard/dashboard.dart
+index 0a7ec48..b90d042 100644
+--- a/lib/dashboard/dashboard.dart
++++ b/lib/dashboard/dashboard.dart
+@@
+-  Future<_DashboardData> _loadDashboardData() async {
+-    // นับจำนวนต่อหมวดหมู่ (ใช้ Categories.normalize)
+-    final counts = <String, int>{};
+-    for (final it in items) {
+-      final key0 = Categories.normalize(it.category);
+-      final key = key0.isEmpty ? 'ไม่ระบุ' : key0;
+-      counts[key] = (counts[key] ?? 0) + 1;
+-    }
+-
+-    // หา top category
+-    String? topCategory;
+-    int topCount = 0;
+-    counts.forEach((k, v) {
+-      if (v > topCount) {
+-        topCount = v;
+-        topCategory = k;
+-      }
+-    });
+-
++  Future<_DashboardData> _loadDashboardData() async {
+     final user = _auth.currentUser;
+     if (user == null) return _DashboardData.empty();
+ 
+     try {
+@@
+       final rawSnapshot = results[0] as QuerySnapshot<Map<String, dynamic>>;
+       final rawCountAgg = results[1] as AggregateQuerySnapshot;
+       final cookSnapshot = results[2] as QuerySnapshot<Map<String, dynamic>>;
+ 
+       final inventoryItems = rawSnapshot.docs
+           .map((d) => ShoppingItem.fromMap(d.data(), d.id))
+           .toList(growable: false);
++
++      // นับจำนวนต่อหมวดหมู่ (ใช้ Categories.normalize)
++      final counts = <String, int>{};
++      for (final it in inventoryItems) {
++        final key0 = Categories.normalize(it.category);
++        final key = key0.isEmpty ? 'ไม่ระบุ' : key0;
++        counts[key] = (counts[key] ?? 0) + 1;
++      }
++
++      // หา top category
++      String? topCategory;
++      int topCount = 0;
++      counts.forEach((k, v) {
++        if (v > topCount) {
++          topCount = v;
++          topCategory = k;
++        }
++      });
+ 
+       final totalQuantity = inventoryItems.fold<int>(
+         0,
+         (acc, it) => acc + it.quantity,
+       );
+@@
+       final expiringSoonCount = inventoryItems.where((it) {
+         final dl = it.daysLeft;
+         return dl != null && dl >= 0 && dl <= 3;
+       }).length;
+ 
+-      var expiringTodayItems = items
+-          .where((it) => (it.daysLeft ?? -1) == 0)
+-          .toList(growable: false);
++      var expiringTodayItems = inventoryItems
++          .where((it) => (it.daysLeft ?? -1) == 0)
++          .toList(growable: false);
+       if (expiringTodayItems.length > 10) {
+         expiringTodayItems = expiringTodayItems.take(10).toList();
+       }
+ 
+-      final nearestExpiryItem = items
++      final nearestExpiryItem = inventoryItems
+           .where((it) => it.daysLeft != null && it.daysLeft! >= 0)
+           .fold<ShoppingItem?>(null, (cur, next) {
+             if (cur == null) return next;
+             return next.daysLeft! < cur.daysLeft! ? next : cur;
+           });
+@@
+       }
+ 
+       if (!mounted) return;
+ 
+       setState(() {
+         _currentUser = currentUser.copyWith(
+           height: height,
+           weight: weight,
+           allergies: allergies,
+         );
+-        final updatedExtras = {...?_additionalHealthData};
+-        updatedExtras.addAll(healthUpdates);
+-        for (final key in healthDeletes.keys) {
+-          updatedExtras.remove(key);
+-        }
+-        _additionalHealthData = updatedExtras.isEmpty ? null : updatedExtras;
+-        _populateControllers();
+-        _isEditing = false;
++        final updatedExtras = {...?_additionalHealthData};
++        updatedExtras.addAll(healthUpdates);
++        for (final key in healthDeletes.keys) {
++          updatedExtras.remove(key);
++        }
++        _additionalHealthData = updatedExtras.isEmpty ? null : updatedExtras;
++        _populateControllers();
++        _isEditing = false;
+       });
+       _showSnackBar('บันทึกข้อมูลสำเร็จ');
+     } catch (e) {
+       if (!mounted) return;
+       _showSnackBar('เกิดข้อผิดพลาด: ', success: false);
+@@
+-      return _DashboardData(
+-        totalItems: rawCountAgg.count ?? inventoryItems.length,
++      return _DashboardData(
++        totalItems: rawCountAgg.count,
+         totalQuantity: totalQuantity,
+         expiringSoonCount: expiringSoonCount,
+         expiredCount: expiredCount,
+         expiringTodayItems: expiringTodayItems,
+         nearestExpiryItem: nearestExpiryItem,
+         weeklyCooking: weeklyUsage,
++        categoryCounts: counts,
++        topCategory: topCategory,
+       );
+     } catch (e, st) {
+       debugPrint('Load dashboard failed: ');
+       debugPrint(st.toString());
+       rethrow;
+@@
+-      final nearest = data.nearestExpiryItem;
+-
+       return RefreshIndicator(
+         onRefresh: _refresh,
+         child: ListView(
+           physics: const AlwaysScrollableScrollPhysics(),
+           padding: const EdgeInsets.all(16),
+           children: [
+             ExpiringTodaySection(data: data),
+             const SizedBox(height: 24),
+             _buildWeeklySection(context, data),
+             const SizedBox(height: 24),
+             _buildMenuIdeasSection(context),
+             const SizedBox(height: 24),
+             InventorySummarySection(
+               totalItems: data.totalItems,
+-              counts: data.categoryCounts,
+-              topCategory: data.topCategory,
++              counts: data.categoryCounts,
++              topCategory: data.topCategory,
+             ),
+           ],
+         ),
+       );
+     }
+   }
