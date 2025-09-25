@@ -30,6 +30,8 @@ class IngredientTranslator {
     'ปลาหมึก': 'squid',
     'ปลา': 'fish',
     'ปลาแซลมอน': 'salmon',
+    'แซลมอน': 'salmon',
+    'แซลม่อน': 'salmon',
     'ปลาทู': 'mackerel',
     'ปลานิล': 'tilapia',
     'ปลาทูน่า': 'tuna',
@@ -90,6 +92,12 @@ class IngredientTranslator {
     'น้ำมัน': 'oil',
   };
 
+  /// Precomputed map with Thai diacritics stripped from keys for robust matching
+  static final Map<String, String> _strippedKeyMap = {
+    for (final e in _translationMap.entries)
+      _stripThaiMarks(e.key): e.value,
+  };
+
   /// 📌 Cache (เรียนรู้จาก RapidAPI)
   static final Map<String, String> _learnedCache = {};
 
@@ -119,7 +127,7 @@ class IngredientTranslator {
 
   /// แปลชื่อวัตถุดิบ → อังกฤษ
   static String translate(String name) {
-    final normalized = name.trim().toLowerCase();
+    final normalized = _stripThaiMarks(name.trim().toLowerCase());
 
     if (_learnedCache.containsKey(normalized)) {
       return _learnedCache[normalized]!;
@@ -129,7 +137,12 @@ class IngredientTranslator {
       return _translationMap[normalized]!;
     }
 
-    for (final entry in _translationMap.entries) {
+    // Try stripped-key exact/substring match
+    if (_strippedKeyMap.containsKey(normalized)) {
+      return _strippedKeyMap[normalized]!;
+    }
+
+    for (final entry in _strippedKeyMap.entries) {
       if (normalized.contains(entry.key)) return entry.value;
     }
 
@@ -143,10 +156,44 @@ class IngredientTranslator {
 
   /// Auto-learn mapping จาก RapidAPI
   static Future<void> learnMapping(String original, String suggested) async {
-    final key = original.trim().toLowerCase();
+    final key = _stripThaiMarks(original.trim().toLowerCase());
     final value = suggested.trim().toLowerCase();
+
+    bool containsDigit(String s) => RegExp(r"[0-9]").hasMatch(s);
+    final noisyWords = {
+      'ounces','ounce','oz','cup','cups','tbsp','tablespoon','tsp','teaspoon',
+      'g','kg','ml','l','slices','slice','for','garnish','carton','package','pack'
+    };
+    bool hasNoisyWord(String s) {
+      final words = s.split(RegExp(r"\s+"));
+      for (final w in words) {
+        if (noisyWords.contains(w)) return true;
+      }
+      return false;
+    }
+
+    final tooLong = key.length > 40 || value.length > 40;
+    final tooManyWords =
+        key.split(RegExp(r"\s+")).length > 5 || value.split(RegExp(r"\s+")).length > 5;
+
+    if (containsDigit(key) ||
+        containsDigit(value) ||
+        hasNoisyWord(key) ||
+        hasNoisyWord(value) ||
+        tooLong ||
+        tooManyWords) {
+      debugPrint("🧠 Skip learning noisy mapping: $original → $suggested");
+      return;
+    }
+
     _learnedCache[key] = value;
     debugPrint("🧠 Learned mapping: $original → $suggested");
     await saveCache();
+  }
+
+  /// Remove Thai tone/diacritic marks to make matching robust
+  static String _stripThaiMarks(String input) {
+    // Remove: 31 (mai han-akat), 34-3A (vowels), 47-4E (combining marks)
+    return input.replaceAll(RegExp(r"[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]"), "");
   }
 }

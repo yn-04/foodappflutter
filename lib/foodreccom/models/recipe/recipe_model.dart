@@ -1,4 +1,3 @@
-//lib/foodreccom/models/recipe/recipe_model.dart
 import 'package:flutter/material.dart';
 import 'recipe_ingredient.dart';
 import 'cooking_step.dart';
@@ -75,7 +74,9 @@ class RecipeModel {
       difficulty: json['difficulty'] ?? 'ปานกลาง',
       servings: json['servings'] ?? 2,
       category: json['category'] ?? 'อาหารจานหลัก',
-      nutrition: NutritionInfo.fromJson(json['nutrition'] ?? {}),
+      nutrition: json['nutrition'] != null
+          ? NutritionInfo.fromJson(json['nutrition'])
+          : NutritionInfo.empty(),
       imageUrl: json['imageUrl'] ?? json['image_url'],
       tags: List<String>.from(json['tags'] ?? []),
       source: json['source'] ?? "AI",
@@ -115,19 +116,18 @@ class RecipeModel {
       difficulty: 'ไม่ระบุ',
       servings: json['servings'] ?? 1,
       category: 'ไม่ระบุ',
-      nutrition: NutritionInfo.fromJson(
-        json['nutrition']?['nutrients'] != null
-            ? {
-                'calories':
-                    (json['nutrition']['nutrients'].firstWhere(
-                              (n) => n['name'] == 'Calories',
-                              orElse: () => {'amount': 0},
-                            )['amount'] ??
-                            0)
-                        .toDouble(),
-              }
-            : {},
-      ),
+      nutrition:
+          (json['nutrition'] != null && json['nutrition']['nutrients'] != null)
+          ? NutritionInfo.fromJson({
+              'calories':
+                  (json['nutrition']['nutrients'].firstWhere(
+                            (n) => n['name'] == 'Calories',
+                            orElse: () => {'amount': 0},
+                          )['amount'] ??
+                          0)
+                      .toDouble(),
+            })
+          : NutritionInfo.empty(),
       imageUrl: json['image'],
       tags: [],
       source: 'RapidAPI',
@@ -159,7 +159,9 @@ class RecipeModel {
       difficulty: json['difficulty'] ?? 'ง่าย',
       servings: json['servings'] ?? 1,
       category: json['category'] ?? 'ไม่ระบุ',
-      nutrition: NutritionInfo.fromJson(json['nutrition'] ?? {}),
+      nutrition: json['nutrition'] != null
+          ? NutritionInfo.fromJson(json['nutrition'])
+          : NutritionInfo.empty(),
       imageUrl: json['imageUrl'] ?? json['image_url'],
       tags: (json['tags'] as List? ?? []).cast<String>(),
       source: json['source'],

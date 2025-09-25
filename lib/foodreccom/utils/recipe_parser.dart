@@ -45,6 +45,15 @@ class RecipeParser {
       sodium: nutritionMap['sodium'] ?? 0,
     );
 
+    final rawDishTypes = (data['dishTypes'] as List?) ?? [];
+    final dishTypes = rawDishTypes
+        .map((type) => type == null ? '' : type.toString().trim())
+        .where((type) => type.isNotEmpty)
+        .cast<String>()
+        .toList();
+
+    final primaryDishType = dishTypes.isNotEmpty ? dishTypes.first : '';
+
     return RecipeModel(
       id: 'rapid_${data['id']}',
       name: data['title'] ?? 'ไม่ระบุชื่อ',
@@ -58,9 +67,7 @@ class RecipeParser {
       prepTime: data['preparationMinutes'] ?? 15,
       difficulty: getDifficulty(data['readyInMinutes'] ?? 30),
       servings: data['servings'] ?? 2,
-      category: translateDishType(
-        (data['dishTypes'] as List?)?.first?.toString() ?? '',
-      ),
+      category: translateDishType(primaryDishType),
       nutrition: nutrition,
       imageUrl: data['image'],
       tags: getTags(data),
@@ -108,6 +115,13 @@ class RecipeParser {
     if (data['readyInMinutes'] != null && data['readyInMinutes'] <= 30) {
       tags.add('ทำเร็ว');
     }
+    // cuisines from API (keep english lowercase tags for filtering)
+    final cuisines = (data['cuisines'] as List? ?? [])
+        .map((c) => c?.toString()?.trim()?.toLowerCase() ?? '')
+        .where((c) => c.isNotEmpty)
+        .cast<String>()
+        .toList();
+    tags.addAll(cuisines);
     return tags;
   }
 

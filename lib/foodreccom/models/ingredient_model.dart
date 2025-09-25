@@ -69,6 +69,10 @@ class IngredientModel {
 
   bool get isNearExpiry => daysToExpiry <= 3;
   bool get isUrgentExpiry => daysToExpiry <= 1;
+  bool get isExpired =>
+      expiryDate != null && expiryDate!.isBefore(DateTime.now());
+  int get daysToExpiryRaw =>
+      expiryDate == null ? 999 : expiryDate!.difference(DateTime.now()).inDays;
   bool get isFrequentlyUsed => usageCount >= 5 || utilizationRate >= 0.7;
 
   bool get isUnderutilized {
@@ -116,6 +120,7 @@ class IngredientModel {
       'days_to_expiry': daysToExpiry,
       'is_near_expiry': isNearExpiry,
       'is_urgent_expiry': isUrgentExpiry,
+      'is_expired': isExpired,
       'usage_count': usageCount,
       'is_frequently_used': isFrequentlyUsed,
       'is_underutilized': isUnderutilized,

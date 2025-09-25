@@ -6,18 +6,22 @@ import '../models/recipe/recipe.dart';
 import '../services/ai_recommendation_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../services/user_recipe_service.dart';
 
 class RecommendationProvider extends ChangeNotifier {
   final AIRecommendationService _aiService = AIRecommendationService();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final UserRecipeService _userRecipeService = UserRecipeService();
 
   List<RecipeModel> _recommendations = [];
+  List<RecipeModel> _userRecipes = [];
   List<IngredientModel> _ingredients = [];
   bool _isLoading = false;
   String? _error;
 
   List<RecipeModel> get recommendations => _recommendations;
+  List<RecipeModel> get userRecipes => _userRecipes;
   List<IngredientModel> get ingredients => _ingredients;
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -73,10 +77,15 @@ class RecommendationProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // โหลดสูตรผู้ใช้ด้วย
+      try {
+        _userRecipes = await _userRecipeService.getUserRecipes();
+      } catch (_) {}
       final recs = await _aiService.getRecommendations(_ingredients);
 
       // แยก isolate เผื่อ sort/filter ภายหลัง
-      _recommendations = await compute(_sortRecommendations, recs);
+      final sorted = await compute(_sortRecommendations, recs);
+      _recommendations = [..._userRecipes, ...sorted];
 
       if (_recommendations.isEmpty) {
         _error = 'ไม่สามารถแนะนำเมนูได้ กรุณาลองใหม่อีกครั้ง';
@@ -89,6 +98,14 @@ class RecommendationProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  // -------- User recipes --------
+  Future<void> addUserRecipe(RecipeModel recipe) async {
+    await _userRecipeService.addUserRecipe(recipe);
+    _userRecipes = await _userRecipeService.getUserRecipes();
+    _recommendations = [..._userRecipes, ..._recommendations];
+    notifyListeners();
   }
 
   static List<RecipeModel> _sortRecommendations(List<RecipeModel> recs) {

@@ -16,6 +16,18 @@ class NutritionInfo {
     required this.sodium,
   });
 
+  /// ✅ ค่า default สำหรับกรณีไม่มีข้อมูล
+  factory NutritionInfo.empty() {
+    return NutritionInfo(
+      calories: 0,
+      protein: 0,
+      carbs: 0,
+      fat: 0,
+      fiber: 0,
+      sodium: 0,
+    );
+  }
+
   /// ✅ แปลงจาก Map (Firestore หรือ API)
   factory NutritionInfo.fromMap(Map<String, dynamic> map) {
     return NutritionInfo(
