@@ -1,220 +1,303 @@
-// lib/services/ai_recommendation_service.dart
+//lib/foodreccom/services/ai_recommendation_service.dart
 import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 import '../models/ingredient_model.dart';
-import '../models/recipe_model.dart';
+import '../models/recipe/recipe.dart';
+
+class ApiKeyChecker {
+  final List<String> _apiKeys;
+  final List<String> _validKeys = [];
+
+  ApiKeyChecker(this._apiKeys);
+
+  Future<List<String>> checkKeys() async {
+    _validKeys.clear();
+    for (var key in _apiKeys) {
+      final model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: key);
+      try {
+        final response = await model
+            .generateContent([Content.text("ping")])
+            .timeout(const Duration(seconds: 5));
+        if (response.text != null && response.text!.isNotEmpty) {
+          print("✅ Key ใช้ได้: ${key.substring(0, 6)}...");
+          _validKeys.add(key);
+        }
+      } catch (e) {
+        print("❌ Key ใช้ไม่ได้/Quota หมด: ${key.substring(0, 6)}... → $e");
+      }
+    }
+    return _validKeys;
+  }
+}
 
 class AIRecommendationService {
-  static const String _apiKey = 'AIzaSyCy1cWTsLIlBDsY1BfaUpgUw5ArL_aSrc0';
   static const String _cacheKey = 'cached_recommendations';
 
-  late final GenerativeModel _model;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  late int _rateLimitMs;
+  late int _cacheDurationMs;
+  late List<String> _apiKeys;
+  int _currentKeyIndex = 0;
+
+  late GenerativeModel _primaryModel;
+  late GenerativeModel _fallbackModel;
+
+  static final Map<String, int> _lastRequestTime = {};
 
   AIRecommendationService() {
-    _model = GenerativeModel(
+    final apiKeysStr = dotenv.env['GEMINI_API_KEYS'];
+    if (apiKeysStr == null || apiKeysStr.isEmpty) {
+      throw Exception('❌ GEMINI_API_KEYS is missing in .env');
+    }
+    _apiKeys = apiKeysStr.split(',').map((k) => k.trim()).toList();
+
+    _rateLimitMs = int.tryParse(dotenv.env['AI_RATE_LIMIT'] ?? '') ?? 30000;
+    _cacheDurationMs =
+        int.tryParse(dotenv.env['AI_CACHE_DURATION'] ?? '') ?? 7200000;
+
+    print("⚙️ RateLimit=$_rateLimitMs ms | CacheDuration=$_cacheDurationMs ms");
+
+    final checker = ApiKeyChecker(_apiKeys);
+    checker.checkKeys().then((validKeys) {
+      if (validKeys.isEmpty) throw Exception("❌ ไม่มี API Key ไหนที่ใช้ได้");
+      _apiKeys = validKeys;
+      print("🔑 ใช้งานได้ ${_apiKeys.length} keys");
+      _initModels();
+    });
+  }
+
+  void _initModels() {
+    final apiKey = _apiKeys[_currentKeyIndex];
+    print(
+      "👉 Using API Key[${_currentKeyIndex + 1}/${_apiKeys.length}]: ${apiKey.substring(0, 6)}...",
+    );
+
+    _primaryModel = GenerativeModel(
       model: 'gemini-1.5-flash',
-      apiKey: _apiKey,
+      apiKey: apiKey,
       generationConfig: GenerationConfig(
         temperature: 0.7,
         topK: 40,
         topP: 0.95,
         maxOutputTokens: 4096,
+        responseMimeType: "application/json",
+      ),
+    );
+
+    _fallbackModel = GenerativeModel(
+      model: 'gemini-2.5-pro',
+      apiKey: apiKey,
+      generationConfig: GenerationConfig(
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.9,
+        maxOutputTokens: 6144,
+        responseMimeType: "application/json",
       ),
     );
   }
 
-  // เปลี่ยนชื่อจาก getDetailedRecommendations เป็น getRecommendations
-  Future<List<RecipeModel>> getRecommendations(
-    List<IngredientModel> ingredients,
-  ) async {
-    try {
-      // ตรวจสอบ cache ก่อน
-      final cached = await _getCachedRecommendations(ingredients);
-      if (cached != null) {
-        print('🎯 ใช้ข้อมูลจาก cache');
-        return cached;
-      }
-
-      print('🤖 เรียก Gemini AI...');
-
-      final prompt = _buildDetailedPrompt(ingredients);
-      final response = await _model
-          .generateContent([Content.text(prompt)])
-          .timeout(Duration(seconds: 45));
-
-      if (response.text == null) {
-        throw Exception('AI ไม่สามารถสร้างคำแนะนำได้');
-      }
-
-      final recipes = _parseDetailedResponse(response.text!);
-
-      // บันทึก cache
-      await _cacheRecommendations(ingredients, recipes);
-
-      return recipes;
-    } catch (e) {
-      print('❌ AI Error: $e');
-      return _getFallbackRecommendations(ingredients);
-    }
+  void _rotateApiKey() {
+    _currentKeyIndex = (_currentKeyIndex + 1) % _apiKeys.length;
+    print("🔄 Rotate API Key → index=$_currentKeyIndex");
+    _initModels();
   }
 
-  // แทนที่ method _buildDetailedPrompt ในไฟล์ ai_recommendation_service.dart
+  String _getUserCacheKey() {
+    final user = _auth.currentUser;
+    return user == null ? _cacheKey : "${_cacheKey}_${user.uid}";
+  }
 
-  // ✅ ปรับปรุง prompt ให้ชัดเจนขึ้น
-  String _buildDetailedPrompt(List<IngredientModel> ingredients) {
+  Future<List<RecipeModel>> getRecommendations(
+    List<IngredientModel> ingredients, {
+    bool forceRefresh = false, // ✅ เพิ่ม parameter นี้
+  }) async {
+    final userId = _auth.currentUser?.uid ?? 'guest';
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final lastTime = _lastRequestTime[userId] ?? 0;
+
+    // Rate limit (ยกเว้นถ้า forceRefresh = true)
+    if (!forceRefresh && now - lastTime < _rateLimitMs) {
+      print("⏳ Rate limit → ใช้ cache/fallback");
+      final cached = await _getCachedRecommendations(ingredients);
+      if (cached != null) return cached;
+      return _getFallbackRecommendations(ingredients);
+    }
+
+    _lastRequestTime[userId] = now;
+
+    // Cache (ยกเว้นถ้า forceRefresh = true)
+    if (!forceRefresh) {
+      final cached = await _getCachedRecommendations(ingredients);
+      if (cached != null) {
+        print('🎯 ใช้ข้อมูลจาก cache (user=$userId)');
+        return cached;
+      }
+    } else {
+      print("🔄 Force refresh → ข้าม cache");
+    }
+
+    // AI call
+    print('🤖 เรียก Gemini...');
+    final prompt = _buildPrompt(ingredients);
+
+    String? responseText;
+    try {
+      final response = await _primaryModel
+          .generateContent([Content.text(prompt)])
+          .timeout(const Duration(seconds: 60));
+      responseText = response.text;
+    } catch (e) {
+      if (e.toString().contains("Quota") || e.toString().contains("429")) {
+        print("🚫 Quota เต็ม → Rotate Key");
+        _rotateApiKey();
+        return getRecommendations(ingredients, forceRefresh: forceRefresh);
+      }
+      print("⚠️ Flash error → ใช้ Pro");
+      final response = await _fallbackModel
+          .generateContent([Content.text(prompt)])
+          .timeout(const Duration(seconds: 60));
+      responseText = response.text;
+    }
+
+    if (responseText == null) {
+      print("❌ ไม่มี response");
+      return _getFallbackRecommendations(ingredients);
+    }
+
+    final recipes = _parseRecipes(responseText);
+    await _cacheRecommendations(ingredients, recipes);
+    return recipes;
+  }
+
+  String _buildPrompt(List<IngredientModel> ingredients) {
     final nearExpiry = ingredients.where((i) => i.isNearExpiry).toList();
     final available = ingredients.where((i) => !i.isNearExpiry).toList();
 
     return '''
-คุณเป็นเชฟมืออาชีพและนักโภชนาการ กรุณาแนะนำเมนูอาหาร 3-5 เมนู
-
-**วัตถุดิบใกล้หมดอายุ (ให้ความสำคัญ)**:
-${nearExpiry.map((i) => '- ${i.name}: ${i.quantity} ${i.unit} (หมดอายุใน ${i.daysToExpiry} วัน)').join('\n')}
-
-**วัตถุดิบที่มี**:
+คุณเป็นเชฟ AI แนะนำเมนูอาหาร 3-5 เมนู ใช้วัตถุดิบใกล้หมดอายุก่อน
+**ใกล้หมดอายุ**:
+${nearExpiry.map((i) => '- ${i.name}: ${i.quantity} ${i.unit} (${i.daysToExpiry} วัน)').join('\n')}
+**ที่มี**:
 ${available.map((i) => '- ${i.name}: ${i.quantity} ${i.unit}').join('\n')}
-
-**ตอบเฉพาะ JSON รูปแบบนี้เท่านั้น**:
-
+ตอบ JSON:
 {
-  "recommendations": [
-    {
-      "menu_name": "ไก่ผัดกะเพรา",
-      "description": "เมนูยอดฮิต ใช้ไก่และกะเพราที่ใกล้หมดอายุ",
-      "match_score": 95,
-      "reason": "ใช้ไก่และกะเพราที่ใกล้หมดอายุได้หมด",
-      "category": "อาหารจานหลัก",
-      "cooking_time": 20,
-      "prep_time": 10,
-      "difficulty": "ง่าย",
-      "servings": 2,
-      "ingredients": [
-        {"name": "ไก่", "amount": 300, "unit": "กรัม", "is_optional": false},
-        {"name": "กะเพรา", "amount": 100, "unit": "กรัม", "is_optional": false},
-        {"name": "พริกขี้หนู", "amount": 5, "unit": "เม็ด", "is_optional": true}
-      ],
-      "missing_ingredients": ["ซอสปรุงรส"],
-      "steps": [
-        {"step_number": 1, "instruction": "หั่นไก่เป็นชิ้นเล็ก", "time_minutes": 5, "tips": ["หั่นตามเนื้อไก่"]},
-        {"step_number": 2, "instruction": "ผัดไก่จนสุก", "time_minutes": 10, "tips": ["ใช้ไฟแรง"]}
-      ],
-      "nutrition": {"calories": 350, "protein": 25, "carbs": 15, "fat": 20, "fiber": 3, "sodium": 800},
-      "tags": ["ง่าย", "ไว", "ไทย"],
-      "source": "สูตรดั้งเดิม",
-      "source_url": ""
-    }
-  ]
+ "recommendations": [ ... ]
 }
-
-**สำคัญมาก**:
-- amount ต้องเป็นตัวเลขเท่านั้น (เช่น 5, 300, 1.5)
-- ห้ามใส่ช่วง (เช่น 5-10)
-- ห้ามใส่ข้อความอื่นนอกจาก JSON
-- ตรวจสอบรูปแบบ JSON ให้ถูกต้อง
-- ใส่ครบทุก field ตามตัวอย่าง
 ''';
   }
-  // แทนที่ method _parseDetailedResponse ในไฟล์ ai_recommendation_service.dart
 
-  List<RecipeModel> _parseDetailedResponse(String response) {
+  List<RecipeModel> _parseRecipes(String response) {
     try {
-      // ทำความสะอาด response
-      String cleanJson = response
-          .replaceAll('```json', '')
-          .replaceAll('```', '')
-          .trim();
-
-      // หา JSON object
-      final jsonStart = cleanJson.indexOf('{');
-      final jsonEnd = cleanJson.lastIndexOf('}') + 1;
-
-      if (jsonStart != -1 && jsonEnd > jsonStart) {
-        cleanJson = cleanJson.substring(jsonStart, jsonEnd);
-      }
-
-      // ✅ แก้ไขปัญหา amount ที่เป็น range (เช่น 5-10)
-      cleanJson = _fixJsonIssues(cleanJson);
-
-      final Map<String, dynamic> parsed = json.decode(cleanJson);
-      final List<dynamic> recommendations = parsed['recommendations'] ?? [];
-
-      return recommendations
-          .map((json) => RecipeModel.fromAI(json))
-          .where((recipe) => recipe.name.isNotEmpty)
-          .toList();
+      final cleanJson = _sanitizeJson(response);
+      final parsed = json.decode(cleanJson) as Map<String, dynamic>;
+      final recs = parsed['recommendations'] as List? ?? [];
+      return recs.map((r) => RecipeModel.fromAI(r)).toList();
     } catch (e) {
-      print('❌ Parse Error: $e');
-      print('Response: $response');
+      print("❌ Parse error: $e");
+      print("Raw: $response");
       return [];
     }
   }
 
-  // ✅ ปรับปรุง method สำหรับแก้ไข JSON issues
-  String _fixJsonIssues(String jsonString) {
-    // แก้ไขปัญหา amount ที่เป็น range
-    // เช่น "amount": 5-10 → "amount": "5-10"
-    jsonString = jsonString.replaceAllMapped(
+  String _sanitizeJson(String response) {
+    String clean = response
+        .replaceAll("```json", "")
+        .replaceAll("```", "")
+        .trim();
+
+    final start = clean.indexOf("{");
+    final end = clean.lastIndexOf("}") + 1;
+    if (start != -1 && end > start) clean = clean.substring(start, end);
+
+    clean = clean.replaceAllMapped(
       RegExp(r'"amount":\s*(\d+\.?\d*)-(\d+\.?\d*)'),
-      (match) => '"amount": "${match.group(1)}-${match.group(2)}"',
+      (m) {
+        final avg = (double.parse(m.group(1)!) + double.parse(m.group(2)!)) / 2;
+        return '"amount": $avg';
+      },
     );
 
-    // แก้ไขปัญหา amount ที่เป็นจำนวนเต็มหรือทศนิยมธรรมดา
-    // ให้แน่ใจว่าเป็น number ที่ถูกต้อง
-    jsonString = jsonString.replaceAllMapped(
-      RegExp(r'"amount":\s*"?(\d+\.?\d*)"?(?!["\d-])'),
-      (match) => '"amount": ${match.group(1)}',
-    );
-
-    // ลบ trailing commas ที่ผิดรูปแบบ
-    jsonString = jsonString.replaceAll(RegExp(r',(\s*[}\]])'), r'$1');
-
-    // แก้ไข missing commas ระหว่าง objects
-    jsonString = jsonString.replaceAll(RegExp(r'}(\s*{)'), r'},$1');
-
-    // แก้ไข missing commas ระหว่าง arrays
-    jsonString = jsonString.replaceAll(RegExp(r'](\s*\[)'), r'],$1');
-
-    // แก้ไขปัญหา quotes ผิดรูปแบบ
-    jsonString = jsonString.replaceAll(RegExp(r'([{,]\s*)(\w+):'), r'$1"$2":');
-
-    return jsonString;
+    clean = clean.replaceAll(RegExp(r',(\s*[}\]])'), r'$1');
+    return clean;
   }
 
+  // --- Cache ---
+  Future<void> _cacheRecommendations(
+    List<IngredientModel> ingredients,
+    List<RecipeModel> recipes,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cacheData = {
+        'ingredients_hash': _getIngredientsHash(ingredients),
+        'recipes': recipes.map((r) => r.toJson()).toList(),
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString(_getUserCacheKey(), json.encode(cacheData));
+      print("✅ Cache saved (user=${_auth.currentUser?.uid})");
+    } catch (e) {
+      print('❌ Cache save error: $e');
+    }
+  }
+
+  Future<List<RecipeModel>?> _getCachedRecommendations(
+    List<IngredientModel> ingredients,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_getUserCacheKey());
+      if (cached == null) return null;
+
+      final data = json.decode(cached);
+      final timestamp = data['timestamp'] as int;
+
+      if (DateTime.now().millisecondsSinceEpoch - timestamp >
+          _cacheDurationMs) {
+        print("⌛ Cache expired");
+        return null;
+      }
+
+      if (data['ingredients_hash'] != _getIngredientsHash(ingredients)) {
+        print("🔄 Cache mismatch");
+        return null;
+      }
+
+      final recipesData = data['recipes'] as List;
+      return recipesData.map((d) => RecipeModel.fromAI(d)).toList();
+    } catch (e) {
+      print('❌ Cache load error: $e');
+      return null;
+    }
+  }
+
+  // --- Fallback ---
   List<RecipeModel> _getFallbackRecommendations(
     List<IngredientModel> ingredients,
   ) {
-    final nearExpiry = ingredients.where((i) => i.isNearExpiry).toList();
-
-    if (nearExpiry.isEmpty) {
+    if (ingredients.isEmpty) {
       return [
         RecipeModel(
-          id: 'fallback_1',
+          id: 'fallback_basic',
           name: 'ข้าวผัดไข่',
-          description: 'เมนูง่ายที่ทำได้รวดเร็ว',
-          matchScore: 70,
-          reason: 'เมนูพื้นฐานที่ทำได้จากวัตถุดิบที่มี',
+          description: 'เมนูง่าย ใช้วัตถุดิบพื้นฐาน',
+          matchScore: 60,
+          reason: 'เมนู fallback พื้นฐาน',
           ingredients: [
-            RecipeIngredient(name: 'ข้าวสวย', amount: 2, unit: 'จาน'),
-            RecipeIngredient(name: 'ไข่ไก่', amount: 2, unit: 'ฟอง'),
+            RecipeIngredient(name: 'ข้าวสวย', amount: 1, unit: 'จาน'),
+            RecipeIngredient(name: 'ไข่ไก่', amount: 1, unit: 'ฟอง'),
           ],
           missingIngredients: [],
-          steps: [
-            CookingStep(
-              stepNumber: 1,
-              instruction: 'ตีไข่ให้เข้ากัน',
-              timeMinutes: 2,
-            ),
-            CookingStep(
-              stepNumber: 2,
-              instruction: 'ผัดไข่ให้สุก แล้วใส่ข้าว',
-              timeMinutes: 5,
-            ),
-          ],
+          steps: [],
           cookingTime: 10,
           prepTime: 5,
           difficulty: 'ง่าย',
-          servings: 2,
+          servings: 1,
           category: 'อาหารจานหลัก',
           nutrition: NutritionInfo(
             calories: 350,
@@ -224,39 +307,23 @@ ${available.map((i) => '- ${i.name}: ${i.quantity} ${i.unit}').join('\n')}
             fiber: 1,
             sodium: 400,
           ),
-          source: 'สูตรพื้นฐาน',
+          source: 'Fallback',
         ),
       ];
     }
 
-    return nearExpiry.map((ingredient) {
+    return ingredients.take(3).map((i) {
       return RecipeModel(
-        id: 'fallback_${ingredient.name}',
-        name: 'เมนูจาก${ingredient.name}',
-        description: 'เมนูที่ใช้${ingredient.name}เป็นหลัก',
-        matchScore: 60,
-        reason:
-            'ใช้${ingredient.name}ที่ใกล้หมดอายุใน ${ingredient.daysToExpiry} วัน',
+        id: 'fallback_${i.name}',
+        name: 'เมนูจาก${i.name}',
+        description: 'ใช้ ${i.name} เป็นวัตถุดิบหลัก',
+        matchScore: i.priorityScore,
+        reason: 'เมนู fallback',
         ingredients: [
-          RecipeIngredient(
-            name: ingredient.name,
-            amount: ingredient.quantity.toDouble(),
-            unit: ingredient.unit,
-          ),
+          RecipeIngredient(name: i.name, amount: i.quantity, unit: i.unit),
         ],
         missingIngredients: ['เครื่องปรุง'],
-        steps: [
-          CookingStep(
-            stepNumber: 1,
-            instruction: 'เตรียม${ingredient.name}และวัตถุดิบอื่นๆ',
-            timeMinutes: 5,
-          ),
-          CookingStep(
-            stepNumber: 2,
-            instruction: 'ปรุงอาหารตามวิธีที่ถนัด',
-            timeMinutes: 15,
-          ),
-        ],
+        steps: [],
         cookingTime: 20,
         prepTime: 5,
         difficulty: 'ง่าย',
@@ -270,80 +337,12 @@ ${available.map((i) => '- ${i.name}: ${i.quantity} ${i.unit}').join('\n')}
           fiber: 3,
           sodium: 500,
         ),
-        source: 'สูตรแนะนำพื้นฐาน',
+        source: 'Fallback',
       );
     }).toList();
   }
 
-  // Cache functions
-  Future<void> _cacheRecommendations(
-    List<IngredientModel> ingredients,
-    List<RecipeModel> recipes,
-  ) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final cacheData = {
-        'ingredients_hash': _getIngredientsHash(ingredients),
-        'recipes': recipes
-            .map(
-              (r) => {
-                'menu_name': r.name,
-                'description': r.description,
-                'match_score': r.matchScore,
-                'reason': r.reason,
-                'ingredients': r.ingredients.map((i) => i.toJson()).toList(),
-                'missing_ingredients': r.missingIngredients,
-                'cooking_time': r.cookingTime,
-                'prep_time': r.prepTime,
-                'difficulty': r.difficulty,
-                'servings': r.servings,
-                'category': r.category,
-                'nutrition': r.nutrition.toJson(),
-                'tags': r.tags,
-                'source': r.source,
-                'source_url': r.sourceUrl,
-              },
-            )
-            .toList(),
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      };
-
-      await prefs.setString(_cacheKey, json.encode(cacheData));
-    } catch (e) {
-      print('Cache save error: $e');
-    }
-  }
-
-  Future<List<RecipeModel>?> _getCachedRecommendations(
-    List<IngredientModel> ingredients,
-  ) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final cached = prefs.getString(_cacheKey);
-
-      if (cached == null) return null;
-
-      final cacheData = json.decode(cached);
-      final timestamp = cacheData['timestamp'] as int;
-
-      // ใช้ cache ไม่เกิน 2 ชั่วโมง
-      if (DateTime.now().millisecondsSinceEpoch - timestamp > 7200000) {
-        return null;
-      }
-
-      final cachedHash = cacheData['ingredients_hash'] as String;
-      final currentHash = _getIngredientsHash(ingredients);
-
-      if (cachedHash != currentHash) return null;
-
-      final recipesData = cacheData['recipes'] as List;
-      return recipesData.map((data) => RecipeModel.fromAI(data)).toList();
-    } catch (e) {
-      print('Cache load error: $e');
-      return null;
-    }
-  }
-
+  // --- Helpers ---
   String _getIngredientsHash(List<IngredientModel> ingredients) {
     final sorted =
         ingredients

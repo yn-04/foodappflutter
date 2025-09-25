@@ -1,5 +1,10 @@
 import 'package:camera/camera.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import 'package:my_app/foodreccom/providers/enhanced_recommendation_provider.dart';
+import 'package:my_app/foodreccom/utils/ingredient_translator.dart'; // ✅ เพิ่มมา
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -15,7 +20,28 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Init Firebase with explicit options to avoid platform-specific hangs
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await FirebaseAuth.instance.setLanguageCode('th');
 
+  // โหลดไฟล์ .env
+  await dotenv.load(fileName: ".env");
+  final apiKeys = dotenv.env['GEMINI_API_KEYS'];
+  if (apiKeys == null || apiKeys.isEmpty) {
+    print("❌ [ENV ERROR] GEMINI_API_KEYS not found");
+  } else {
+    print("✅ [ENV OK] Loaded ${apiKeys.split(',').length} keys");
+    print("🔑 First key: ${apiKeys.split(',').first.substring(0, 6)}...");
+  }
+
+  // ✅ โหลด Ingredient Translator cache
+  await IngredientTranslator.loadCache();
+
+  // ตรวจสอบกล้องก่อน
+  try {
+    final cameras = await availableCameras();
+    print('📷 Available cameras: ${cameras.length}');
+  } catch (e) {
+    print('❌ Error getting cameras: $e');
+  }
   // (ไม่บังคับ) อุ่นเครื่องกล้องแบบไม่บล็อก UI เพื่อลดจอดำ
   // ไม่ต้องรอให้เสร็จ เพื่อไม่ให้บูตช้า
   // ignore: unawaited_futures
@@ -35,16 +61,18 @@ class AuthGate extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (_, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        // ล็อกอินค้าง → ไป Home
-        if (snap.hasData) return const HomeScreen();
-        // ยังไม่ล็อกอิน → ไป Login
-        return const LoginScreen();
+
+        if (snapshot.hasData) {
+          return const HomeScreen();
+        } else {
+          return const LoginScreen();
+        }
       },
     );
   }
@@ -55,10 +83,12 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => RecommendationProvider(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => EnhancedRecommendationProvider()),
+      ],
       child: MaterialApp(
-        title: 'ระบบผู้ใช้งาน',
+        title: 'ระบบผู้ใช้งาน (Dev)',
         theme: ThemeData(
           primarySwatch: Colors.blue,
           fontFamily: 'Kanit',

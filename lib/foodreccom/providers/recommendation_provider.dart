@@ -1,7 +1,8 @@
-// lib/providers/recommendation_provider.dart
+//lib/foodreccom/providers/recommendation_provider.dart
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/ingredient_model.dart';
-import '../models/recipe_model.dart';
+import '../models/recipe/recipe.dart';
 import '../services/ai_recommendation_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -21,11 +22,11 @@ class RecommendationProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  // วัตถุดิบใกล้หมดอายุ
+  // -------- Ingredient Categories --------
   List<IngredientModel> get nearExpiryIngredients =>
       _ingredients.where((i) => i.isNearExpiry).toList();
 
-  // โหลดวัตถุดิบจาก Firestore
+  // -------- Load Ingredients --------
   Future<void> loadIngredients() async {
     try {
       final user = _auth.currentUser;
@@ -37,17 +38,25 @@ class RecommendationProvider extends ChangeNotifier {
           .collection('raw_materials')
           .get();
 
-      _ingredients = snapshot.docs
+      final items = snapshot.docs
           .map((doc) => IngredientModel.fromFirestore(doc.data()))
           .toList();
 
+      // แยก isolate ถ้า list ใหญ่
+      _ingredients = await compute(_sortIngredients, items);
+
       notifyListeners();
     } catch (e) {
-      print('Error loading ingredients: $e');
+      debugPrint('Error loading ingredients: $e');
     }
   }
 
-  // ขอคำแนะนำจาก AI
+  static List<IngredientModel> _sortIngredients(List<IngredientModel> items) {
+    items.sort((a, b) => b.priorityScore.compareTo(a.priorityScore));
+    return items;
+  }
+
+  // -------- Get Recommendations --------
   Future<void> getRecommendations() async {
     if (_ingredients.isEmpty) {
       await loadIngredients();
@@ -64,27 +73,47 @@ class RecommendationProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _recommendations = await _aiService.getRecommendations(_ingredients);
+      final recs = await _aiService.getRecommendations(_ingredients);
+
+      // แยก isolate เผื่อ sort/filter ภายหลัง
+      _recommendations = await compute(_sortRecommendations, recs);
 
       if (_recommendations.isEmpty) {
         _error = 'ไม่สามารถแนะนำเมนูได้ กรุณาลองใหม่อีกครั้ง';
       }
     } catch (e) {
-      _error = 'เกิดข้อผิดพลาด: ${e.toString()}';
+      _error = 'เกิดข้อผิดพลาด: $e';
       _recommendations = [];
+      debugPrint('Error getRecommendations: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  // รีเฟรชข้อมูล
-  Future<void> refresh() async {
-    await loadIngredients();
-    await getRecommendations();
+  static List<RecipeModel> _sortRecommendations(List<RecipeModel> recs) {
+    recs.sort((a, b) => b.matchScore.compareTo(a.matchScore));
+    return recs;
   }
 
-  // ล้างข้อมูล
+  // -------- Refresh --------
+  Future<void> refresh() async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      // โหลดข้อมูล + ขอคำแนะนำ
+      await loadIngredients();
+      await getRecommendations();
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // -------- Clear --------
   void clearRecommendations() {
     _recommendations = [];
     _error = null;

@@ -1,12 +1,18 @@
-// lib/widgets/recipe_card.dart
+//lib/foodreccom/widgets/recipe_card.dart
 import 'package:flutter/material.dart';
-import '../models/recipe_model.dart';
+import '../models/recipe/recipe.dart';
 
 class RecipeCard extends StatelessWidget {
   final RecipeModel recipe;
   final VoidCallback? onTap;
+  final bool showSourceBadge; // ✅ เพิ่ม field
 
-  const RecipeCard({super.key, required this.recipe, this.onTap});
+  const RecipeCard({
+    super.key,
+    required this.recipe,
+    this.onTap,
+    this.showSourceBadge = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +59,28 @@ class RecipeCard extends StatelessWidget {
                       ],
                     ),
                   ),
+                  // ✅ ตรงนี้เพิ่ม badge แหล่งที่มา
+                  if (showSourceBadge)
+                    Container(
+                      margin: const EdgeInsets.only(left: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: recipe.tags.contains('จาก RapidAPI')
+                            ? Colors.blue[100]
+                            : Colors.green[100],
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        recipe.tags.contains('จาก RapidAPI') ? 'API' : 'AI',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,

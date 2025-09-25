@@ -1,14 +1,11 @@
-// lib/widgets/recipe_detail_sheet.dart
+//lib/foodreccom/widgets/recipe_detail_sheet.dart
 import 'package:flutter/material.dart';
-import '../models/recipe_model.dart';
+import '../models/recipe/recipe.dart';
 
 class RecipeDetailSheet extends StatelessWidget {
   final RecipeModel recipe;
 
-  const RecipeDetailSheet({
-    super.key, // เปลี่ยนจาก {Key? key} : super(key: key);
-    required this.recipe,
-  });
+  const RecipeDetailSheet({super.key, required this.recipe});
 
   @override
   Widget build(BuildContext context) {
@@ -197,7 +194,11 @@ class RecipeDetailSheet extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(width: 12),
-                            Expanded(child: Text(entry.value as String)),
+                            Expanded(
+                              child: Text(
+                                entry.value.instruction,
+                              ), // ✅ ใช้ instruction
+                            ),
                           ],
                         ),
                       ),
