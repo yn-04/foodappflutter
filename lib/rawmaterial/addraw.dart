@@ -127,9 +127,12 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
       _nameController.text = name;
     }
 
-    final category = Categories.normalize(data['category']);
-    if (category.isNotEmpty) {
-      _selectedCategory = category;
+    // ✅ หมวดหมู่: ต้อง validate กับ Categories.list
+    final normalized = Categories.normalize(data['category']);
+    if (normalized.isNotEmpty && Categories.list.contains(normalized)) {
+      _selectedCategory = normalized;
+    } else {
+      _selectedCategory = null; // ถ้าไม่ match, ปล่อยให้ผู้ใช้เลือกเอง
     }
 
     final unit = Units.safe(data['unit']);
@@ -137,6 +140,7 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
       _selectedUnit = unit;
       _unitLocked = true;
     }
+
     final quantity = data['defaultQuantity'];
     if (quantity is num && quantity > 0) {
       _quantity = quantity.toInt();
@@ -775,14 +779,21 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
   }
 
   Widget _buildCategoryDropdown() {
+    final String? safeValue =
+        (_selectedCategory != null &&
+            Categories.list.contains(_selectedCategory))
+        ? _selectedCategory
+        : null;
+
     return DropdownButtonFormField<String>(
-      value: _selectedCategory,
+      value: safeValue, // ✅ ใช้ค่าเฉพาะที่อยู่ใน items
       decoration: InputDecoration(
         labelText: 'หมวดหมู่',
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       ),
       icon: const Icon(Icons.arrow_drop_down),
       items: Categories.list
+          .toSet() // ✅ กันรายชื่อซ้ำเผื่อ list เผลอมี duplicate
           .map((cat) => DropdownMenuItem(value: cat, child: Text(cat)))
           .toList(),
       onChanged: (value) {

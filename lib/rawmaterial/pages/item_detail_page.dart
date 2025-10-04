@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:my_app/rawmaterial/constants/units.dart';
 import 'package:my_app/rawmaterial/constants/categories.dart';
 import 'package:my_app/rawmaterial/models/shopping_item.dart';
+import 'dart:math' as math;
 
 /// ข้อมูลร่างสำหรับทำซ้ำ (แก้ไขได้ใน dialog)
 class _DupDraft {
@@ -261,11 +262,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       barrierDismissible: false,
       useRootNavigator: true,
       builder: (dialogCtx) {
+        final m = MediaQuery.of(dialogCtx);
+        final kb = m.viewInsets.bottom;
+        final avail = m.size.height - kb - 32; // เว้นระยะบนล่างรวม ๆ
+        final maxH = math.min(avail * 0.96, 560.0); // ✅ ลอจิกเดียวกัน
+
         return AnimatedPadding(
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeOut,
           padding: EdgeInsets.only(
-            bottom: MediaQuery.of(dialogCtx).viewInsets.bottom + 16,
+            bottom: m.viewInsets.bottom + 16,
             top: 16,
             left: 16,
             right: 16,
@@ -274,7 +280,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             child: ConstrainedBox(
               constraints: BoxConstraints(
                 maxWidth: 420,
-                maxHeight: MediaQuery.of(dialogCtx).size.height * 0.9,
+                maxHeight: maxH, // ✅ เดิมเคยใช้ m.size.height * 0.9
               ),
               child: Material(
                 color: Colors.white,
@@ -633,9 +639,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final cardMaxHeight = media.size.height * 0.85;
 
+    // ✅ ความสูงจอจริงที่เหลืออยู่หลังคีย์บอร์ด
+    final kb = media.viewInsets.bottom;
+    final verticalMargin = 24.0; // top 12 + bottom 12 จาก AnimatedPadding
+    final availableHeight = media.size.height - kb - verticalMargin;
+
+    // ✅ ให้การ์ดสูงสุดไม่เกิน 92% ของพื้นที่ที่เหลือ หรือ 560 (แล้วแต่ต่ำกว่า)
+    final cardMaxHeight = math.min(availableHeight * 0.92, 560.0);
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: Colors.black.withOpacity(0.45),
       body: SafeArea(
         child: Center(
@@ -644,7 +657,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             curve: Curves.easeOut,
             padding: EdgeInsets.only(
               top: 12,
-              bottom: media.viewInsets.bottom + 12,
+              bottom: 12 + kb, // ✅ ขยับทั้งใบขึ้นตามคีย์บอร์ด
               left: 12,
               right: 12,
             ),
@@ -653,7 +666,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               child: ConstrainedBox(
                 constraints: BoxConstraints(
                   maxWidth: 420,
-                  maxHeight: cardMaxHeight,
+                  maxHeight: cardMaxHeight, // ✅ ใช้ความสูงที่คำนวณแล้ว
                 ),
                 child: Material(
                   color: Colors.white,

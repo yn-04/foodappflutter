@@ -505,16 +505,19 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
       context,
       MaterialPageRoute(builder: (_) => WorkingBarcodeScanner()),
     );
+
     if (result is Map<String, dynamic>) {
-      final barcode = result['barcode'] ?? '';
-      final Map<String, dynamic>? productData = result['productData'];
+      final String? scannedBarcode = result['scannedBarcode'] as String?;
+      final Map<String, dynamic>? scannedProductData =
+          (result['scannedProductData'] as Map?)?.cast<String, dynamic>();
+
       // ignore: use_build_context_synchronously
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => AddRawMaterialPage(
-            scannedBarcode: barcode,
-            scannedProductData: productData,
+            scannedBarcode: scannedBarcode,
+            scannedProductData: scannedProductData,
           ),
         ),
       ).then((_) {
