@@ -1,15 +1,33 @@
-// lib/rawmaterial/pages/item_detail_page.dart — หน้าเต็มจอ แก้ไข/ลบ วัตถุดิบ เมื่อกดจากการ์ดวัตถุดิบ
+﻿// lib/rawmaterial/pages/item_detail_page.dart
+// หน้า “รายละเอียดวัตถุดิบ” แบบกระทัดรัด การ์ดกลางจอ + แถบหัวไอคอนล้วน
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:my_app/rawmaterial/constants/units.dart';
 import 'package:my_app/rawmaterial/constants/categories.dart';
 import 'package:my_app/rawmaterial/models/shopping_item.dart';
 
+/// ข้อมูลร่างสำหรับทำซ้ำ (แก้ไขได้ใน dialog)
+class _DupDraft {
+  _DupDraft({
+    required this.name,
+    required this.category,
+    required this.quantity,
+    required this.unit,
+    this.expiry,
+  });
+
+  String name;
+  String category;
+  int quantity;
+  String unit;
+  DateTime? expiry;
+}
+
 class ItemDetailPage extends StatefulWidget {
   final ShoppingItem item;
-
   const ItemDetailPage({super.key, required this.item});
 
   @override
@@ -22,14 +40,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
 
   late TextEditingController _nameCtrl;
   late TextEditingController _qtyCtrl;
-  late TextEditingController _consumeCtrl;
-  late TextEditingController _noteCtrl;
 
   late String _category;
   late String _unit;
   DateTime? _expiry;
 
   bool _saving = false;
+  bool _isPopping = false; // บล็อคทุก action ระหว่างกำลังปิด
 
   @override
   void initState() {
@@ -37,22 +54,53 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final i = widget.item;
     _nameCtrl = TextEditingController(text: i.name);
     _qtyCtrl = TextEditingController(text: i.quantity.toString());
-    _consumeCtrl = TextEditingController();
-    _noteCtrl = TextEditingController();
-
-    _category = i.category;
+    _category = Categories.normalize(i.category);
     _unit = Units.safe(i.unit);
     _expiry = i.expiryDate;
   }
 
   @override
   void dispose() {
+    // ตัดโฟกัสก่อน dispose controller
+    FocusManager.instance.primaryFocus?.unfocus();
     _nameCtrl.dispose();
     _qtyCtrl.dispose();
-    _consumeCtrl.dispose();
-    _noteCtrl.dispose();
     super.dispose();
   }
+
+  // ---------- Safe helpers ----------
+  void _safePop([dynamic result]) {
+    if (_isPopping) return;
+    _isPopping = true;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final nav = Navigator.of(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (nav.mounted && nav.canPop()) {
+        nav.pop(result);
+      }
+    });
+  }
+
+  void _safePopUsing(BuildContext ctx, [dynamic result]) {
+    if (_isPopping) return;
+    _isPopping = true;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final nav = Navigator.of(ctx);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (nav.mounted && nav.canPop()) {
+        nav.pop(result);
+      }
+    });
+  }
+
+  void _showSnack(String message) {
+    final m = ScaffoldMessenger.maybeOf(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      m?.showSnackBar(SnackBar(content: Text(message)));
+    });
+  }
+  // -----------------------------------
 
   String _formatThaiDate(DateTime d) {
     final day = d.day.toString().padLeft(2, '0');
@@ -62,27 +110,39 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
 
   Future<void> _pickDate() async {
+    if (_saving || _isPopping) return;
     final now = DateTime.now();
     final picked = await showDatePicker(
       context: context,
       initialDate: _expiry ?? now,
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 5),
+      helpText: 'เลือกวันหมดอายุ',
     );
+    if (!mounted || _isPopping) return;
     if (picked != null) setState(() => _expiry = picked);
   }
 
   Future<void> _save() async {
+    if (_saving || _isPopping) return;
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('กรุณาเข้าสู่ระบบใหม่อีกครั้ง')),
+      );
+      return;
+    }
+
     final newName = _nameCtrl.text.trim();
-    final newQty = int.tryParse(_qtyCtrl.text) ?? widget.item.quantity;
-    if (newName.isEmpty || newQty <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
+    final newQty = int.tryParse(_qtyCtrl.text.trim());
+
+    if (newName.isEmpty || newQty == null || newQty <= 0) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         const SnackBar(content: Text('กรุณากรอกชื่อและจำนวนให้ถูกต้อง')),
       );
       return;
     }
+
     setState(() => _saving = true);
     try {
       await _firestore
@@ -101,20 +161,29 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             'updated_at': FieldValue.serverTimestamp(),
           });
       if (!mounted) return;
-      Navigator.pop(context, true);
-    } catch (e) {
+      _safePop(true);
+    } catch (e, st) {
+      debugPrint('Save error: $e');
+      debugPrintStack(stackTrace: st);
       if (!mounted) return;
-      ScaffoldMessenger.of(
+      ScaffoldMessenger.maybeOf(
         context,
-      ).showSnackBar(SnackBar(content: Text('บันทึกไม่สำเร็จ: $e')));
+      )?.showSnackBar(SnackBar(content: Text('บันทึกไม่สำเร็จ: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _delete() async {
+    if (_saving || _isPopping) return;
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('กรุณาเข้าสู่ระบบใหม่อีกครั้ง')),
+      );
+      return;
+    }
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -132,6 +201,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
         ],
       ),
     );
+    if (!mounted || _isPopping) return;
     if (ok != true) return;
 
     try {
@@ -142,281 +212,741 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
           .doc(widget.item.id)
           .delete();
       if (!mounted) return;
-      Navigator.pop(context, true);
-    } catch (e) {
+      _safePop(true);
+    } catch (e, st) {
+      debugPrint('Delete error: $e');
+      debugPrintStack(stackTrace: st);
       if (!mounted) return;
-      ScaffoldMessenger.of(
+      ScaffoldMessenger.maybeOf(
         context,
-      ).showSnackBar(SnackBar(content: Text('ลบไม่สำเร็จ: $e')));
+      )?.showSnackBar(SnackBar(content: Text('ลบไม่สำเร็จ: $e')));
     }
   }
 
+  // เปิด dialog แก้ไขรายละเอียดก่อน "ทำซ้ำ" — ป้องกัน disposed controller + overflow
+  Future<_DupDraft?> _openDuplicateDialog() async {
+    // controller เฉพาะ dialog
+    final nameCtrl = TextEditingController(text: _nameCtrl.text.trim());
+    final qtyCtrl = TextEditingController(text: _qtyCtrl.text.trim());
+    String category = _category;
+    String unit = _unit;
+    DateTime? expiry = _expiry;
+
+    String? nameError;
+    String? qtyError;
+    bool closing =
+        false; // ✅ เมื่อ true จะไม่วาด TextField อีก (กัน re-build ท้าย ๆ)
+
+    String fmtThai(DateTime d) {
+      final day = d.day.toString().padLeft(2, '0');
+      final month = d.month.toString().padLeft(2, '0');
+      final year2 = (d.year + 543).toString().substring(2);
+      return '$day/$month/$year2';
+    }
+
+    Future<void> pickDate(BuildContext dialogCtx) async {
+      final now = DateTime.now();
+      final picked = await showDatePicker(
+        context: dialogCtx,
+        initialDate: expiry ?? now,
+        firstDate: DateTime(now.year - 1),
+        lastDate: DateTime(now.year + 5),
+        helpText: 'เลือกวันหมดอายุ',
+      );
+      if (picked != null) expiry = picked;
+    }
+
+    final result = await showDialog<_DupDraft>(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (dialogCtx) {
+        return AnimatedPadding(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(dialogCtx).viewInsets.bottom + 16,
+            top: 16,
+            left: 16,
+            right: 16,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 420,
+                maxHeight: MediaQuery.of(dialogCtx).size.height * 0.9,
+              ),
+              child: Material(
+                color: Colors.white,
+                elevation: 24,
+                shadowColor: Colors.black.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(20),
+                clipBehavior: Clip.antiAlias,
+                child: StatefulBuilder(
+                  builder: (ctx, setState) {
+                    void doCloseWith([_DupDraft? draft]) {
+                      // ปิดคีย์บอร์ด + ตั้ง closing ให้ UI ไม่วาด TextField อีก
+                      FocusScope.of(dialogCtx).unfocus();
+                      setState(() => closing = true);
+                      // pop หลังเฟรม
+                      final nav = Navigator.of(dialogCtx);
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (nav.mounted && nav.canPop()) {
+                          nav.pop(draft);
+                        }
+                      });
+                    }
+
+                    void validateAndSubmit() {
+                      final name = nameCtrl.text.trim();
+                      final qty = int.tryParse(qtyCtrl.text.trim());
+                      String? ne;
+                      String? qe;
+
+                      if (name.isEmpty) ne = 'กรุณากรอกชื่อวัตถุดิบ';
+                      if (qty == null || qty <= 0) qe = 'จำนวนไม่ถูกต้อง';
+
+                      setState(() {
+                        nameError = ne;
+                        qtyError = qe;
+                      });
+
+                      if (ne != null || qe != null) return;
+
+                      final normalizedUnit = Units.safe(unit);
+                      final normalizedCat = Categories.normalize(category);
+
+                      doCloseWith(
+                        _DupDraft(
+                          name: name,
+                          category: normalizedCat,
+                          quantity: qty!,
+                          unit: normalizedUnit,
+                          expiry: expiry,
+                        ),
+                      );
+                    }
+
+                    if (closing) {
+                      // ลดโอกาสใช้ controller หลัง dispose โดยไม่วาดฟอร์มอีก
+                      return const SizedBox.shrink();
+                    }
+
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Header
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.copy_all_rounded),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text(
+                                  'ทำซ้ำวัตถุดิบ',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'ยกเลิก',
+                                icon: const Icon(Icons.close),
+                                onPressed: () => doCloseWith(null),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Divider(height: 1),
+
+                        // เนื้อหาเลื่อนขึ้นลงได้
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                            child: Column(
+                              children: [
+                                TextField(
+                                  controller: nameCtrl,
+                                  decoration: _decoration().copyWith(
+                                    labelText: 'ชื่อวัตถุดิบ',
+                                    prefixIcon: const Icon(
+                                      Icons.fastfood_outlined,
+                                    ),
+                                    errorText: nameError,
+                                  ),
+                                  textInputAction: TextInputAction.next,
+                                ),
+                                const SizedBox(height: 10),
+                                DropdownButtonFormField<String>(
+                                  value: category,
+                                  items: Categories.list
+                                      .map(
+                                        (c) => DropdownMenuItem(
+                                          value: c,
+                                          child: Text(c),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (v) => setState(
+                                    () => category = Categories.normalize(
+                                      v ?? category,
+                                    ),
+                                  ),
+                                  decoration: _decoration().copyWith(
+                                    labelText: 'หมวดหมู่',
+                                    prefixIcon: const Icon(
+                                      Icons.category_outlined,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: qtyCtrl,
+                                        textAlign: TextAlign.center,
+                                        keyboardType: TextInputType.number,
+                                        inputFormatters: [
+                                          FilteringTextInputFormatter
+                                              .digitsOnly,
+                                        ],
+                                        decoration: _decoration(isDense: true)
+                                            .copyWith(
+                                              labelText: 'จำนวน',
+                                              errorText: qtyError,
+                                            ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: DropdownButtonFormField<String>(
+                                        value: unit,
+                                        isExpanded: true,
+                                        items: Units.all
+                                            .map(
+                                              (u) => DropdownMenuItem(
+                                                value: u,
+                                                child: Text(u),
+                                              ),
+                                            )
+                                            .toList(),
+                                        selectedItemBuilder: (_) => Units.all
+                                            .map(
+                                              (u) => Align(
+                                                alignment: Alignment.centerLeft,
+                                                child: Text(
+                                                  u,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            )
+                                            .toList(),
+                                        onChanged: (v) => setState(
+                                          () => unit = Units.safe(v ?? unit),
+                                        ),
+                                        decoration: _decoration().copyWith(
+                                          labelText: 'หน่วย',
+                                          prefixIcon: const Icon(
+                                            Icons.straighten_outlined,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                // วันหมดอายุ
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: () async {
+                                    await pickDate(dialogCtx);
+                                    setState(() {});
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 12,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: Colors.grey[300]!,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.event_outlined,
+                                          color: Colors.grey[700],
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            expiry == null
+                                                ? 'แตะเพื่อเลือกวันที่'
+                                                : fmtThai(expiry!),
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                        if (expiry != null)
+                                          InkWell(
+                                            borderRadius: BorderRadius.circular(
+                                              20,
+                                            ),
+                                            onTap: () =>
+                                                setState(() => expiry = null),
+                                            child: const Padding(
+                                              padding: EdgeInsets.all(6),
+                                              child: Icon(
+                                                Icons.clear,
+                                                size: 18,
+                                                color: Colors.black54,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        const Divider(height: 1),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () => doCloseWith(null),
+                                  child: const Text('ยกเลิก'),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: validateAndSubmit,
+                                  icon: const Icon(Icons.check_circle),
+                                  label: const Text('ยืนยันทำซ้ำ'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    // เลื่อน dispose controller ของ dialog ไปหลังเฟรมที่ dialog ปิด
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      nameCtrl.dispose();
+      qtyCtrl.dispose();
+    });
+
+    return result;
+  }
+
   Future<void> _duplicate() async {
+    if (_saving || _isPopping) return;
+
     final user = _auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('กรุณาเข้าสู่ระบบใหม่อีกครั้ง')),
+      );
+      return;
+    }
+
+    final draft = await _openDuplicateDialog();
+    if (draft == null || !mounted || _isPopping) return;
+
+    final ctx = context;
+
     try {
-      final data = {
-        'name': _nameCtrl.text.trim(),
-        'category': _category,
-        'quantity': int.tryParse(_qtyCtrl.text) ?? widget.item.quantity,
-        'unit': _unit,
-        'expiry_date': _expiry != null ? Timestamp.fromDate(_expiry!) : null,
-        'imageUrl': widget.item.imageUrl,
-        'created_at': FieldValue.serverTimestamp(),
-        'updated_at': FieldValue.serverTimestamp(),
-        'user_id': user.uid,
-      };
+      if (!mounted || _isPopping) return;
+      setState(() => _saving = true);
+
       await _firestore
           .collection('users')
           .doc(user.uid)
           .collection('raw_materials')
-          .add(data);
+          .add({
+            'name': draft.name.trim(),
+            'category': draft.category,
+            'quantity': draft.quantity,
+            'unit': draft.unit,
+            'expiry_date': draft.expiry != null
+                ? Timestamp.fromDate(draft.expiry!)
+                : null,
+            'imageUrl': widget.item.imageUrl,
+            'created_at': FieldValue.serverTimestamp(),
+            'updated_at': FieldValue.serverTimestamp(),
+            'user_id': user.uid,
+          });
+
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('ทำซ้ำแล้ว')));
-      Navigator.pop(context, true);
-    } catch (e) {
+      _safePopUsing(ctx, true);
+      _showSnack('ทำซ้ำแล้ว');
+    } catch (e, st) {
+      debugPrint('Duplicate error: $e');
+      debugPrintStack(stackTrace: st);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('ทำซ้ำไม่สำเร็จ: $e')));
+      ScaffoldMessenger.maybeOf(
+        ctx,
+      )?.showSnackBar(SnackBar(content: Text('ทำซ้ำไม่สำเร็จ: $e')));
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
+  }
+
+  // ข้อความสรุป “จะหมดอายุอีกกี่วัน” + สีสถานะ
+  (String, Color) _expiryCountdown() {
+    if (_expiry == null) return ('ยังไม่ระบุวันหมดอายุ', Colors.blueGrey);
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final exp = DateTime(_expiry!.year, _expiry!.month, _expiry!.day);
+    final diff = exp.difference(today).inDays;
+
+    if (diff < 0) return ('หมดอายุแล้ว ${diff.abs()} วัน', Colors.red);
+    if (diff == 0) return ('หมดอายุวันนี้', Colors.orange);
+    if (diff <= 3) return ('จะหมดอายุในอีก $diff วัน', Colors.orange);
+    return ('จะหมดอายุในอีก $diff วัน', Colors.green);
   }
 
   @override
   Widget build(BuildContext context) {
-    final status = () {
-      if (_expiry == null) return ('ยังไม่ระบุวันหมดอายุ', Colors.green);
-      final d = _expiry!.difference(DateTime.now()).inDays;
-      if (d < 0) return ('หมดอายุแล้ว', Colors.red);
-      if (d <= 3) return ('ใกล้หมดอายุ', Colors.orange);
-      return ('ยังไม่หมดอายุ', Colors.green);
-    }();
+    final media = MediaQuery.of(context);
+    final cardMaxHeight = media.size.height * 0.85;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'รายละเอียดวัตถุดิบ',
-          style: TextStyle(color: Colors.black),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.copy_rounded),
-            tooltip: 'ทำซ้ำ',
-            onPressed: _duplicate,
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline, color: Colors.red),
-            tooltip: 'ลบ',
-            onPressed: _delete,
-          ),
-        ],
-      ),
-      body: AbsorbPointer(
-        absorbing: _saving,
-        child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            12,
-            16,
-            16 + MediaQuery.of(context).padding.bottom,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // สถานะหมดอายุ
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
+      backgroundColor: Colors.black.withOpacity(0.45),
+      body: SafeArea(
+        child: Center(
+          child: AnimatedPadding(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            padding: EdgeInsets.only(
+              top: 12,
+              bottom: media.viewInsets.bottom + 12,
+              left: 12,
+              right: 12,
+            ),
+            child: FractionallySizedBox(
+              widthFactor: 0.94,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 420,
+                  maxHeight: cardMaxHeight,
                 ),
-                decoration: BoxDecoration(
-                  color: status.$2.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  status.$1,
-                  style: TextStyle(
-                    color: status.$2,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // ชื่อ
-              const Text(
-                'ชื่อวัตถุดิบ',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 6),
-              TextField(controller: _nameCtrl, decoration: _inputDecoration()),
-              const SizedBox(height: 12),
-
-              // หมวดหมู่
-              const Text(
-                'หมวดหมู่',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                value: _category,
-                items: <String>[...Categories.list]
-                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                    .toList(),
-                onChanged: (v) => setState(() => _category = v ?? _category),
-                decoration: _inputDecoration(),
-              ),
-              const SizedBox(height: 12),
-
-              // จำนวน + หน่วย
-              const Text(
-                'จำนวน',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  IconButton(
-                    onPressed: () {
-                      final n = int.tryParse(_qtyCtrl.text) ?? 1;
-                      if (n > 1) _qtyCtrl.text = (n - 1).toString();
-                    },
-                    icon: const Icon(
-                      Icons.remove_circle_outline,
-                      color: Colors.red,
-                    ),
-                  ),
-                  SizedBox(
-                    width: 80,
-                    child: TextField(
-                      controller: _qtyCtrl,
-                      textAlign: TextAlign.center,
-                      keyboardType: TextInputType.number,
-                      decoration: _inputDecoration(isDense: true),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () {
-                      final n = int.tryParse(_qtyCtrl.text) ?? 0;
-                      _qtyCtrl.text = (n + 1).toString();
-                    },
-                    icon: const Icon(
-                      Icons.add_circle_outline,
-                      color: Colors.green,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _unit,
-                      items: Units.all
-                          .map(
-                            (u) => DropdownMenuItem(value: u, child: Text(u)),
-                          )
-                          .toList(),
-                      onChanged: (v) => setState(() => _unit = Units.safe(v)),
-                      decoration: _inputDecoration().copyWith(
-                        prefixIcon: Icon(
-                          Icons.straighten,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-
-              // วันหมดอายุ
-              const Text(
-                'วันหมดอายุ',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 6),
-              InkWell(
-                onTap: _pickDate,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    border: Border.all(color: Colors.grey[300]!),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
+                child: Material(
+                  color: Colors.white,
+                  elevation: 16,
+                  shadowColor: Colors.black.withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(20),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.event, color: Colors.grey[600]),
-                      const SizedBox(width: 8),
-                      Text(
-                        _expiry == null
-                            ? 'แตะเพื่อเลือกวันที่'
-                            : _formatThaiDate(_expiry!),
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      _IconHeaderBar(
+                        onClose: _safePop,
+                        onDuplicate: _saving ? null : _duplicate,
+                        onDelete: _saving ? null : _delete,
+                        onSave: _saving ? null : _save,
                       ),
-                      const Spacer(),
-                      if (_expiry != null)
-                        InkWell(
-                          onTap: () => setState(() => _expiry = null),
-                          child: const Padding(
-                            padding: EdgeInsets.all(4.0),
-                            child: Icon(
-                              Icons.clear,
-                              size: 18,
-                              color: Colors.black54,
-                            ),
+                      if (_saving) const LinearProgressIndicator(minHeight: 2),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _SectionCard(
+                                title: 'ข้อมูลพื้นฐาน',
+                                children: [
+                                  TextField(
+                                    controller: _nameCtrl,
+                                    textInputAction: TextInputAction.next,
+                                    decoration: _decoration().copyWith(
+                                      labelText: 'ชื่อวัตถุดิบ',
+                                      prefixIcon: const Icon(
+                                        Icons.fastfood_outlined,
+                                      ),
+                                      hintText: 'เช่น อกไก่, ไข่ไก่, แอปเปิล',
+                                    ),
+                                  ),
+                                  DropdownButtonFormField<String>(
+                                    value: _category,
+                                    items: Categories.list
+                                        .map(
+                                          (c) => DropdownMenuItem(
+                                            value: c,
+                                            child: Text(c),
+                                          ),
+                                        )
+                                        .toList(),
+                                    onChanged: (v) {
+                                      if (v == null || _isPopping) return;
+                                      setState(
+                                        () =>
+                                            _category = Categories.normalize(v),
+                                      );
+                                    },
+                                    decoration: _decoration().copyWith(
+                                      labelText: 'หมวดหมู่',
+                                      prefixIcon: const Icon(
+                                        Icons.category_outlined,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              _SectionCard(
+                                title: 'จำนวนและหน่วย',
+                                children: [
+                                  // บรรทัดจำนวน (เต็มบรรทัด)
+                                  Row(
+                                    children: [
+                                      _qtyButton(
+                                        icon: Icons.remove_circle_outline,
+                                        color: Colors.red,
+                                        onTap: () {
+                                          if (_isPopping || _saving) return;
+                                          final n =
+                                              int.tryParse(
+                                                _qtyCtrl.text.trim(),
+                                              ) ??
+                                              1;
+                                          if (n > 1) {
+                                            setState(
+                                              () => _qtyCtrl.text = (n - 1)
+                                                  .toString(),
+                                            );
+                                          }
+                                        },
+                                      ),
+                                      Expanded(
+                                        child: TextField(
+                                          controller: _qtyCtrl,
+                                          textAlign: TextAlign.center,
+                                          keyboardType: TextInputType.number,
+                                          inputFormatters: [
+                                            FilteringTextInputFormatter
+                                                .digitsOnly,
+                                          ],
+                                          decoration: _decoration(isDense: true)
+                                              .copyWith(
+                                                labelText: 'จำนวน',
+                                                contentPadding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 12,
+                                                    ),
+                                              ),
+                                        ),
+                                      ),
+                                      _qtyButton(
+                                        icon: Icons.add_circle_outline,
+                                        color: Colors.green,
+                                        onTap: () {
+                                          if (_isPopping || _saving) return;
+                                          final n =
+                                              int.tryParse(
+                                                _qtyCtrl.text.trim(),
+                                              ) ??
+                                              0;
+                                          setState(
+                                            () => _qtyCtrl.text = (n + 1)
+                                                .toString(),
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                  ),
+
+                                  // บรรทัดหน่วย (เต็มความกว้าง)
+                                  DropdownButtonFormField<String>(
+                                    value: _unit,
+                                    isExpanded: true,
+                                    items: Units.all
+                                        .map(
+                                          (u) => DropdownMenuItem(
+                                            value: u,
+                                            child: Text(u),
+                                          ),
+                                        )
+                                        .toList(),
+                                    selectedItemBuilder: (_) => Units.all
+                                        .map(
+                                          (u) => Align(
+                                            alignment: Alignment.centerLeft,
+                                            child: Text(
+                                              u,
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 1,
+                                            ),
+                                          ),
+                                        )
+                                        .toList(),
+                                    onChanged: (v) {
+                                      if (v == null || _isPopping) return;
+                                      setState(() => _unit = Units.safe(v));
+                                    },
+                                    menuMaxHeight: 320,
+                                    decoration: _decoration().copyWith(
+                                      labelText: 'หน่วย',
+                                      isDense: true,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 10,
+                                          ),
+                                      prefixIcon: const Icon(
+                                        Icons.straighten_outlined,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              _SectionCard(
+                                title: 'วันหมดอายุ',
+                                children: [
+                                  InkWell(
+                                    onTap: _pickDate,
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: Colors.grey[300]!,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.event_outlined,
+                                            color: Colors.grey[700],
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              _expiry == null
+                                                  ? 'แตะเพื่อเลือกวันที่'
+                                                  : _formatThaiDate(_expiry!),
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                          if (_expiry != null)
+                                            InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              onTap: () {
+                                                if (_isPopping || _saving) {
+                                                  return;
+                                                }
+                                                setState(() => _expiry = null);
+                                              },
+                                              child: const Padding(
+                                                padding: EdgeInsets.all(6),
+                                                child: Icon(
+                                                  Icons.clear,
+                                                  size: 18,
+                                                  color: Colors.black54,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+
+                                  // ป้าย “หมดอายุอีกกี่วัน”
+                                  Builder(
+                                    builder: (_) {
+                                      final info = _expiryCountdown();
+                                      return Container(
+                                        margin: const EdgeInsets.only(top: 10),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: info.$2.withOpacity(0.10),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                          border: Border.all(
+                                            color: info.$2.withOpacity(0.25),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Icon(
+                                              Icons.schedule_outlined,
+                                              size: 16,
+                                              color: info.$2,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                info.$1,
+                                                softWrap: true,
+                                                style: TextStyle(
+                                                  color: info.$2,
+                                                  fontSize: 12.5,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
+                      ),
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
-
-              // ใช้วัตถุดิบ (ตัดสต็อก + ลง log)
-
-              // ปุ่มบันทึก
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _saving ? null : _save,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.yellow[300],
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 0,
-                  ),
-                  child: _saving
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation(Colors.black),
-                          ),
-                        )
-                      : const Text(
-                          'บันทึกการเปลี่ยนแปลง',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  InputDecoration _inputDecoration({bool isDense = false}) => InputDecoration(
+  // ------- UI helpers -------
+  InputDecoration _decoration({bool isDense = false}) => InputDecoration(
     isDense: isDense,
     filled: true,
     fillColor: Colors.grey[50],
@@ -424,5 +954,130 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       borderRadius: BorderRadius.circular(12),
       borderSide: BorderSide(color: Colors.grey[300]!),
     ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: Colors.grey[300]!),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: Colors.grey[700]!),
+    ),
   );
+
+  Widget _qtyButton({
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: Material(
+        color: color.withOpacity(0.12),
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Icon(icon, color: color),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _IconHeaderBar extends StatelessWidget {
+  const _IconHeaderBar({
+    required this.onClose,
+    required this.onDuplicate,
+    required this.onDelete,
+    required this.onSave,
+  });
+
+  final VoidCallback onClose;
+  final VoidCallback? onDuplicate;
+  final VoidCallback? onDelete;
+  final VoidCallback? onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey[200]!, width: 1)),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'ปิด',
+            onPressed: onClose,
+            icon: const Icon(Icons.close),
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: 'ทำซ้ำ',
+            onPressed: onDuplicate,
+            icon: const Icon(Icons.copy_rounded),
+          ),
+          IconButton(
+            tooltip: 'ลบ',
+            onPressed: onDelete,
+            icon: const Icon(Icons.delete_outline, color: Colors.red),
+          ),
+          IconButton(
+            tooltip: 'บันทึก',
+            onPressed: onSave,
+            icon: const Icon(Icons.check_circle, color: Colors.green),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// การ์ดส่วน (Section) มาตรฐาน แบบกระทัดรัด
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({required this.title, required this.children});
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ..._gap(children, 10),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _gap(List<Widget> ch, double gap) {
+    final out = <Widget>[];
+    for (var i = 0; i < ch.length; i++) {
+      out.add(ch[i]);
+      if (i != ch.length - 1) out.add(SizedBox(height: gap));
+    }
+    return out;
+  }
 }

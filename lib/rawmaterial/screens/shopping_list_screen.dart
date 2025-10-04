@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
@@ -15,6 +16,7 @@ import 'package:my_app/rawmaterial/models/shopping_item.dart';
 import 'package:my_app/rawmaterial/pages/item_detail_page.dart';
 import 'package:my_app/rawmaterial/widgets/item_group_detail_card.dart';
 import 'package:my_app/rawmaterial/widgets/quick_use_sheet.dart';
+import 'package:my_app/rawmaterial/utils/unit_converter.dart';
 
 import 'package:my_app/rawmaterial/widgets/shopping_item_card.dart';
 import 'package:my_app/rawmaterial/widgets/grouped_item_card.dart';
@@ -48,13 +50,12 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
   List<String> availableCategories = [_ALL];
 
-  static const List<String> _expiryOptions = <String>[
+  /// ตัวเลือกวันหมดอายุที่แสดงในเมนู
+  final List<String> _expiryOptions = const [
     'ทั้งหมด',
-    '1 วัน',
-    '2 วัน',
-    '3 วัน',
     '7 วัน',
     '14 วัน',
+    '30 วัน',
     'กำหนดเอง…',
   ];
 
@@ -77,6 +78,28 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     super.dispose();
   }
 
+  // ===== Helpers: วันหมดอายุ =====
+
+  /// แปลง label เช่น "7 วัน" → 7, ถ้าไม่ใช่ preset คืน null
+  int? _parseDaysFromLabel(String label) {
+    final m = RegExp(r'^(\d+)\s*วัน$').firstMatch(label.trim());
+    if (m == null) return null;
+    return int.tryParse(m.group(1)!);
+  }
+
+  /// คืนจำนวนวันที่จะใช้กรองจริง:
+  /// - ถ้าเลือก preset → คืนค่าตาม preset
+  /// - ถ้าเลือก "กำหนดเอง" → คืน customDays
+  /// - ถ้า "ทั้งหมด" → คืน null
+  int? _effectiveDays() {
+    final preset = _parseDaysFromLabel(selectedExpiryFilter);
+    if (preset != null) return preset;
+    if (selectedExpiryFilter == 'กำหนดเอง') return customDays;
+    return null;
+  }
+
+  DateTime _stripDate(DateTime d) => DateTime(d.year, d.month, d.day);
+
   Future<void> _loadAvailableCategories() async {
     if (currentUser == null) return;
     try {
@@ -86,20 +109,57 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
           .collection('raw_materials')
           .get();
 
-      final set = <String>{_ALL};
-      for (final d in qs.docs) {
-        final cat = (d.data()['category'] ?? '').toString();
-        if (cat.isNotEmpty) set.add(cat);
-      }
+      final activeItems = _activeItemsFromDocs(qs.docs);
+      _scheduleAvailableCategoriesUpdate(activeItems, immediate: true);
+    } catch (e) {
+      debugPrint('Load categories error: $e');
+    }
+  }
+
+  List<ShoppingItem> _activeItemsFromDocs(
+    Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    final today = _stripDate(DateTime.now());
+    return docs
+        .map((d) => ShoppingItem.fromMap(d.data(), d.id))
+        .where((item) => item.quantity > 0)
+        .where((item) {
+          final expiry = item.expiryDate;
+          if (expiry == null) return true;
+          return !_stripDate(expiry).isBefore(today);
+        })
+        .toList(growable: false);
+  }
+
+  void _scheduleAvailableCategoriesUpdate(
+    List<ShoppingItem> items, {
+    bool immediate = false,
+  }) {
+    final categories =
+        items
+            .map((it) => it.category.trim())
+            .where((cat) => cat.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort((a, b) => a.compareTo(b));
+    final next = <String>[_ALL, ...categories];
+
+    if (listEquals(next, availableCategories)) return;
+
+    void apply() {
       if (!mounted) return;
       setState(() {
-        availableCategories = set.toList();
+        availableCategories = next;
         if (!availableCategories.contains(selectedCategory)) {
           selectedCategory = _ALL;
         }
       });
-    } catch (e) {
-      debugPrint('Load categories error: $e');
+    }
+
+    if (immediate) {
+      apply();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => apply());
     }
   }
 
@@ -131,17 +191,18 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     }
   }
 
+  // ===== Quick use =====
   void _showQuickUseSheet(ShoppingItem item) {
-    showModalBottomSheet(
+    showDialog<bool>(
       context: context,
-      isScrollControlled: true, // ⬅️ สำคัญเพื่อยกแผ่นตามคีย์บอร์ด
-      backgroundColor: Colors.transparent, // ขอบโค้งสวย
+      barrierDismissible: true,
+      barrierColor: Colors.black54,
       builder: (_) {
         return QuickUseSheet(
           itemName: item.name,
           unit: item.unit,
           currentQty: item.quantity,
-          onSave: (useQty, note) async {
+          onSave: (useQty, unit, note) async {
             if (useQty <= 0) {
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
@@ -149,6 +210,23 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
               );
               return;
             }
+
+            final conversion = UnitConverter.applyUsage(
+              currentQty: item.quantity,
+              currentUnit: item.unit,
+              useQty: useQty,
+              useUnit: unit,
+            );
+            if (!conversion.isValid) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('จำนวนที่ใช้ต้องอยู่ระหว่าง 1 ถึงจำนวนคงเหลือ'),
+                ),
+              );
+              return;
+            }
+
             try {
               final user = _auth.currentUser;
               if (user == null) return;
@@ -161,34 +239,37 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
               await docRef.collection('usage_logs').add({
                 'quantity': useQty,
-                'unit': item.unit,
+                'unit': unit,
                 'note': note,
                 'used_at': FieldValue.serverTimestamp(),
               });
 
-              final newQty = (item.quantity - useQty) < 0
-                  ? 0
-                  : (item.quantity - useQty);
               await docRef.update({
-                'quantity': newQty,
+                'quantity': conversion.remainingQuantity,
+                'unit': conversion.remainingUnit,
                 'updated_at': FieldValue.serverTimestamp(),
               });
 
               if (!mounted) return;
-              Navigator.pop(context, true);
-
               Future.microtask(() {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        'บันทึกการใช้แล้ว - เหลือ $newQty ${item.unit}',
+                        'บันทึกการใช้แล้ว - เหลือ ${conversion.remainingQuantity} ${conversion.remainingUnit}',
                       ),
                       behavior: SnackBarBehavior.floating,
                     ),
                   );
                 }
               });
+
+              try {
+                await _loadAvailableCategories();
+              } catch (err) {
+                debugPrint('Refresh categories failed: $err');
+              }
+              if (!mounted) return;
               setState(() {}); // รีเฟรชลิสต์
             } catch (e) {
               if (!mounted) return;
@@ -202,10 +283,13 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     );
   }
 
-  // ===== Custom days dialog =====
-  void _showCustomDaysDialog() {
-    _customDaysCtrl.text = (customDays ?? 0).toString();
-    showDialog(
+  // ===== Custom days dialog (กำหนดเอง) =====
+  Future<bool?> _showCustomDaysDialog() async {
+    _customDaysCtrl.text = (customDays != null && customDays! > 0)
+        ? '$customDays'
+        : '';
+
+    return showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => Dialog(
@@ -226,42 +310,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.yellow[300]!.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Icon(
-                      Icons.edit_calendar_rounded,
-                      size: 28,
-                      color: Colors.yellow[700],
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'กำหนดจำนวนวัน',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black,
-                          ),
-                        ),
-                        Text(
-                          'ระบุจำนวนวันที่ต้องการ',
-                          style: TextStyle(color: Colors.black54),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+              // ... หัวไดอะล็อกคงเดิม ...
               const SizedBox(height: 16),
               Container(
                 decoration: BoxDecoration(
@@ -279,27 +328,28 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                     color: Colors.black,
                   ),
                   decoration: InputDecoration(
-                    hintText: '0',
+                    hintText: 'เช่น 5',
                     hintStyle: TextStyle(color: Colors.grey[400], fontSize: 24),
                     border: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 20,
                       vertical: 20,
                     ),
-                    suffixIcon: Padding(
-                      padding: const EdgeInsets.only(right: 20),
-                      child: Center(
-                        child: Text(
-                          'วัน',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
+
+                    // ✅ ใช้ suffixText แทน suffixIcon เพื่อไม่ทับตัวเลขที่พิมพ์
+                    suffixText: 'วัน',
+                    suffixStyle: TextStyle(
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                   autofocus: true,
+                  onChanged: (v) {
+                    final n = int.tryParse(v.trim());
+                    setState(() {
+                      customDays = (n != null && n > 0 && n <= 3650) ? n : null;
+                    });
+                  },
                 ),
               ),
               const SizedBox(height: 12),
@@ -308,7 +358,12 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                 runSpacing: 8,
                 children: [1, 3, 7, 14, 30].map((d) {
                   return InkWell(
-                    onTap: () => _customDaysCtrl.text = d.toString(),
+                    onTap: () {
+                      _customDaysCtrl.text = d.toString();
+                      setState(() {
+                        customDays = d; // อัปเดตเรียลไทม์
+                      });
+                    },
                     borderRadius: BorderRadius.circular(20),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -336,7 +391,8 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                 children: [
                   Expanded(
                     child: TextButton(
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: () =>
+                          Navigator.pop(context, false), // ← false = ยกเลิก
                       style: TextButton.styleFrom(
                         backgroundColor: Colors.grey[100],
                         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -357,13 +413,13 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () {
-                        final days = int.tryParse(_customDaysCtrl.text);
-                        if (days != null && days > 0) {
+                        final days = int.tryParse(_customDaysCtrl.text.trim());
+                        if (days != null && days > 0 && days <= 3650) {
                           setState(() {
-                            customDays = days;
-                            selectedExpiryFilter = 'กำหนดเอง';
+                            customDays = days; // ตอกย้ำค่า
+                            // selectedExpiryFilter เป็น 'กำหนดเอง' อยู่แล้ว
                           });
-                          Navigator.pop(context);
+                          Navigator.pop(context, true); // ← true = ตกลง
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: const Row(
@@ -565,8 +621,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
       backgroundColor: themeGrey,
       body: Listener(
         behavior: HitTestBehavior.translucent,
-        onPointerDown: (_) =>
-            _handleOutsideTap(), // ✅ แตะที่ไหนก็เลิกค้นหา/ซ่อนคีย์บอร์ด
+        onPointerDown: (_) => _handleOutsideTap(),
         child: NestedScrollView(
           floatHeaderSlivers: true,
           headerSliverBuilder: (context, innerScrolled) => [
@@ -593,7 +648,21 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                   StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                     stream: _streamCount(),
                     builder: (_, s) {
-                      final cnt = s.hasData ? s.data!.docs.length : 0;
+                      final docs = s.data?.docs;
+                      if (docs == null) {
+                        return Text(
+                          '0 ชิ้น',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 16,
+                          ),
+                        );
+                      }
+
+                      final activeItems = _activeItemsFromDocs(docs);
+                      _scheduleAvailableCategoriesUpdate(activeItems);
+                      final cnt = activeItems.length;
+
                       return Text(
                         '$cnt ชิ้น',
                         style: TextStyle(color: Colors.grey[600], fontSize: 16),
@@ -687,8 +756,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                             color: selectedExpiryFilter == 'ทั้งหมด'
                                 ? Colors.grey[100]!
                                 : Colors.yellow[300]!,
-                            surfaceTintColor:
-                                Colors.transparent, // กัน M3 แต้มทินต์ให้ดูซีด
+                            surfaceTintColor: Colors.transparent,
                             shape: StadiumBorder(
                               side: BorderSide(
                                 color: selectedExpiryFilter == 'ทั้งหมด'
@@ -697,10 +765,9 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                                 width: 1.5,
                               ),
                             ),
-                            clipBehavior: Clip
-                                .antiAlias, // ให้ ripple/ink โค้งตามเส้นรอบรูป
+                            clipBehavior: Clip.antiAlias,
                             child: PopupMenuButton<String>(
-                              color: Colors.white, // ✅ พื้นเมนูทึบ
+                              color: Colors.white,
                               tooltip:
                                   'กรองตามวันหมดอายุ (จะแสดงเรียงใกล้หมดอายุก่อน)',
                               offset: const Offset(0, 40),
@@ -708,16 +775,31 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               itemBuilder: (_) => _expiryOptions.map((opt) {
-                                final isCustom = opt == 'กำหนดเอง…';
-                                final isSelected = isCustom
-                                    ? selectedExpiryFilter == 'กำหนดเอง'
-                                    : selectedExpiryFilter == opt;
-                                final label =
-                                    (isCustom &&
-                                        selectedExpiryFilter == 'กำหนดเอง' &&
-                                        customDays != null)
-                                    ? 'กำหนดเอง (${customDays} วัน)'
-                                    : opt;
+                                final isCustomTrigger = opt == 'กำหนดเอง…';
+                                final isPreset =
+                                    _parseDaysFromLabel(opt) != null;
+
+                                // เช็คว่า item นี้ถือว่า "selected" ไหม
+                                final bool isSelected = () {
+                                  if (isCustomTrigger) {
+                                    // แสดงติ๊กเมื่อผู้ใช้กำหนดเองอยู่แล้ว
+                                    return selectedExpiryFilter == 'กำหนดเอง';
+                                  }
+                                  if (isPreset) {
+                                    return selectedExpiryFilter == opt;
+                                  }
+                                  return selectedExpiryFilter ==
+                                      opt; // 'ทั้งหมด'
+                                }();
+
+                                // ปรับ label ถ้ากำหนดเอง + มีตัวเลขอยู่
+                                String label = opt;
+                                if (isCustomTrigger &&
+                                    selectedExpiryFilter == 'กำหนดเอง' &&
+                                    customDays != null) {
+                                  label = 'กำหนดเอง (${customDays} วัน)';
+                                }
+
                                 return PopupMenuItem<String>(
                                   value: opt,
                                   child: Row(
@@ -736,16 +818,35 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                                   ),
                                 );
                               }).toList(),
-                              onSelected: (val) {
+                              onSelected: (val) async {
                                 if (val == 'กำหนดเอง…') {
-                                  _showCustomDaysDialog();
+                                  final prevFilter = selectedExpiryFilter;
+                                  final prevDays = customDays;
+
+                                  // ให้ป้ายข้างหลังแสดงเป็น "กำหนดเอง" ทันที ระหว่างพิมพ์
+                                  setState(() {
+                                    selectedExpiryFilter = 'กำหนดเอง';
+                                    // ไม่ต้องแตะ customDays ที่นี่ ให้ user พิมพ์/เลือกใน dialog
+                                  });
+
+                                  final confirmed =
+                                      await _showCustomDaysDialog(); // ← จะคืน true/false
+                                  if (confirmed != true) {
+                                    // ถ้ากดยกเลิก ให้ย้อนกลับค่าก่อนหน้า
+                                    setState(() {
+                                      selectedExpiryFilter = prevFilter;
+                                      customDays = prevDays;
+                                    });
+                                  }
                                 } else {
+                                  // preset เช่น "7 วัน"
                                   setState(() {
                                     selectedExpiryFilter = val;
-                                    if (val != 'กำหนดเอง') customDays = null;
+                                    customDays = null;
                                   });
                                 }
                               },
+
                               child: Padding(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 10,
@@ -764,10 +865,10 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                                     const SizedBox(width: 6),
                                     Text(
                                       selectedExpiryFilter == 'ทั้งหมด'
-                                          ? 'หมดอายุ'
+                                          ? 'กรองตามวันหมดอายุ'
                                           : (selectedExpiryFilter == 'กำหนดเอง'
-                                                ? 'หมดอายุ (${customDays ?? 0} วัน)'
-                                                : 'หมดอายุ: $selectedExpiryFilter'),
+                                                ? 'หมดอายุในอีก (${customDays ?? 0} วัน)'
+                                                : 'หมดอายุในอีก $selectedExpiryFilter'),
                                       style: TextStyle(
                                         color: selectedExpiryFilter == 'ทั้งหมด'
                                             ? Colors.grey[600]
@@ -876,24 +977,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                 return _emptyState();
               }
 
-              var all = snap.data!.docs
-                  .map((d) => ShoppingItem.fromMap(d.data(), d.id))
-                  .toList(growable: false);
-              // ซ่อนรายการที่จำนวนคงเหลือเป็น 0
-              all = all.where((it) => it.quantity > 0).toList(growable: false);
-              // ✅ เพิ่ม: ซ่อนวัตถุดิบที่ “หมดอายุแล้ว” เสมอ (เทียบวันที่ล้วน ไม่แคร์เวลา)
-              DateTime _strip(DateTime d) => DateTime(d.year, d.month, d.day);
-              final DateTime _today = _strip(DateTime.now());
-              all = all
-                  .where((it) {
-                    final ed = it.expiryDate;
-                    if (ed == null) return true; // ถ้าไม่มีวันหมดอายุ โชว์ได้
-                    return !_strip(
-                      ed,
-                    ).isBefore(_today); // ก่อนวันนี้ = หมดอายุ → ตัดออก
-                  })
-                  .toList(growable: false);
-              // ===== กรองที่ฝั่งแอป เพื่อลดปัญหา composite index =====
+              final all = _activeItemsFromDocs(snap.data!.docs);
               List<ShoppingItem> filtered = List.of(all);
 
               // กรองหมวดหมู่
@@ -910,51 +994,18 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                     .toList();
               }
 
-              // กรองวันหมดอายุ
-              DateTime strip(DateTime d) => DateTime(d.year, d.month, d.day);
-              final today = strip(DateTime.now());
-              DateTime? from;
-              DateTime? to;
-
-              switch (selectedExpiryFilter) {
-                case '1 วัน':
-                  from = today;
-                  to = today.add(const Duration(days: 1));
-                  break;
-                case '2 วัน':
-                  from = today;
-                  to = today.add(const Duration(days: 2));
-                  break;
-                case '3 วัน':
-                  from = today;
-                  to = today.add(const Duration(days: 3));
-                  break;
-                case '7 วัน':
-                  from = today.add(const Duration(days: 4));
-                  to = today.add(const Duration(days: 7));
-                  break;
-                case '14 วัน':
-                  from = today.add(const Duration(days: 8));
-                  to = today.add(const Duration(days: 14));
-                  break;
-                case 'กำหนดเอง':
-                  if (customDays != null) {
-                    from = today.add(Duration(days: customDays!));
-                    to = from;
-                  }
-                  break;
-                default:
-                  break; // 'ทั้งหมด'
-              }
-
-              if (from != null && to != null) {
+              // กรองวันหมดอายุ: ภายใน N วันนับจาก "วันนี้" (รวมวันสิ้นสุด)
+              final int? withinDays = _effectiveDays();
+              if (withinDays != null && withinDays > 0) {
+                final today = _stripDate(DateTime.now());
+                final end = today.add(Duration(days: withinDays));
                 filtered = filtered.where((it) {
                   final ed = it.expiryDate;
                   if (ed == null) return false;
-                  final only = strip(ed);
-                  final geFrom = !only.isBefore(from!);
-                  final leTo = !only.isAfter(to!);
-                  return geFrom && leTo;
+                  final only = _stripDate(ed);
+                  final geToday = !only.isBefore(today);
+                  final leEnd = !only.isAfter(end);
+                  return geToday && leEnd;
                 }).toList();
               }
 
@@ -996,15 +1047,20 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                         item: item,
                         onDelete: () => _deleteItem(item.id),
                         onTap: () async {
-                          final changed = await Navigator.push<bool>(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ItemDetailPage(item: item),
+                          Navigator.of(context).push<bool>(
+                            PageRouteBuilder(
+                              opaque: false,
+                              barrierColor: Colors.transparent,
+                              pageBuilder: (_, __, ___) =>
+                                  ItemDetailPage(item: item),
+                              transitionsBuilder: (_, a, __, child) =>
+                                  FadeTransition(opacity: a, child: child),
                             ),
                           );
-                          if (changed == true && mounted) setState(() {});
                         },
                         onQuickUse: () => _showQuickUseSheet(item),
+                        // ถ้าต้องการให้ยืนยันลบเฉพาะ parent ให้ใส่ confirmDelete: false แล้วทำ confirm ที่นี่แทน
+                        // confirmDelete: false,
                       ),
                     );
                   } else {
@@ -1015,19 +1071,15 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                         name: displayName,
                         items: groupItems,
                         onTap: () async {
-                          final changed = await showModalBottomSheet<bool>(
+                          await showModalBottomSheet<bool>(
                             context: context,
                             isScrollControlled: true,
                             backgroundColor: Colors.transparent,
-                            builder: (_) => SizedBox(
-                              height: MediaQuery.of(context).size.height * 0.9,
-                              child: ItemGroupDetailSheet(
-                                groupName: displayName,
-                                items: groupItems,
-                              ),
+                            builder: (_) => ItemGroupDetailSheet(
+                              groupName: displayName,
+                              items: groupItems,
                             ),
                           );
-                          if (changed == true && mounted) setState(() {});
                         },
                         // ✅ ผูกการลบทั้งกลุ่ม
                         onDeleteGroup: () => _deleteGroupItems(groupItems),
@@ -1111,7 +1163,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
   Widget _emptyAfterFilter() {
     final text = (selectedExpiryFilter != 'ทั้งหมด')
-        ? 'ไม่มีวัตถุดิบที่หมดอายุใน${selectedExpiryFilter == 'กำหนดเอง' ? '$customDays วัน' : selectedExpiryFilter}'
+        ? 'ไม่มีวัตถุดิบที่หมดอายุภายใน ${selectedExpiryFilter == 'กำหนดเอง' ? '$customDays วัน' : selectedExpiryFilter}'
         : (searchQuery.isNotEmpty ? 'ไม่พบรายการที่ค้นหา' : 'ไม่มีรายการ');
 
     return Center(

@@ -1,93 +1,144 @@
-// lib/rawmaterial/constants/categories.dart — รายชื่อหมวดหมู่ + helper icon + label "ทั้งหมด"
+﻿// lib/rawmaterial/constants/categories.dart
+// ยูทิลิตี้จัดการรายชื่อหมวดหมู่ + หมวดย่อย
+
 import 'package:flutter/material.dart';
 
-/// ตัวช่วยจัดการหมวดหมู่ของวัตถุดิบ
+import 'package:my_app/rawmaterial/constants/shelf_life_dataset.dart';
+
 class Categories {
-  /// ป้าย “ทั้งหมด” ใช้เป็นค่าเริ่มต้นของตัวกรอง
   static const String allLabel = 'ทั้งหมด';
 
-  /// alias ให้เรียกสั้น ๆ ได้
-  static String get all => allLabel;
+  static final Map<String, List<String>> _categoryToSubcategories =
+      _buildCategoryMap();
 
-  /// รายชื่อหมวดมาตรฐาน (ไม่รวม “ทั้งหมด”)
-  static const List<String> list = <String>[
-    'เนื้อสัตว์',
-    'ไข่',
-    'ผัก',
-    'ผลไม้',
-    'ผลิตภัณฑ์จากนม',
-    'ข้าว',
-    'เครื่องเทศ',
-    'เครื่องปรุง',
-    'แป้ง',
-    'น้ำมัน',
-    'เครื่องดื่ม',
-    'ของแห้ง',
-    'ของแช่แข็ง',
-  ];
+  static final List<String> list = List.unmodifiable(
+    _categoryToSubcategories.keys.toList()..sort((a, b) => a.compareTo(b)),
+  );
 
-  /// คืนรายการหมวดที่มี “ทั้งหมด” อยู่หน้าเสมอ
+  static const IconData _defaultIcon = Icons.category_outlined;
+
+  // ใช้ normalize ทั้งกับข้อความที่ผู้ใช้พิมพ์ และตอนสร้างดัชนีค้นหา
+  static final RegExp _normalizePattern = RegExp(r'[\s\-_/()]+');
+
+  /// ดัชนีไอเท็ม (normalize แล้ว) -> รายการหมวดย่อย (เหมือน shelfLifeItemIndex แต่ค้นหาแม่นกว่า)
+  static final Map<String, List<String>> _normalizedItemIndex = () {
+    final out = <String, List<String>>{};
+    for (final entry in shelfLifeItemIndex.entries) {
+      final key = _normalizeKey(entry.key);
+      out[key] = entry.value;
+    }
+    return out;
+  }();
+
+  static String _normalizeKey(String input) =>
+      input.trim().toLowerCase().replaceAll(_normalizePattern, '');
+
+  static Map<String, List<String>> _buildCategoryMap() {
+    final map = <String, Set<String>>{};
+    for (final entry in shelfLifeSubcategoryData.entries) {
+      final category = (entry.value['category'] as String?)?.trim();
+      if (category == null || category.isEmpty) continue;
+      map.putIfAbsent(category, () => <String>{}).add(entry.key);
+    }
+    return {
+      for (final e in map.entries)
+        e.key: List.unmodifiable(
+          e.value.toList()..sort((a, b) => a.compareTo(b)),
+        ),
+    };
+  }
+
+  /// ส่งรายการหมวดทั้งหมด โดยมี "ทั้งหมด" อยู่หัวรายการ
   static List<String> withAll([List<String>? extras]) {
     final set = <String>{...list, ...?extras};
-    return [allLabel, ...set.toList()..sort()];
+    return [allLabel, ...set.toList()..sort((a, b) => a.compareTo(b))];
   }
 
-  /// ตรวจชื่อหมวดว่าอยู่ในชุดมาตรฐานหรือไม่ (ไม่รวม “ทั้งหมด”)
   static bool isKnown(String category) => list.contains(category);
 
-  /// เลือกไอคอนให้เหมาะกับหมวด
-  static IconData iconFor(String category) {
-    switch (category) {
-      case 'เนื้อสัตว์':
-        return Icons.set_meal;
-      case 'ไข่':
-        return Icons.egg_alt;
-      case 'ผัก':
-        return Icons.eco;
-      case 'ผลไม้':
-        return Icons.apple;
-      case 'ผลิตภัณฑ์จากนม':
-        return Icons.icecream;
-      case 'ข้าว':
-        return Icons.rice_bowl;
-      case 'เครื่องเทศ':
-        return Icons.grain;
-      case 'เครื่องปรุง':
-        return Icons.soup_kitchen;
-      case 'แป้ง':
-        return Icons.bakery_dining;
-      case 'น้ำมัน':
-        return Icons.opacity;
-      case 'เครื่องดื่ม':
-        return Icons.local_drink;
-      case 'ของแห้ง':
-        return Icons.inventory_2;
-      case 'ของแช่แข็ง':
-        return Icons.ac_unit;
-      case allLabel:
-        return Icons.all_inclusive_rounded;
-      default:
-        return Icons.category;
+  /// คืนชื่อหมวดที่ตรงกับที่ระบบรู้จัก (case-insensitive) ถ้าไม่รู้จักคืนค่าดั้งเดิม
+  static String normalize(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return value;
+    if (isKnown(value) || value == allLabel) return value;
+    for (final existing in list) {
+      if (existing.toLowerCase() == value.toLowerCase()) return existing;
     }
+    return value;
   }
 
-  /// ทำความสะอาดชื่อหมวด (trim) และ map ชื่อที่ใกล้เคียงให้เป็นหมวดที่รู้จัก
-  static String normalize(String? raw) {
-    final s = (raw ?? '').trim();
-    if (s.isEmpty) return s;
-    // ถ้าตรงก็ใช้เลย
-    if (isKnown(s) || s == allLabel) return s;
+  /// คืนรายการหมวดย่อยของหมวด
+  static List<String> subcategoriesOf(String category) {
+    final normalized = normalize(category);
+    return _categoryToSubcategories[normalized] ?? const <String>[];
+  }
 
-    // ตัวอย่าง mapping เพิ่มเติม (แก้ typo ทั่วไป)
-    switch (s) {
-      case 'นม':
-        return 'ผลิตภัณฑ์จากนม';
-      case 'แป้ง/เบเกอรี่':
-        return 'แป้ง';
-      case 'สไปซ์':
-        return 'เครื่องเทศ';
+  /// คืนหมวดย่อยแรกของหมวดนั้น ๆ (ใช้เป็นค่าเริ่มต้น)
+  static String? defaultSubcategoryFor(String? category) {
+    if (category == null) return null;
+    final subs = subcategoriesOf(category);
+    if (subs.isEmpty) return null;
+    return subs.first;
+  }
+
+  /// หา "หมวดหลัก" จากชื่อหมวดย่อย
+  static String? categoryForSubcategory(String? subcategory) {
+    if (subcategory == null || subcategory.trim().isEmpty) return null;
+    final target = subcategory.trim();
+    for (final entry in _categoryToSubcategories.entries) {
+      if (entry.value.contains(target)) return entry.key;
+      for (final value in entry.value) {
+        if (value.toLowerCase() == target.toLowerCase()) return entry.key;
+      }
+    }
+    return null;
+  }
+
+  /// ตรวจหมวด/หมวดย่อยจากชื่อที่ผู้ใช้พิมพ์
+  static Map<String, String?> autoDetect(String name) {
+    final cleaned = name.trim();
+    if (cleaned.isEmpty) return {'category': null, 'subcategory': null};
+
+    // 1) พยายามหาแม่นยำจากดัชนี normalize แล้วก่อน
+    final normalized = _normalizeKey(cleaned);
+    final matches = _normalizedItemIndex[normalized];
+    if (matches != null && matches.isNotEmpty) {
+      final sub = matches.first;
+      return {'category': categoryForSubcategory(sub), 'subcategory': sub};
+    }
+
+    // 2) เผื่อชื่อหมวดถูกพิมพ์ติดมากับชื่อวัตถุดิบ เช่น "ผักผลไม้สด - แอปเปิ้ล"
+    for (final entry in _categoryToSubcategories.entries) {
+      if (cleaned.contains(entry.key)) {
+        return {
+          'category': entry.key,
+          'subcategory': defaultSubcategoryFor(entry.key),
+        };
+      }
+    }
+
+    return {'category': null, 'subcategory': null};
+  }
+
+  /// ไอคอนสำหรับชื่อหมวดที่ "ตรงกับ dataset ปัจจุบัน"
+  static IconData iconFor(String category) {
+    switch (normalize(category)) {
+      case 'ผักและผลไม้สด':
+        return Icons.eco;
+      case 'เนื้อสัตว์และอาหารทะเล':
+        return Icons.set_meal;
+      case 'ผลิตภัณฑ์นมและไข่':
+        return Icons.egg_alt_outlined;
+      case 'ของแห้งและเครื่องปรุง':
+        return Icons.rice_bowl;
+      case 'อาหารพร้อมทาน-กับข้าว':
+        return Icons.restaurant_menu;
+      case 'อาหารสำเร็จรูป-เบเกอรี่-ขนม':
+        return Icons.bakery_dining;
+      case 'เครื่องดื่ม':
+        return Icons.local_drink_outlined;
       default:
-        return s; // ไม่รู้จักก็คืนค่าเดิม
+        return _defaultIcon;
     }
   }
 }

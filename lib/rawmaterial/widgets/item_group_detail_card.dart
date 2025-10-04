@@ -1,4 +1,4 @@
-// lib/rawmaterial/widgets/item_group_detail_card.dart — แสดงรายละเอียดกลุ่ม (ชื่อซ้ำ) แบบ Pop-up
+﻿// lib/rawmaterial/widgets/item_group_detail_card.dart — แสดงรายละเอียดกลุ่ม (ชื่อซ้ำ) แบบ Pop-up
 // โชว์รายการด้วยการ์ด ShoppingItemCard และให้แก้ไข/ลบได้
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -9,6 +9,7 @@ import 'package:my_app/rawmaterial/models/shopping_item.dart';
 import 'package:my_app/rawmaterial/pages/item_detail_page.dart';
 import 'package:my_app/rawmaterial/widgets/shopping_item_card.dart';
 import 'package:my_app/rawmaterial/widgets/quick_use_sheet.dart'; // ✅ เพิ่มบรรทัดนี้
+import 'package:my_app/rawmaterial/utils/unit_converter.dart';
 
 class ItemGroupDetailSheet extends StatefulWidget {
   final String groupName;
@@ -26,10 +27,6 @@ class ItemGroupDetailSheet extends StatefulWidget {
 
 class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
   bool _busy = false;
-
-  int get totalQty => widget.items.fold(0, (s, i) => s + i.quantity);
-  String get unit =>
-      widget.items.isNotEmpty ? Units.safe(widget.items.first.unit) : '';
 
   @override
   Widget build(BuildContext context) {
@@ -88,19 +85,11 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
                   child: Row(
                     children: [
                       Text(
-                        'รวม: $totalQty $unit • ${widget.items.length} รายการ',
+                        '${widget.items.length} รายการ',
                         style: TextStyle(
                           color: Colors.grey[700],
                           fontWeight: FontWeight.w700,
                         ),
-                      ),
-                      const Spacer(),
-                      TextButton.icon(
-                        onPressed: _busy
-                            ? null
-                            : () => _duplicateFromFirst(context),
-                        icon: const Icon(Icons.copy_all_rounded, size: 18),
-                        label: const Text('ทำซ้ำตัวอย่าง'),
                       ),
                     ],
                   ),
@@ -117,19 +106,20 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
                       return ShoppingItemCard(
                         item: i,
                         onTap: () async {
-                          final changed = await Navigator.push<bool>(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ItemDetailPage(item: i),
-                            ),
+                          final changed = await showModalBottomSheet<bool>(
+                            context: context,
+                            isScrollControlled: true,
+                            backgroundColor: Colors.transparent,
+                            builder: (_) => ItemDetailPage(item: i),
                           );
-                          if (changed == true && mounted)
+                          if (changed == true && mounted) {
                             Navigator.pop(context, true);
+                          }
                         },
                         onDelete: () => _deleteItem(context, i),
-                        onQuickUse: () => _showQuickUseSheet(
-                          i,
-                        ), // ในชีตนี้ปิดปุ่ม Quick use อยู่แล้ว
+                        onQuickUse: () => _showQuickUseSheet(i),
+                        // ในชีตนี้ปิดปุ่ม Quick use อยู่แล้ว
+                        confirmDelete: false, // 👈 ปิดการยืนยันบนการ์ด
                       );
                     },
                   ),
@@ -186,6 +176,7 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
     if (user == null) return;
     final ok = await showDialog<bool>(
       context: context,
+      useRootNavigator: false, // 👈 เปิดบน navigator ของชีต
       builder: (_) => AlertDialog(
         title: const Text('ลบวัตถุดิบ'),
         content: Text('ต้องการลบ "${i.name}" ใช่หรือไม่?'),
@@ -201,6 +192,7 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
         ],
       ),
     );
+
     if (ok != true) return;
 
     setState(() => _busy = true);
@@ -211,7 +203,9 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
           .collection('raw_materials')
           .doc(i.id)
           .delete();
+
       if (!mounted) return;
+      // ปิดชีตพร้อมส่ง true กลับให้หน้าพ่อรีเฟรช
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
@@ -224,22 +218,33 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
   }
 
   void _showQuickUseSheet(ShoppingItem item) {
-    showModalBottomSheet(
+    showDialog<bool>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white, // ทึบ
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      clipBehavior: Clip.antiAlias,
+      barrierDismissible: true,
+      barrierColor: Colors.black54,
       builder: (_) {
         return QuickUseSheet(
           itemName: item.name,
           unit: item.unit,
           currentQty: item.quantity,
-          onSave: (useQty, note) async {
-            // กันกรอกเกิน/น้อยเกิน
-            if (useQty <= 0 || useQty > item.quantity) {
+          onSave: (useQty, unit, note) async {
+            if (useQty <= 0) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('จำนวนที่ใช้ต้องอยู่ระหว่าง 1 ถึงจำนวนคงเหลือ'),
+                ),
+              );
+              return;
+            }
+
+            final conversion = UnitConverter.applyUsage(
+              currentQty: item.quantity,
+              currentUnit: item.unit,
+              useQty: useQty,
+              useUnit: unit,
+            );
+            if (!conversion.isValid) {
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -261,35 +266,30 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
 
               await docRef.collection('usage_logs').add({
                 'quantity': useQty,
-                'unit': item.unit,
+                'unit': unit,
                 'note': note,
                 'used_at': FieldValue.serverTimestamp(),
               });
 
-              final newQty = (item.quantity - useQty) < 0
-                  ? 0
-                  : (item.quantity - useQty);
               await docRef.update({
-                'quantity': newQty,
+                'quantity': conversion.remainingQuantity,
+                'unit': conversion.remainingUnit,
                 'updated_at': FieldValue.serverTimestamp(),
               });
 
               if (!mounted) return;
-              Navigator.pop(context, true); // ปิด QuickUseSheet
 
-              // ปิดชีตรายละเอียดกลุ่มเพื่อรีเฟรชหน้าหลัก
               Future.microtask(() {
-                if (mounted) {
-                  Navigator.pop(context, true);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'บันทึกการใช้แล้ว - เหลือ $newQty ${item.unit}',
-                      ),
-                      behavior: SnackBarBehavior.floating,
+                if (!mounted) return;
+                Navigator.pop(context, true);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'บันทึกการใช้แล้ว - เหลือ ${conversion.remainingQuantity} ${conversion.remainingUnit}',
                     ),
-                  );
-                }
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
               });
             } catch (e) {
               if (!mounted) return;

@@ -10,6 +10,11 @@ class ShoppingItemCard extends StatelessWidget {
   final Future<void> Function()? onDelete; // รองรับ async
   final VoidCallback? onQuickUse;
 
+  /// ====== ตัวเลือกควบคุมการยืนยันลบ ======
+  /// ถ้า true (default) -> การ์ดจะแสดง dialog ยืนยันก่อนเรียก onDelete()
+  /// ถ้า false -> การ์ดจะเรียก onDelete() ตรงๆ (ให้ parent เป็นคนยืนยัน)
+  final bool confirmDelete;
+
   /// ====== โหมดกลุ่ม (ออปชัน) ======
   /// จำนวนรวมทั้งหมดในกลุ่ม (ถ้า null จะใช้ item.quantity)
   final int? groupTotalQuantity;
@@ -33,6 +38,7 @@ class ShoppingItemCard extends StatelessWidget {
     this.groupUnit,
     this.groupCategory,
     this.groupEarliestExpiry,
+    this.confirmDelete = true, // 👈 ค่าเริ่มต้น: ถามยืนยันเหมือนเดิม
   }) : super(key: key);
 
   @override
@@ -154,13 +160,20 @@ class ShoppingItemCard extends StatelessWidget {
               ),
             ),
 
-            // ปุ่มลบ (มียืนยันก่อนลบ)
+            // ปุ่มลบ
             IconButton(
               icon: Icon(Icons.delete_outline, color: Colors.grey[700]),
               tooltip: 'ลบรายการ',
               onPressed: onDelete == null
                   ? null
                   : () async {
+                      if (!confirmDelete) {
+                        // ไม่ต้องยืนยันที่การ์ด -> ให้ parent จัดการ
+                        await onDelete!();
+                        return;
+                      }
+
+                      // โหมดเดิม: ยืนยันที่การ์ดก่อน
                       final ok = await showDialog<bool>(
                         context: context,
                         builder: (_) => AlertDialog(
@@ -201,7 +214,6 @@ class ShoppingItemCard extends StatelessWidget {
                     side: BorderSide(color: Colors.grey[700]!),
                   ),
                 ),
-                // ใช้ไอคอนธีมทำอาหาร สีเทา
                 icon: Icon(
                   Icons.restaurant_menu,
                   size: 16,
