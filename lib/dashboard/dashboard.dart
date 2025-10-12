@@ -50,9 +50,8 @@ class _DashboardTabState extends State<DashboardTab>
     try {
       final doc = await _firestore.collection('users').doc(user.uid).get();
       final data = doc.data() ?? {};
-      String? name = (data['username'] as String?)?.trim();
-      name ??= (data['firstName'] as String?)?.trim();
-      name ??= (data['fullName'] as String?)?.trim();
+      String? name = (data['displayName'] as String?)?.trim();
+      name ??= (data['username'] as String?)?.trim();
       name ??= (user.displayName ?? '').trim();
       if (name.isEmpty) {
         final email = user.email ?? '';

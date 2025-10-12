@@ -16,17 +16,13 @@ class _ModernAccountDetailsScreenState
     extends State<ModernAccountDetailsScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = true;
-  bool _isEditing = false;
   MyUser? _myUser;
+
   final user = FirebaseAuth.instance.currentUser;
   final UserService _userService = UserService();
 
-  // Controllers สำหรับแก้ไขข้อมูล
-  final TextEditingController _firstNameController = TextEditingController();
-  final TextEditingController _lastNameController = TextEditingController();
-  final TextEditingController _heightController = TextEditingController();
-  final TextEditingController _weightController = TextEditingController();
-  final TextEditingController _allergiesController = TextEditingController();
+  // Controllers สำหรับแก้ไขข้อมูล (เหลือเฉพาะที่ใช้บนหน้า)
+  final TextEditingController _displayNameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
 
   String _selectedGender = 'ชาย';
@@ -40,11 +36,7 @@ class _ModernAccountDetailsScreenState
 
   @override
   void dispose() {
-    _firstNameController.dispose();
-    _lastNameController.dispose();
-    _heightController.dispose();
-    _weightController.dispose();
-    _allergiesController.dispose();
+    _displayNameController.dispose();
     _phoneController.dispose();
     super.dispose();
   }
@@ -63,6 +55,7 @@ class _ModernAccountDetailsScreenState
         }
       }
     } catch (e) {
+      // ignore: avoid_print
       print('Error loading user data: $e');
       _showErrorSnackBar('ไม่สามารถโหลดข้อมูลได้');
     } finally {
@@ -74,16 +67,8 @@ class _ModernAccountDetailsScreenState
 
   void _populateControllers() {
     if (_myUser != null) {
-      _firstNameController.text = _myUser!.firstName;
-      _lastNameController.text = _myUser!.lastName;
+      _displayNameController.text = _myUser!.displayName;
       _phoneController.text = _myUser!.phoneNumber;
-      _heightController.text = _myUser!.height > 0
-          ? _myUser!.height.toStringAsFixed(0)
-          : '';
-      _weightController.text = _myUser!.weight > 0
-          ? _myUser!.weight.toStringAsFixed(0)
-          : '';
-      _allergiesController.text = _myUser!.allergies;
       _selectedGender = _myUser!.gender.isNotEmpty ? _myUser!.gender : 'ชาย';
       _selectedBirthDate = _myUser!.birthDate;
     }
@@ -96,7 +81,7 @@ class _ModernAccountDetailsScreenState
 
       final DateTime? picked = await showDatePicker(
         context: context,
-        initialDate: _selectedBirthDate ?? now,
+        initialDate: _selectedBirthDate ?? DateTime(now.year - 20),
         firstDate: DateTime(1900),
         lastDate: now,
         helpText: 'เลือกวันเกิด',
@@ -123,6 +108,7 @@ class _ModernAccountDetailsScreenState
         });
       }
     } catch (e) {
+      // ignore: avoid_print
       print('Error selecting date: $e');
       _showErrorSnackBar('ไม่สามารถเปิดปฏิทินได้ กรุณาลองใหม่');
     }
@@ -141,35 +127,30 @@ class _ModernAccountDetailsScreenState
     setState(() => _isLoading = true);
 
     try {
-      MyUser updatedUser = MyUser(
-        firstName: _firstNameController.text.trim(),
-        lastName: _lastNameController.text.trim(),
-        email: _myUser!.email,
+      final old = _myUser!;
+      final displayName = _displayNameController.text.trim();
+
+      final updatedUser = old.copyWith(
+        displayName: displayName,
         phoneNumber: _phoneController.text.trim(),
         gender: _selectedGender,
-        height: double.tryParse(_heightController.text) ?? 0,
-        weight: double.tryParse(_weightController.text) ?? 0,
-        allergies: _allergiesController.text.trim(),
-        fullName:
-            '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}',
         birthDate: _selectedBirthDate!,
-        createdAt: _myUser!.createdAt,
         profileCompleted: true,
       );
 
-      bool success = await _userService.updateUser(user!.uid, updatedUser);
+      final success = await _userService.updateUser(user!.uid, updatedUser);
 
       if (success) {
-        await user!.updateDisplayName(updatedUser.fullName);
+        await user!.updateDisplayName(updatedUser.displayName);
         setState(() {
           _myUser = updatedUser;
-          _isEditing = false;
         });
         _showSuccessSnackBar('อัปเดตข้อมูลสำเร็จ');
       } else {
         _showErrorSnackBar('ไม่สามารถอัปเดตข้อมูลได้');
       }
     } catch (e) {
+      // ignore: avoid_print
       print('Error saving user data: $e');
       _showErrorSnackBar('เกิดข้อผิดพลาด: ${e.toString()}');
     } finally {
@@ -177,15 +158,6 @@ class _ModernAccountDetailsScreenState
         setState(() => _isLoading = false);
       }
     }
-  }
-
-  void _toggleEditMode() {
-    setState(() {
-      _isEditing = !_isEditing;
-      if (!_isEditing) {
-        _populateControllers();
-      }
-    });
   }
 
   String _formatDate(DateTime date) {
@@ -252,19 +224,7 @@ class _ModernAccountDetailsScreenState
           icon: const Icon(Icons.arrow_back_ios, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
-        actions: [
-          if (!_isLoading)
-            TextButton(
-              onPressed: _toggleEditMode,
-              child: Text(
-                _isEditing ? 'ยกเลิก' : 'แก้ไข',
-                style: TextStyle(
-                  color: _isEditing ? Colors.red[600] : Colors.blue[600],
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-        ],
+        // ไม่มีปุ่ม "แก้ไข" แล้ว เพราะแก้ไขได้ตลอดเวลา
       ),
       body: _isLoading
           ? const Center(
@@ -280,26 +240,16 @@ class _ModernAccountDetailsScreenState
                   children: [
                     // ข้อมูลส่วนตัว
                     _buildInfoSection('ข้อมูลส่วนตัว', [
-                      _buildInfoItem(
-                        'ชื่อ',
-                        _myUser?.firstName ?? '',
-                        _firstNameController,
+                      _buildEditableItem(
+                        'ชื่อที่ต้องการแสดง',
+                        _displayNameController,
                         Icons.person_outline,
                         validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'กรุณากรอกชื่อ';
+                          if (value == null || value.trim().isEmpty) {
+                            return 'กรุณากรอกชื่อที่ต้องการแสดง';
                           }
-                          return null;
-                        },
-                      ),
-                      _buildInfoItem(
-                        'นามสกุล',
-                        _myUser?.lastName ?? '',
-                        _lastNameController,
-                        Icons.person_outline,
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'กรุณากรอกนามสกุล';
+                          if (value.trim().length < 2) {
+                            return 'กรุณากรอกชื่ออย่างน้อย 2 ตัวอักษร';
                           }
                           return null;
                         },
@@ -315,44 +265,6 @@ class _ModernAccountDetailsScreenState
 
                     const SizedBox(height: 16),
 
-                    // ข้อมูลสุขภาพ
-                    _buildInfoSection('ข้อมูลสุขภาพ', [
-                      _buildInfoItem(
-                        'ส่วนสูง (ซม.)',
-                        _myUser?.height != null && _myUser!.height > 0
-                            ? _myUser!.height.toStringAsFixed(0)
-                            : '',
-                        _heightController,
-                        Icons.height,
-                        keyboardType: TextInputType.number,
-                      ),
-                      _buildInfoItem(
-                        'น้ำหนัก (กก.)',
-                        _myUser?.weight != null && _myUser!.weight > 0
-                            ? _myUser!.weight.toStringAsFixed(0)
-                            : '',
-                        _weightController,
-                        Icons.monitor_weight_outlined,
-                        keyboardType: TextInputType.number,
-                      ),
-                      _buildReadOnlyItem(
-                        'BMI',
-                        _myUser?.bmi != null && _myUser!.bmi > 0
-                            ? '${_myUser!.bmi.toStringAsFixed(1)} (${_myUser!.bmiCategory})'
-                            : 'ไม่ระบุ',
-                        Icons.analytics_outlined,
-                      ),
-                      _buildInfoItem(
-                        'ประวัติการแพ้',
-                        _myUser?.allergies ?? '',
-                        _allergiesController,
-                        Icons.medical_services_outlined,
-                        maxLines: 2,
-                      ),
-                    ]),
-
-                    const SizedBox(height: 16),
-
                     // ข้อมูลติดต่อ
                     _buildInfoSection('ข้อมูลติดต่อ', [
                       _buildReadOnlyItem(
@@ -360,9 +272,8 @@ class _ModernAccountDetailsScreenState
                         _myUser?.email ?? user?.email ?? 'ไม่ระบุ',
                         Icons.email_outlined,
                       ),
-                      _buildInfoItem(
+                      _buildEditableItem(
                         'เบอร์โทรศัพท์',
-                        _myUser?.phoneNumber ?? '',
                         _phoneController,
                         Icons.phone_outlined,
                         keyboardType: TextInputType.phone,
@@ -399,43 +310,42 @@ class _ModernAccountDetailsScreenState
                       ),
                     ]),
 
-                    // ปุ่มบันทึก
-                    if (_isEditing) ...[
-                      const SizedBox(height: 24),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: ElevatedButton(
-                          onPressed: _isLoading ? null : _saveUserData,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.black87,
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
+                    const SizedBox(height: 24),
+
+                    // ปุ่มบันทึก (แสดงตลอด)
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _saveUserData,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.black87,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white,
-                                    ),
-                                  ),
-                                )
-                              : const Text(
-                                  'บันทึกข้อมูล',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
+                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white,
                                   ),
                                 ),
-                        ),
+                              )
+                            : const Text(
+                                'บันทึกข้อมูล',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                       ),
-                    ],
+                    ),
 
                     const SizedBox(height: 32),
                   ],
@@ -444,6 +354,8 @@ class _ModernAccountDetailsScreenState
             ),
     );
   }
+
+  // ---------------- UI helpers ----------------
 
   Widget _buildInfoSection(String title, List<Widget> children) {
     return Container(
@@ -471,9 +383,8 @@ class _ModernAccountDetailsScreenState
     );
   }
 
-  Widget _buildInfoItem(
+  Widget _buildEditableItem(
     String label,
-    String value,
     TextEditingController controller,
     IconData icon, {
     TextInputType keyboardType = TextInputType.text,
@@ -499,49 +410,36 @@ class _ModernAccountDetailsScreenState
           ),
           Expanded(
             flex: 3,
-            child: _isEditing
-                ? TextFormField(
-                    controller: controller,
-                    keyboardType: keyboardType,
-                    maxLines: maxLines,
-                    validator: validator,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: const BorderSide(color: Colors.black87),
-                      ),
-                      hintText: keyboardType == TextInputType.phone
-                          ? '08X-XXX-XXXX'
-                          : null,
-                      hintStyle: TextStyle(color: Colors.grey[400]),
-                    ),
-                  )
-                : Text(
-                    value.isEmpty ? 'ไม่ระบุ' : value,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: value.isEmpty ? Colors.grey[500] : Colors.black87,
-                    ),
-                    textAlign: TextAlign.right,
-                  ),
+            child: TextFormField(
+              controller: controller,
+              keyboardType: keyboardType,
+              maxLines: maxLines,
+              validator: validator,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 8,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: Colors.grey[300]!),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: Colors.grey[300]!),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: const BorderSide(color: Colors.black87),
+                ),
+                hintText: keyboardType == TextInputType.phone
+                    ? '08X-XXX-XXXX'
+                    : null,
+                hintStyle: TextStyle(color: Colors.grey[400]),
+              ),
+            ),
           ),
         ],
       ),
@@ -603,43 +501,28 @@ class _ModernAccountDetailsScreenState
           ),
           Expanded(
             flex: 3,
-            child: _isEditing
-                ? DropdownButtonFormField<String>(
-                    value: _selectedGender,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                    ),
-                    items: ['ชาย', 'หญิง', 'อื่นๆ'].map((gender) {
-                      return DropdownMenuItem(
-                        value: gender,
-                        child: Text(gender),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedGender = value!;
-                      });
-                    },
-                  )
-                : Text(
-                    _selectedGender.isEmpty ? 'ไม่ระบุ' : _selectedGender,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: _selectedGender.isEmpty
-                          ? Colors.grey[500]
-                          : Colors.black87,
-                    ),
-                    textAlign: TextAlign.right,
-                  ),
+            child: DropdownButtonFormField<String>(
+              value: _selectedGender,
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 8,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: Colors.grey[300]!),
+                ),
+              ),
+              items: ['ชาย', 'หญิง', 'อื่นๆ'].map((gender) {
+                return DropdownMenuItem(value: gender, child: Text(gender));
+              }).toList(),
+              onChanged: (value) {
+                setState(() {
+                  _selectedGender = value!;
+                });
+              },
+            ),
           ),
         ],
       ),
@@ -666,60 +549,45 @@ class _ModernAccountDetailsScreenState
           ),
           Expanded(
             flex: 3,
-            child: _isEditing
-                ? InkWell(
-                    onTap: _selectBirthDate,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            _selectedBirthDate != null
-                                ? _formatDate(_selectedBirthDate!)
-                                : 'เลือกวันเกิด',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: _selectedBirthDate != null
-                                  ? Colors.black87
-                                  : Colors.grey[500],
-                            ),
-                          ),
-                          Icon(
-                            Icons.keyboard_arrow_down,
-                            size: 16,
-                            color: Colors.grey[600],
-                          ),
-                        ],
+            child: InkWell(
+              onTap: _selectBirthDate,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[300]!),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      _selectedBirthDate != null
+                          ? _formatDate(_selectedBirthDate!)
+                          : 'เลือกวันเกิด',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: _selectedBirthDate != null
+                            ? Colors.black87
+                            : Colors.grey[500],
                       ),
                     ),
-                  )
-                : Text(
-                    _selectedBirthDate != null
-                        ? _formatDate(_selectedBirthDate!)
-                        : 'ไม่ระบุ',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: _selectedBirthDate != null
-                          ? Colors.black87
-                          : Colors.grey[500],
+                    Icon(
+                      Icons.keyboard_arrow_down,
+                      size: 16,
+                      color: Colors.grey[600],
                     ),
-                    textAlign: TextAlign.right,
-                  ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
+
+  // ---------------- Snackbars ----------------
 
   void _showSuccessSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(

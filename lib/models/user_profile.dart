@@ -4,9 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class UserProfile {
   final String uid;
   final String email;
-  final String firstName;
-  final String lastName;
-  final String fullName;
+  final String displayName;
   final String phoneNumber;
   final String gender;
   final Timestamp? birthDate; // ค.ศ. เป็น Timestamp
@@ -19,9 +17,7 @@ class UserProfile {
   UserProfile({
     required this.uid,
     required this.email,
-    required this.firstName,
-    required this.lastName,
-    required this.fullName,
+    required this.displayName,
     required this.phoneNumber,
     required this.gender,
     this.birthDate,
@@ -34,12 +30,12 @@ class UserProfile {
 
   factory UserProfile.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final d = doc.data() ?? {};
+    final resolvedDisplay = (d['displayName'] ?? '') as String;
+
     return UserProfile(
       uid: doc.id,
       email: (d['email'] ?? '') as String,
-      firstName: (d['firstName'] ?? '') as String,
-      lastName: (d['lastName'] ?? '') as String,
-      fullName: (d['fullName'] ?? '') as String,
+      displayName: resolvedDisplay.trim(),
       phoneNumber: (d['phoneNumber'] ?? '') as String,
       gender: (d['gender'] ?? '') as String,
       birthDate: d['birthDate'] as Timestamp?,
@@ -54,9 +50,7 @@ class UserProfile {
   Map<String, dynamic> toMap() {
     return {
       'email': email,
-      'firstName': firstName,
-      'lastName': lastName,
-      'fullName': fullName,
+      'displayName': displayName,
       'phoneNumber': phoneNumber,
       'gender': gender,
       'birthDate': birthDate,

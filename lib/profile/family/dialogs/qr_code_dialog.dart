@@ -1,415 +1,296 @@
-// screens/family/dialogs/qr_code_dialog.dart
+// lib/profile/family/dialogs/qr_code_dialog.dart
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
-class QRCodeDialog {
-  static void show({required BuildContext context, required String familyId}) {
-    showDialog(
+/// Dialog แสดง QR สำหรับเชิญเข้าครอบครัว (แนวทาง A: ชื่อเรียลไทม์อ่านจาก users/{uid})
+///
+/// การใช้งานแบบเดิม (Backward-compatible):
+/// ```dart
+/// await QRCodeDialog.show(
+///   context: context,
+///   payload: yourEncodedString,
+///   inviteCode: 'ABC123',
+/// );
+/// ```
+///
+/// การใช้งานแบบ enriched อัตโนมัติ:
+/// ```dart
+/// await QRCodeDialog.show(
+///   context: context,
+///   payload: '',                 // ถ้าไม่อยากสร้างเอง
+///   familyId: fid,               // ใส่ familyId
+///   enrichWithInviter: true,     // (ค่าเริ่มต้น true) จะดึง inviterUid/displayName ให้อัตโนมัติ
+///   inviteCode: 'ABC123',
+/// );
+/// ```
+class QRCodeDialog extends StatelessWidget {
+  const QRCodeDialog._({
+    super.key,
+    required this.title,
+    required this.payload,
+    this.inviteCode,
+    this.subtitle,
+    required this.qrSize,
+  });
+
+  /// เปิด Dialog
+  static Future<void> show({
+    required BuildContext context,
+    required String payload,
+    String? inviteCode,
+    String title = 'สแกนเพื่อเข้าร่วมครอบครัว',
+    String? subtitle,
+    double qrSize = 220,
+    // เพิ่มความสามารถใหม่ (ไม่บังคับใช้): ให้ตัว Dialog ช่วย "เติมข้อมูลผู้เชิญ" ลง payload ให้เอง
+    String? familyId,
+    bool enrichWithInviter = true,
+  }) async {
+    // ถ้าขอให้ enrich และมี familyId ให้สร้าง payload ใหม่แบบ JSON ใส่ inviter
+    if (enrichWithInviter && (familyId != null && familyId.isNotEmpty)) {
+      final enriched = await _buildEnrichedPayload(familyId);
+      if (enriched != null) {
+        payload = enriched;
+      }
+    }
+
+    return showDialog<void>(
       context: context,
-      builder: (context) => _QRCodeDialogContent(familyId: familyId),
+      barrierDismissible: true,
+      builder: (_) => QRCodeDialog._(
+        title: title,
+        payload: payload,
+        inviteCode: inviteCode,
+        subtitle: subtitle,
+        qrSize: qrSize,
+      ),
     );
   }
-}
 
-class _QRCodeDialogContent extends StatefulWidget {
-  final String familyId;
+  final String title;
+  final String payload;
+  final String? inviteCode;
+  final String? subtitle;
+  final double qrSize;
 
-  const _QRCodeDialogContent({required this.familyId});
+  static Future<String?> _buildEnrichedPayload(String familyId) async {
+    try {
+      final auth = FirebaseAuth.instance;
+      final uid = auth.currentUser?.uid;
+      if (uid == null) return null;
 
-  @override
-  State<_QRCodeDialogContent> createState() => _QRCodeDialogContentState();
-}
+      // อ่าน displayName สด ๆ จาก users/{uid}
+      final uSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
 
-class _QRCodeDialogContentState extends State<_QRCodeDialogContent>
-    with TickerProviderStateMixin {
-  late TabController _tabController;
-  late String _inviteCode;
-  late String _inviteLink;
+      final inviterDisplayName =
+          (uSnap.data() ?? const {})['displayName'] as String? ?? '';
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _inviteCode = 'FAMILY_${widget.familyId.substring(0, 8).toUpperCase()}';
-    _inviteLink = 'https://yourapp.com/join/$_inviteCode';
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+      // โครง payload เป็น JSON string (อ่านง่ายและขยายในอนาคต)
+      final data = <String, dynamic>{
+        'familyId': familyId,
+        'inviterUid': uid,
+        'inviterDisplayName': inviterDisplayName,
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
+        'v': 2, // เวอร์ชัน schema
+      };
+      return jsonEncode(data);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final code = (inviteCode ?? '').trim();
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(16),
-                ),
-              ),
-              child: Row(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+      insetPadding: const EdgeInsets.symmetric(
+        horizontal: 24.0,
+        vertical: 16.0,
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Header
+              Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[100],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      Icons.qr_code,
-                      color: Colors.blue[700],
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      'เชิญสมาชิกเข้าร่วม',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        if (subtitle != null && subtitle!.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4.0),
+                            child: Text(
+                              subtitle!,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   IconButton(
-                    onPressed: () => Navigator.pop(context),
+                    tooltip: 'ปิด',
                     icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 12.0),
 
-            // Tab bar
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
-              ),
-              child: TabBar(
-                controller: _tabController,
-                tabs: const [
-                  Tab(text: 'QR Code'),
-                  Tab(text: 'รหัสเชิญ'),
-                ],
-                labelColor: Colors.blue[700],
-                unselectedLabelColor: Colors.grey[600],
-                indicatorColor: Colors.blue[700],
-              ),
-            ),
-
-            // Tab content
-            SizedBox(
-              height: 400,
-              child: TabBarView(
-                controller: _tabController,
-                children: [_buildQRCodeTab(), _buildInviteCodeTab()],
-              ),
-            ),
-
-            // Actions
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Colors.grey[50],
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(16),
+              // QR Box
+              Container(
+                padding: const EdgeInsets.all(12.0),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12.0),
+                ),
+                child: QrImageView(
+                  data: payload,
+                  version: QrVersions.auto,
+                  size: qrSize,
+                  gapless: true,
                 ),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _copyToClipboard,
+              const SizedBox(height: 12.0),
+
+              // Invite code (ถ้ามี)
+              if (code.isNotEmpty) ...[
+                SelectableText(
+                  code,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontFeatures: const [ui.FontFeature.tabularFigures()],
+                    letterSpacing: 1.0,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8.0),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton.icon(
                       icon: const Icon(Icons.copy),
                       label: const Text('คัดลอก'),
+                      onPressed: () async {
+                        await Clipboard.setData(ClipboardData(text: code));
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('คัดลอกโค้ดแล้ว')),
+                          );
+                        }
+                      },
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _shareInvite,
+                    const SizedBox(width: 8.0),
+                    TextButton.icon(
                       icon: const Icon(Icons.share),
-                      label: const Text('แชร์'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue[600],
-                        foregroundColor: Colors.white,
-                      ),
+                      label: const Text('แชร์โค้ด'),
+                      onPressed: () async {
+                        await Share.share(code);
+                      },
                     ),
+                  ],
+                ),
+              ],
+
+              const SizedBox(height: 12.0),
+              // Actions (Save / Share QR)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  FilledButton.icon(
+                    icon: const Icon(Icons.download),
+                    label: const Text('บันทึกภาพ QR'),
+                    onPressed: () async {
+                      try {
+                        final file = await _saveQrToFile(
+                          payload,
+                          size: (qrSize + 24.0),
+                        );
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('บันทึกแล้ว: ${file.path}')),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('บันทึกไม่สำเร็จ: $e')),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 12.0),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.ios_share),
+                    label: const Text('แชร์รูป QR'),
+                    onPressed: () async {
+                      try {
+                        final file = await _saveQrToFile(
+                          payload,
+                          size: (qrSize + 24.0),
+                        );
+                        await Share.shareXFiles([XFile(file.path)]);
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('แชร์ไม่สำเร็จ: $e')),
+                          );
+                        }
+                      }
+                    },
                   ),
                 ],
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildQRCodeTab() {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          const Text(
-            'ให้สมาชิกใหม่สแกน QR Code นี้',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-
-          // QR Code
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[300]!),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: QrImageView(
-              data: _inviteLink,
-              version: QrVersions.auto,
-              size: 200.0,
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
-              errorCorrectionLevel: QrErrorCorrectLevel.M,
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          // Instructions
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.green[50],
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.green[200]!),
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.smartphone, color: Colors.green[600], size: 32),
-                const SizedBox(height: 8),
-                Text(
-                  'วิธีใช้งาน',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.green[700],
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '1. เปิดแอปในมือถือของสมาชิก\n'
-                  '2. เลือก "เข้าร่วมครอบครัว"\n'
-                  '3. สแกน QR Code นี้',
-                  style: TextStyle(fontSize: 12, color: Colors.green[600]),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+  /// เรนเดอร์ QR เป็น PNG แล้วบันทึกลง temp directory
+  static Future<File> _saveQrToFile(String data, {num size = 256}) async {
+    final painter = QrPainter(
+      data: data,
+      version: QrVersions.auto,
+      gapless: true,
     );
-  }
 
-  Widget _buildInviteCodeTab() {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          const Text(
-            'แชร์รหัสเชิญหรือลิงก์นี้',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 20),
-
-          // Invite Code
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.blue[50],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.blue[200]!),
-            ),
-            child: Column(
-              children: [
-                Text(
-                  'รหัสเชิญ',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.blue[700],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SelectableText(
-                  _inviteCode,
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 2,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    TextButton.icon(
-                      onPressed: () => _copyText(_inviteCode),
-                      icon: const Icon(Icons.copy, size: 16),
-                      label: const Text('คัดลอกรหัส'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.blue[700],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Invite Link
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[300]!),
-            ),
-            child: Column(
-              children: [
-                Text(
-                  'ลิงก์เชิญ',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[700],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SelectableText(
-                  _inviteLink,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.blue,
-                    decoration: TextDecoration.underline,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    TextButton.icon(
-                      onPressed: () => _copyText(_inviteLink),
-                      icon: const Icon(Icons.copy, size: 16),
-                      label: const Text('คัดลอกลิงก์'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.grey[700],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          // Expiry info
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.orange[50],
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange[200]!),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.schedule, color: Colors.orange[600], size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'รหัสเชิญนี้ใช้ได้ถาวร แต่คุณสามารถเปลี่ยนใหม่ได้ตลอดเวลา',
-                    style: TextStyle(fontSize: 12, color: Colors.orange[700]),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _copyToClipboard() {
-    final currentTab = _tabController.index;
-    final textToCopy = currentTab == 0 ? _inviteLink : _inviteCode;
-    _copyText(textToCopy);
-  }
-
-  void _copyText(String text) {
-    Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('คัดลอก${text.contains('http') ? 'ลิงก์' : 'รหัส'}แล้ว'),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  void _shareInvite() async {
-    try {
-      final message =
-          '''
-🏥 เชิญเข้าร่วมครอบครัวใน Health App
-
-👨‍👩‍👧‍👦 ครอบครัวของเราต้องการให้คุณเข้าร่วม!
-
-📱 วิธีเข้าร่วม:
-1. ดาวน์โหลดแอป Health App
-2. เลือก "เข้าร่วมครอบครัว"
-3. ใช้รหัสเชิญ: $_inviteCode
-หรือคลิกลิงก์: $_inviteLink
-
-💚 มาดูแลสุขภาพไปด้วยกัน!
-      ''';
-
-      await Share.share(message, subject: 'เชิญเข้าร่วมครอบครัวใน Health App');
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('ไม่สามารถแชร์ได้: $e'),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    final uiImage = await painter.toImage(size.toDouble());
+    final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null) {
+      throw Exception('สร้างภาพ QR ไม่สำเร็จ');
     }
+
+    final bytes = Uint8List.view(byteData.buffer);
+    final dir = await getTemporaryDirectory();
+    final file = File(
+      '${dir.path}/family_invite_qr_${DateTime.now().millisecondsSinceEpoch}.png',
+    );
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
   }
 }

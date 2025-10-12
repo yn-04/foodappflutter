@@ -1,8 +1,13 @@
 // lib/profile/health_info_screen.dart — Health Info (Modern UI + Always Editable + BMI no-overflow + Allergy suggestions
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:my_app/profile/model/my_user.dart';
+import 'package:my_app/services/firebase_storage_service.dart';
 
 class HealthInfoScreen extends StatefulWidget {
   const HealthInfoScreen({super.key});
@@ -20,6 +25,11 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
 
   MyUser? _currentUser;
   Map<String, dynamic>? _additionalHealthData;
+
+  final TextEditingController _displayNameController = TextEditingController();
+  File? _selectedProfileImage;
+  String? _currentPhotoUrl;
+  final ImagePicker _imagePicker = ImagePicker();
 
   // ---- Base controllers ----
   final TextEditingController _heightController = TextEditingController();
@@ -96,6 +106,7 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
 
   @override
   void dispose() {
+    _displayNameController.dispose();
     _heightController.dispose();
     _weightController.dispose();
     _allergiesController.removeListener(_handleAllergyTyping);
@@ -115,7 +126,7 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     try {
       final doc = await FirebaseFirestore.instance
           .collection('users')
-          .doc(_user!.uid)
+          .doc(_user.uid)
           .get();
 
       MyUser? currentUser;
@@ -134,18 +145,23 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
       if (extras == null || extras.isEmpty) {
         final legacyDoc = await FirebaseFirestore.instance
             .collection('health_profiles')
-            .doc(_user!.uid)
+            .doc(_user.uid)
             .get();
         if (legacyDoc.exists) extras = legacyDoc.data();
       }
 
       if (!mounted) return;
 
+      final authUser = FirebaseAuth.instance.currentUser;
       setState(() {
         _currentUser = currentUser;
         _additionalHealthData = extras == null || extras.isEmpty
             ? null
             : Map<String, dynamic>.from(extras);
+        _currentPhotoUrl = authUser?.photoURL;
+        final resolvedName =
+            currentUser?.displayName ?? authUser?.displayName ?? '';
+        _displayNameController.text = resolvedName;
       });
 
       _populateBase();
@@ -159,6 +175,11 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
   }
 
   void _populateBase() {
+    final displayName = _currentUser?.displayName ?? (_user?.displayName ?? '');
+    if (_displayNameController.text.trim() != displayName.trim()) {
+      _displayNameController.text = displayName;
+    }
+
     final h = _currentUser?.height ?? 0;
     final w = _currentUser?.weight ?? 0;
     _heightController.text = h > 0 ? h.toStringAsFixed(0) : '';
@@ -248,6 +269,10 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     if (user == null || base == null) return;
     if (!_formKey.currentState!.validate()) return;
 
+    final displayName = _displayNameController.text.trim();
+    final nameChanged = displayName != base.displayName;
+    final imageChanged = _selectedProfileImage != null;
+
     final h = double.tryParse(_heightController.text.trim()) ?? 0;
     final w = double.tryParse(_weightController.text.trim()) ?? 0;
 
@@ -288,7 +313,34 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     if (targets.isNotEmpty) profile['nutritionTargetsPerMeal'] = targets;
 
     setState(() => _isSaving = true);
+    var updatedModel = base;
+    String? nextPhotoUrl = _currentPhotoUrl;
+    final shouldUpdateProfileBasics = nameChanged || imageChanged;
+
     try {
+      if (shouldUpdateProfileBasics) {
+        try {
+          if (imageChanged) {
+            await FirebaseStorageService.updateCompleteProfile(
+              displayName: displayName,
+              imageFile: _selectedProfileImage,
+            );
+          } else {
+            await FirebaseStorageService.updateUserProfile(
+              displayName: displayName,
+            );
+          }
+          await FirebaseAuth.instance.currentUser?.reload();
+          final refreshedUser = FirebaseAuth.instance.currentUser;
+          nextPhotoUrl = refreshedUser?.photoURL;
+          updatedModel = updatedModel.copyWith(displayName: displayName);
+        } catch (e) {
+          if (!mounted) return;
+          _showSnackBar('อัปเดตชื่อหรือรูปภาพไม่สำเร็จ: $e', success: false);
+          return;
+        }
+      }
+
       final updates = <String, dynamic>{'height': h, 'weight': w};
       if (profile.isEmpty) {
         updates['healthProfile'] = FieldValue.delete();
@@ -303,7 +355,7 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
 
       if (!mounted) return;
       setState(() {
-        _currentUser = base.copyWith(
+        _currentUser = updatedModel.copyWith(
           height: h,
           weight: w,
           allergies: allergies,
@@ -311,6 +363,11 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
         _additionalHealthData = profile.isEmpty
             ? null
             : Map<String, dynamic>.from(profile);
+        _currentPhotoUrl = nextPhotoUrl;
+        if (shouldUpdateProfileBasics) {
+          _selectedProfileImage = null;
+          _displayNameController.text = updatedModel.displayName;
+        }
       });
       _showSnackBar('บันทึกข้อมูลสำเร็จ');
     } catch (e) {
@@ -319,6 +376,149 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  void _showImagePickerSheet() {
+    if (_isSaving) return;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('ถ่ายรูปใหม่'),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                await _pickProfileImage(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('เลือกรูปจากแกลเลอรี่'),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                await _pickProfileImage(ImageSource.gallery);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickProfileImage(ImageSource source) async {
+    if (_isSaving) return;
+    try {
+      final XFile? picked = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+      if (picked != null) {
+        setState(() {
+          _selectedProfileImage = File(picked.path);
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar('ไม่สามารถเลือกรูปภาพได้: $e', success: false);
+    }
+  }
+
+  Widget _buildProfileSection() {
+    ImageProvider<Object>? imageProvider;
+    if (_selectedProfileImage != null) {
+      imageProvider = FileImage(_selectedProfileImage!);
+    } else if (_currentPhotoUrl != null && _currentPhotoUrl!.isNotEmpty) {
+      imageProvider = NetworkImage(_currentPhotoUrl!);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 42,
+                  backgroundColor: const Color(0xFFE5E6EB),
+                  backgroundImage: imageProvider,
+                  child: imageProvider == null
+                      ? const Icon(Icons.person, size: 42, color: Colors.white)
+                      : null,
+                ),
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: GestureDetector(
+                    onTap: _isSaving ? null : _showImagePickerSheet,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: _isSaving ? Colors.grey[400] : Colors.black87,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      child: const Icon(
+                        Icons.edit,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 18),
+            Expanded(
+              child: TextFormField(
+                controller: _displayNameController,
+                decoration: const InputDecoration(
+                  labelText: 'ชื่อที่ต้องการแสดง',
+                  hintText: 'เช่น Nina',
+                ),
+                enabled: !_isSaving,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                validator: _displayNameValidator,
+                inputFormatters: [
+                  FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                ],
+                textInputAction: TextInputAction.next,
+              ),
+            ),
+          ],
+        ),
+        if (_selectedProfileImage != null) ...[
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _isSaving
+                  ? null
+                  : () {
+                      setState(() {
+                        _selectedProfileImage = null;
+                      });
+                    },
+              icon: const Icon(Icons.cancel_outlined),
+              label: const Text('ยกเลิกรูปภาพที่เลือก'),
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
+        Text(
+          'ชื่อและรูปภาพของคุณจะแสดงกับสมาชิกครอบครัวและการแนะนำอาหาร',
+          style: TextStyle(fontSize: 11.5, color: Colors.grey[600]),
+        ),
+      ],
+    );
   }
 
   // ------- UI -------
@@ -347,6 +547,12 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                 children: [
+                  _ModernCard(
+                    title: 'โปรไฟล์ผู้ใช้',
+                    icon: Icons.person_outline,
+                    child: _buildProfileSection(),
+                  ),
+                  const SizedBox(height: 16),
                   _ModernCard(
                     title: 'ดัชนีมวลกาย (BMI)',
                     icon: Icons.health_and_safety,
@@ -618,6 +824,16 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
   }
 
   // ---- validators ----
+  String? _displayNameValidator(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return 'กรุณากรอกชื่อที่ต้องการแสดง';
+    if (trimmed.contains(RegExp(r'\s'))) {
+      return 'กรุณากรอกชื่อที่ติดกันไม่เว้นวรรค';
+    }
+    if (trimmed.length < 2) return 'กรุณากรอกชื่ออย่างน้อย 2 ตัวอักษร';
+    return null;
+  }
+
   String? _numberOrEmptyValidator(String? value) {
     if (value == null || value.trim().isEmpty) return null;
     final d = double.tryParse(value.trim());

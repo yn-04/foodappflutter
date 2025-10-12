@@ -103,6 +103,19 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
   }
   // -----------------------------------
 
+  DocumentReference<Map<String, dynamic>>? _itemRef() {
+    if (widget.item.reference != null) return widget.item.reference;
+    final ownerId = widget.item.ownerId.isNotEmpty
+        ? widget.item.ownerId
+        : _auth.currentUser?.uid ?? '';
+    if (ownerId.isEmpty) return null;
+    return _firestore
+        .collection('users')
+        .doc(ownerId)
+        .collection('raw_materials')
+        .doc(widget.item.id);
+  }
+
   String _formatThaiDate(DateTime d) {
     final day = d.day.toString().padLeft(2, '0');
     final month = d.month.toString().padLeft(2, '0');
@@ -144,23 +157,24 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       return;
     }
 
+    final docRef = _itemRef();
+    if (docRef == null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('ไม่พบข้อมูลรายการนี้ในคลัง')),
+      );
+      return;
+    }
+
     setState(() => _saving = true);
     try {
-      await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('raw_materials')
-          .doc(widget.item.id)
-          .update({
-            'name': newName,
-            'category': _category,
-            'quantity': newQty,
-            'unit': _unit,
-            'expiry_date': _expiry != null
-                ? Timestamp.fromDate(_expiry!)
-                : null,
-            'updated_at': FieldValue.serverTimestamp(),
-          });
+      await docRef.update({
+        'name': newName,
+        'category': _category,
+        'quantity': newQty,
+        'unit': _unit,
+        'expiry_date': _expiry != null ? Timestamp.fromDate(_expiry!) : null,
+        'updated_at': FieldValue.serverTimestamp(),
+      });
       if (!mounted) return;
       _safePop(true);
     } catch (e, st) {
@@ -206,12 +220,14 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     if (ok != true) return;
 
     try {
-      await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('raw_materials')
-          .doc(widget.item.id)
-          .delete();
+      final docRef = _itemRef();
+      if (docRef == null) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(content: Text('ไม่พบข้อมูลรายการนี้ในคลัง')),
+        );
+        return;
+      }
+      await docRef.delete();
       if (!mounted) return;
       _safePop(true);
     } catch (e, st) {
@@ -588,6 +604,21 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
       if (!mounted || _isPopping) return;
       setState(() => _saving = true);
 
+      String? familyId = widget.item.familyId;
+      if (familyId == null || familyId.isEmpty) {
+        final userDoc = await _firestore
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        final rawUserData = userDoc.data();
+        final fetchedFamilyId =
+            ((rawUserData?['familyId'] ?? rawUserData?['family_id']) as String?)
+                ?.trim();
+        if (fetchedFamilyId != null && fetchedFamilyId.isNotEmpty) {
+          familyId = fetchedFamilyId;
+        }
+      }
+
       await _firestore
           .collection('users')
           .doc(user.uid)
@@ -604,6 +635,8 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
             'created_at': FieldValue.serverTimestamp(),
             'updated_at': FieldValue.serverTimestamp(),
             'user_id': user.uid,
+            'ownerId': user.uid,
+            if (familyId != null) 'familyId': familyId,
           });
 
       if (!mounted) return;

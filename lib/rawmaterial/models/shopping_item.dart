@@ -11,6 +11,9 @@ class ShoppingItem {
   final String imageUrl;
   final DateTime? createdAt;
   final DateTime? updatedAt;
+  final String ownerId;
+  final String? familyId;
+  final DocumentReference<Map<String, dynamic>>? reference;
 
   ShoppingItem({
     required this.id,
@@ -22,6 +25,9 @@ class ShoppingItem {
     required this.imageUrl,
     this.createdAt,
     this.updatedAt,
+    this.ownerId = '',
+    this.familyId,
+    this.reference,
   });
 
   /// อนุพันธ์: ไม่ต้องเก็บลง Firestore
@@ -36,7 +42,26 @@ class ShoppingItem {
     return _dateOnly(expiryDate!).difference(_today()).inDays;
   }
 
-  factory ShoppingItem.fromMap(Map<String, dynamic> map, String id) {
+  factory ShoppingItem.fromMap(
+    Map<String, dynamic> map,
+    String id, {
+    String? ownerId,
+    String? familyId,
+    DocumentReference<Map<String, dynamic>>? reference,
+  }) {
+    String _normalizeString(dynamic value) {
+      if (value is String) return value.trim();
+      if (value == null) return '';
+      return value.toString().trim();
+    }
+
+    final String resolvedOwner = _normalizeString(
+      ownerId ?? map['ownerId'] ?? map['owner_id'],
+    );
+    final String resolvedFamily = _normalizeString(
+      familyId ?? map['familyId'] ?? map['family_id'],
+    );
+
     return ShoppingItem(
       id: id,
       name: (map['name'] ?? '').toString(),
@@ -47,6 +72,9 @@ class ShoppingItem {
       imageUrl: (map['imageUrl'] ?? '').toString(),
       createdAt: _toDateTime(map['created_at']),
       updatedAt: _toDateTime(map['updated_at']),
+      ownerId: resolvedOwner,
+      familyId: resolvedFamily.isEmpty ? null : resolvedFamily,
+      reference: reference,
     );
   }
 
@@ -62,7 +90,38 @@ class ShoppingItem {
       'imageUrl': imageUrl,
       'created_at': createdAt,
       'updated_at': updatedAt,
+      if (ownerId.isNotEmpty) 'ownerId': ownerId,
+      if ((familyId ?? '').isNotEmpty) 'familyId': familyId,
     };
+  }
+
+  ShoppingItem copyWith({
+    String? name,
+    String? category,
+    int? quantity,
+    String? unit,
+    DateTime? expiryDate,
+    String? imageUrl,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    String? ownerId,
+    String? familyId,
+    DocumentReference<Map<String, dynamic>>? reference,
+  }) {
+    return ShoppingItem(
+      id: id,
+      name: name ?? this.name,
+      category: category ?? this.category,
+      quantity: quantity ?? this.quantity,
+      unit: unit ?? this.unit,
+      expiryDate: expiryDate ?? this.expiryDate,
+      imageUrl: imageUrl ?? this.imageUrl,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      ownerId: ownerId ?? this.ownerId,
+      familyId: familyId ?? this.familyId,
+      reference: reference ?? this.reference,
+    );
   }
 
   // ---------- helpers ----------

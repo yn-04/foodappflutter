@@ -218,8 +218,8 @@ class UserService {
     try {
       final querySnapshot = await _firestore
           .collection(_collection)
-          .where('fullName', isGreaterThanOrEqualTo: name)
-          .where('fullName', isLessThanOrEqualTo: '$name\uf8ff')
+          .where('displayName', isGreaterThanOrEqualTo: name)
+          .where('displayName', isLessThanOrEqualTo: '$name\uf8ff')
           .limit(20)
           .get();
 
@@ -258,11 +258,8 @@ class UserService {
     final errors = <String, String>{};
 
     // Validate required fields
-    if (user.firstName.isEmpty) {
-      errors['firstName'] = 'กรุณากรอกชื่อ';
-    }
-    if (user.lastName.isEmpty) {
-      errors['lastName'] = 'กรุณากรอกนามสกุล';
+    if (user.displayName.isEmpty) {
+      errors['displayName'] = 'กรุณากรอกชื่อที่ต้องการแสดง';
     }
     if (user.email.isEmpty) {
       errors['email'] = 'กรุณากรอกอีเมล';

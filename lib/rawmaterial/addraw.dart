@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:my_app/rawmaterial/constants/categories.dart';
 import 'package:my_app/rawmaterial/constants/shelf_life.dart';
 import 'package:my_app/rawmaterial/constants/units.dart';
+import 'package:my_app/welcomeapp/home.dart';
 
 class AddRawMaterialPage extends StatefulWidget {
   const AddRawMaterialPage({
@@ -622,6 +623,22 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
         price = double.tryParse(priceText.replaceAll(',', ''));
       }
 
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
+      final rawUserData = userDoc.data();
+      final familyIdValue =
+          ((rawUserData?['familyId'] ?? rawUserData?['family_id']) as String?)
+              ?.trim();
+      final normalizedFamilyId =
+          (familyIdValue != null && familyIdValue.isNotEmpty)
+          ? familyIdValue
+          : null;
+
+      if (expiryDate == null) {
+        _showSnackBar('กรุณาเลือกวันที่หมดอายุ');
+        if (mounted) setState(() => _isSaving = false);
+        return;
+      }
+
       final doc = <String, dynamic>{
         'name': name,
         'name_key': name.toLowerCase(),
@@ -642,6 +659,8 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
         'notes': _notesController.text.trim(),
         'created_at': FieldValue.serverTimestamp(),
         'created_at_local': now.toIso8601String(),
+        'ownerId': user.uid,
+        if (normalizedFamilyId != null) 'familyId': normalizedFamilyId,
       };
 
       await _firestore
@@ -652,7 +671,14 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
 
       if (!mounted) return;
       _showSnackBar('บันทึกสำเร็จ', success: true);
-      Navigator.of(context).pop(true);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => const HomeScreen(initialIndex: 1),
+        ),
+        (route) => false,
+      );
     } catch (e) {
       if (!mounted) return;
       _showSnackBar('บันทึกไม่สำเร็จ กรุณาลองใหม่');

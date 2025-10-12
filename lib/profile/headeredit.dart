@@ -3,10 +3,10 @@
 
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-// import 'package:my_app/services/firebase_storage_service.dart'; // TODO: เปิดใช้เมื่อเปิด Storage
+import 'package:my_app/services/firebase_storage_service.dart';
 
 class HeaderEditDialog {
   /// แสดง Dialog สำหรับแก้ไขโปรไฟล์ผู้ใช้
@@ -130,6 +130,9 @@ class HeaderEditDialog {
                       child: TextField(
                         controller: nameController,
                         enabled: !isLoading,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                        ],
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
@@ -167,8 +170,8 @@ class HeaderEditDialog {
                             onPressed: isLoading
                                 ? null
                                 : () {
-                                    nameController.dispose();
                                     Navigator.of(context).pop();
+                                    Future.microtask(nameController.dispose);
                                   },
                             style: TextButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -206,7 +209,7 @@ class HeaderEditDialog {
                                         ).showSnackBar(
                                           const SnackBar(
                                             content: Text(
-                                              'ชื่อต้องมีความยาว 2-50 ตัวอักษร และไม่มีอักขระพิเศษ',
+                                              'ชื่อต้องมีความยาว 2-50 ตัวอักษร และห้ามมีช่องว่างหรืออักขระพิเศษ',
                                             ),
                                             backgroundColor: Colors.orange,
                                             behavior: SnackBarBehavior.floating,
@@ -244,47 +247,37 @@ class HeaderEditDialog {
                                     try {
                                       final auth = FirebaseAuth.instance;
                                       final user = auth.currentUser!;
-                                      final users = FirebaseFirestore.instance
-                                          .collection('users');
 
-                                      // ✅ อัปเดตเฉพาะ username ใน Firestore (ไม่แตะ firstName)
-                                      await users.doc(user.uid).set({
-                                        'username': trimmedName,
-                                        'updatedAt':
-                                            FieldValue.serverTimestamp(),
-                                      }, SetOptions(merge: true));
+                                      if (selectedImage != null) {
+                                        await FirebaseStorageService.updateCompleteProfile(
+                                          displayName: trimmedName,
+                                          imageFile: selectedImage,
+                                        );
+                                      } else {
+                                        await FirebaseStorageService.updateUserProfile(
+                                          displayName: trimmedName,
+                                        );
+                                      }
 
-                                      // (ทางเลือก) อัปเดต displayName ใน Auth เพื่อให้ UI อื่น ๆ ที่อ้างถึง auth เห็นชื่อใหม่เร็วขึ้น
-                                      await user.updateDisplayName(trimmedName);
                                       await user.reload();
-
-                                      // ===== ส่วนอัปรูป (คอมเมนต์ไว้ก่อน) =====
-                                      // if (selectedImage != null) {
-                                      //   await FirebaseStorageService.testConnection();
-                                      //   final newPhotoUrl = await FirebaseStorageService.uploadProfileImage(
-                                      //     file: selectedImage!,
-                                      //     uid: user.uid,
-                                      //   );
-                                      //   await user.updatePhotoURL(newPhotoUrl);
-                                      //   await users.doc(user.uid).set({'photoURL': newPhotoUrl}, SetOptions(merge: true));
-                                      // }
-                                      // ======================================
+                                      final refreshed =
+                                          FirebaseAuth.instance.currentUser;
 
                                       if (!context.mounted) return;
 
-                                      // ส่งค่าให้ parent อัปเดต state
-                                      onSave(trimmedName, selectedImage);
+                                      onSave(
+                                        refreshed?.displayName ?? trimmedName,
+                                        selectedImage,
+                                      );
 
-                                      nameController.dispose();
                                       Navigator.of(context).pop();
+                                      Future.microtask(nameController.dispose);
 
                                       ScaffoldMessenger.of(
                                         context,
                                       ).showSnackBar(
                                         const SnackBar(
-                                          content: Text(
-                                            'อัปเดตชื่อผู้ใช้สำเร็จ',
-                                          ),
+                                          content: Text('อัปเดตโปรไฟล์สำเร็จ'),
                                           backgroundColor: Colors.green,
                                           behavior: SnackBarBehavior.floating,
                                           duration: Duration(seconds: 2),
@@ -339,6 +332,7 @@ class HeaderEditDialog {
     if (name.trim().isEmpty) return false;
     if (name.trim().length < 2) return false;
     if (name.trim().length > 50) return false;
+    if (name.contains(RegExp(r'\s'))) return false;
     final List<String> invalidChars = ['<', '>', '"', "'", '&'];
     for (final ch in invalidChars) {
       if (name.contains(ch)) return false;

@@ -3,8 +3,9 @@
 // ถ้าอีเมลถูกใช้งาน → โชว์ error ใต้ช่องและ "ไม่ไปหน้า profile-setup"
 
 import 'dart:async';
-import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -15,7 +16,7 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _name = TextEditingController();
+  final _displayName = TextEditingController();
   final _email = TextEditingController();
   final _pass = TextEditingController();
   final _confirm = TextEditingController();
@@ -39,7 +40,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   void dispose() {
-    _name.dispose();
+    _displayName.dispose();
     _email.dispose();
     _pass.dispose();
     _confirm.dispose();
@@ -49,12 +50,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   // ===== Validators =====
-  String? _validateName(String? v) {
-    if (v == null || v.trim().isEmpty) return 'กรุณากรอกชื่อ-นามสกุล';
-    final parts = v.trim().split(' ').where((e) => e.isNotEmpty).toList();
-    if (parts.length < 2) return 'กรุณากรอกทั้งชื่อและนามสกุล';
-    if (parts.any((p) => p.length < 2))
-      return 'ชื่อ-นามสกุลต้องมีอย่างน้อย 2 ตัวอักษร';
+  String? _validateDisplayName(String? v) {
+    final value = v?.trim() ?? '';
+    if (value.isEmpty) return 'กรุณากรอกชื่อที่ต้องการแสดง';
+    if (value.contains(RegExp(r'\s'))) {
+      return 'กรุณากรอกชื่อที่ติดกันไม่เว้นวรรค';
+    }
+    if (value.length < 2) {
+      return 'กรุณากรอกชื่ออย่างน้อย 2 ตัวอักษร';
+    }
     return null;
   }
 
@@ -186,7 +190,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       context,
       '/profile-setup',
       arguments: {
-        'name': _name.text.trim(),
+        'name': _displayName.text.trim(),
         'email': _email.text.trim(),
         'password': _pass.text,
       },
@@ -228,16 +232,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 40),
 
-                // ชื่อ-นามสกุล
+                // ชื่อที่ต้องการแสดง
                 TextFormField(
-                  controller: _name,
-                  validator: _validateName,
+                  controller: _displayName,
+                  validator: _validateDisplayName,
                   autovalidateMode: AutovalidateMode.onUserInteraction,
                   textInputAction: TextInputAction.next,
                   keyboardType: TextInputType.name,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                  ],
                   decoration: InputDecoration(
-                    labelText: 'ชื่อ-นามสกุล',
-                    hintText: 'เช่น สมชาย ใจดี',
+                    labelText: 'ชื่อที่ต้องการแสดง',
+                    hintText: 'เช่น Nina, Nutchanon',
                     prefixIcon: const Icon(Icons.person_outline),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),

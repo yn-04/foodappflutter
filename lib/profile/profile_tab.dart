@@ -1,15 +1,19 @@
 // profile_tab.dart (Main Profile Tab)
+import 'dart:async';
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 import 'package:my_app/profile/account_details/account_details_screen.dart';
 import 'package:my_app/profile/account_settings/account_settings_screen.dart';
 import 'package:my_app/profile/family/family_account_screen.dart';
 import 'package:my_app/profile/health_info_screen.dart';
-import 'dart:io';
+
 import 'headeredit.dart';
 
 class ProfileTab extends StatefulWidget {
+  static const route = '/profile';
   const ProfileTab({super.key});
 
   @override
@@ -20,11 +24,77 @@ class _ProfileTabState extends State<ProfileTab> {
   File? _selectedImage;
   String? _updatedDisplayName;
   bool _isLoading = false;
+  StreamSubscription<User?>? _authSubscription;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+  _userDocSubscription;
 
   @override
   void initState() {
     super.initState();
+    _listenRealtimeUpdates();
     _loadUserData();
+  }
+
+  void _listenRealtimeUpdates() {
+    final auth = FirebaseAuth.instance;
+    _authSubscription = auth.userChanges().listen((user) {
+      if (!mounted) return;
+      if (user == null) {
+        setState(() {
+          _updatedDisplayName = null;
+          _selectedImage = null;
+        });
+        _userDocSubscription?.cancel();
+        _userDocSubscription = null;
+        return;
+      }
+
+      _attachUserDocListener(user.uid);
+
+      final display = user.displayName?.trim();
+      final fallback = user.email?.split('@').first ?? 'ผู้ใช้';
+      if (display != null && display.isNotEmpty) {
+        if (_updatedDisplayName != display) {
+          setState(() {
+            _updatedDisplayName = display;
+          });
+        }
+      } else if ((_updatedDisplayName ?? '').isEmpty) {
+        setState(() {
+          _updatedDisplayName = fallback;
+        });
+      }
+    });
+
+    final current = auth.currentUser;
+    if (current != null) {
+      _attachUserDocListener(current.uid);
+    }
+  }
+
+  void _attachUserDocListener(String uid) {
+    _userDocSubscription?.cancel();
+    _userDocSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snapshot) {
+          if (!mounted) return;
+          if (!snapshot.exists) return;
+          final data = snapshot.data();
+          if (data == null) return;
+
+          String? resolved = (data['displayName'] as String?)?.trim();
+          resolved ??= (data['username'] as String?)?.trim();
+
+          if (resolved != null &&
+              resolved.isNotEmpty &&
+              resolved != _updatedDisplayName) {
+            setState(() {
+              _updatedDisplayName = resolved;
+            });
+          }
+        });
   }
 
   Future<void> _loadUserData() async {
@@ -47,12 +117,9 @@ class _ProfileTabState extends State<ProfileTab> {
 
           if (doc.exists) {
             final data = doc.data();
-            // ✅ ใช้ username เป็นหลัก
-            displayFromFs = (data?['username'] as String?)?.trim();
-
-            // fallback เผื่อยังไม่มี username
-            displayFromFs ??= (data?['firstName'] as String?)?.trim();
-            displayFromFs ??= (data?['fullName'] as String?)?.trim();
+            // ✅ ใช้ displayName จาก Firestore เป็นหลัก (fallback เป็น username)
+            displayFromFs = (data?['displayName'] as String?)?.trim();
+            displayFromFs ??= (data?['username'] as String?)?.trim();
           }
         } catch (_) {
           // เงียบไว้ไม่ให้ล่มหาก Firestore ยังไม่พร้อม
@@ -88,6 +155,13 @@ class _ProfileTabState extends State<ProfileTab> {
         });
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    _userDocSubscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -309,20 +383,6 @@ class _ProfileTabState extends State<ProfileTab> {
                                   onTap: () {},
                                   hasSwitch: true,
                                 ),
-                                _buildDivider(),
-                                _buildProfileMenuItem(
-                                  icon: Icons.notifications_outlined,
-                                  title: 'การแจ้งเตือน',
-                                  subtitle: 'ตั้งค่าการแจ้งเตือนต่างๆ',
-                                  onTap: () {},
-                                ),
-                                _buildDivider(),
-                                _buildProfileMenuItem(
-                                  icon: Icons.share_outlined,
-                                  title: 'แชร์แอป',
-                                  subtitle: 'แชร์แอปกับเพื่อนๆ',
-                                  onTap: () {},
-                                ),
                               ],
                             ),
                           ),
@@ -356,23 +416,6 @@ class _ProfileTabState extends State<ProfileTab> {
                             ),
                             child: Column(
                               children: [
-                                _buildProfileMenuItem(
-                                  icon: Icons.help_outline,
-                                  title: 'ข้อมูลการสนับสนุน',
-                                  onTap: () {},
-                                ),
-                                _buildDivider(),
-                                _buildProfileMenuItem(
-                                  icon: Icons.info_outline,
-                                  title: 'ข้อมูลพื้นฐาน',
-                                  onTap: () {},
-                                ),
-                                _buildDivider(),
-                                _buildProfileMenuItem(
-                                  icon: Icons.favorite_outline,
-                                  title: 'เกี่ยวกับแอปพลิเคชัน',
-                                  onTap: () {},
-                                ),
                                 _buildDivider(),
                                 _buildProfileMenuItem(
                                   icon: Icons.logout,

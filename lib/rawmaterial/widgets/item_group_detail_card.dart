@@ -10,6 +10,7 @@ import 'package:my_app/rawmaterial/pages/item_detail_page.dart';
 import 'package:my_app/rawmaterial/widgets/shopping_item_card.dart';
 import 'package:my_app/rawmaterial/widgets/quick_use_sheet.dart'; // ✅ เพิ่มบรรทัดนี้
 import 'package:my_app/rawmaterial/utils/unit_converter.dart';
+import 'package:my_app/welcomeapp/home.dart';
 
 class ItemGroupDetailSheet extends StatefulWidget {
   final String groupName;
@@ -217,6 +218,15 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
     }
   }
 
+  void _goToShoppingList() {
+    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => const HomeScreen(initialIndex: 1),
+      ),
+      (route) => false,
+    );
+  }
+
   void _showQuickUseSheet(ShoppingItem item) {
     showDialog<bool>(
       context: context,
@@ -285,7 +295,7 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
-                      'บันทึกการใช้แล้ว - เหลือ ${conversion.remainingQuantity} ${conversion.remainingUnit}',
+                      'บันทึกการใช้แล้ว - เหลือ \${conversion.remainingQuantity} \${conversion.remainingUnit}',
                     ),
                     behavior: SnackBarBehavior.floating,
                   ),

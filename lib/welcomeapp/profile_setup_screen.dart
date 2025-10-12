@@ -24,7 +24,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   String? _phoneNumber;
 
   // Controllers
-  final _fullNameController = TextEditingController();
+  final _displayNameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _weightController = TextEditingController();
   final _heightController = TextEditingController();
@@ -51,7 +51,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       _phoneNumber = args['phoneNumber'];
 
       if (_name != null && _name!.isNotEmpty) {
-        _fullNameController.text = _name!;
+        _displayNameController.text = _name!;
       }
       if (_phoneNumber != null && _phoneNumber!.isNotEmpty) {
         _phoneController.text = _phoneNumber!;
@@ -61,7 +61,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   @override
   void dispose() {
-    _fullNameController.dispose();
+    _displayNameController.dispose();
     _phoneController.dispose();
     _weightController.dispose();
     _heightController.dispose();
@@ -120,26 +120,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     return '$day/$month/$year';
   }
 
-  // แยกชื่อ-นามสกุล
-  Map<String, String> _splitFullName(String fullName) {
-    List<String> nameParts = fullName
-        .trim()
-        .split(' ')
-        .where((p) => p.isNotEmpty)
-        .toList();
-
-    if (nameParts.length == 1) {
-      return {'firstName': nameParts[0], 'lastName': ''};
-    } else if (nameParts.length >= 2) {
-      return {
-        'firstName': nameParts[0],
-        'lastName': nameParts.sublist(1).join(' '),
-      };
-    } else {
-      return {'firstName': fullName, 'lastName': ''};
-    }
-  }
-
   Future<void> _submitRegistration() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -156,10 +136,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // แยกชื่อ
-      final nameData = _splitFullName(_fullNameController.text.trim());
-      final firstName = nameData['firstName']!;
-      final lastName = nameData['lastName']!;
+      final displayName = _displayNameController.text.trim();
 
       // ✅ สร้างผู้ใช้ใน Firebase Auth
       final userCredential = await _auth.createUserWithEmailAndPassword(
@@ -169,7 +146,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
       // อัปเดต displayName
       await userCredential.user!.updateDisplayName(
-        _fullNameController.text.trim(),
+        displayName,
       );
 
       // (ออปชัน) ส่งอีเมลยืนยันตัวตน
@@ -178,9 +155,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       // ✅ เซฟข้อมูลลง Firestore
       await _firestore.collection('users').doc(userCredential.user!.uid).set({
         'email': _email,
-        'firstName': firstName,
-        'lastName': lastName,
-        'fullName': _fullNameController.text.trim(),
+        'displayName': displayName,
         'phoneNumber': _phoneController.text.trim(),
         'gender': _selectedGender,
         'birthDate': Timestamp.fromDate(_selectedDate),
@@ -252,11 +227,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             children: [
               const SizedBox(height: 20),
 
-              // Full Name
+              // Display Name
               TextFormField(
-                controller: _fullNameController,
+                controller: _displayNameController,
                 decoration: InputDecoration(
-                  labelText: 'ชื่อ-นามสกุล',
+                  labelText: 'ชื่อที่ต้องการแสดง',
                   prefixIcon: const Icon(Icons.person, color: Colors.grey),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -272,13 +247,15 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                   ),
                   filled: true,
                   fillColor: Colors.grey[50],
-                  hintText: 'เช่น ภาสกร จิรวัฒน์',
+                  hintText: 'เช่น นีน่า, คุณตะวัน',
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty)
-                    return 'กรุณากรอกชื่อ-นามสกุล';
-                  if (value.trim().split(' ').length < 2)
-                    return 'กรุณากรอกทั้งชื่อและนามสกุล';
+                  if (value == null || value.trim().isEmpty) {
+                    return 'กรุณากรอกชื่อที่ต้องการแสดง';
+                  }
+                  if (value.trim().length < 2) {
+                    return 'กรุณากรอกชื่ออย่างน้อย 2 ตัวอักษร';
+                  }
                   return null;
                 },
               ),

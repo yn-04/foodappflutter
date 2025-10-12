@@ -1,16 +1,17 @@
 import 'package:camera/camera.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:my_app/profile/family/family_account_screen.dart';
+import 'package:my_app/profile/family/family_hub_screen.dart';
+import 'package:my_app/profile/profile_tab.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'package:my_app/foodreccom/providers/enhanced_recommendation_provider.dart';
-import 'package:my_app/foodreccom/utils/ingredient_translator.dart'; // ✅ เพิ่มมา
+import 'package:my_app/foodreccom/utils/ingredient_translator.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
 import 'package:my_app/firebase_options.dart';
-import 'package:my_app/foodreccom/providers/recommendation_provider.dart';
 import 'package:my_app/welcomeapp/login_screen.dart';
 import 'package:my_app/welcomeapp/register_screen.dart';
 import 'package:my_app/welcomeapp/profile_setup_screen.dart';
@@ -18,32 +19,34 @@ import 'package:my_app/welcomeapp/home.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Init Firebase with explicit options to avoid platform-specific hangs
+
+  // Init Firebase ด้วย options
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await FirebaseAuth.instance.setLanguageCode('th');
 
+  // ✅ เปิดใช้ App Check (โหมด Dev ใช้ Debug provider ทั้ง Android/iOS)
+  //    ถ้าจะไปโปรดักชัน ค่อยสลับเป็น playIntegrity/deviceCheck (ดูโน้ตด้านล่าง)
   // โหลดไฟล์ .env
   await dotenv.load(fileName: ".env");
   final apiKeys = dotenv.env['GEMINI_API_KEYS'];
   if (apiKeys == null || apiKeys.isEmpty) {
-    print("❌ [ENV ERROR] GEMINI_API_KEYS not found");
+    debugPrint("❌ [ENV ERROR] GEMINI_API_KEYS not found");
   } else {
-    print("✅ [ENV OK] Loaded ${apiKeys.split(',').length} keys");
-    print("🔑 First key: ${apiKeys.split(',').first.substring(0, 6)}...");
+    debugPrint("✅ [ENV OK] Loaded ${apiKeys.split(',').length} keys");
+    debugPrint("🔑 First key: ${apiKeys.split(',').first.substring(0, 6)}...");
   }
 
-  // ✅ โหลด Ingredient Translator cache
+  // โหลด Ingredient Translator cache
   await IngredientTranslator.loadCache();
 
-  // ตรวจสอบกล้องก่อน
+  // ตรวจสอบกล้อง
   try {
     final cameras = await availableCameras();
-    print('📷 Available cameras: ${cameras.length}');
+    debugPrint('📷 Available cameras: ${cameras.length}');
   } catch (e) {
-    print('❌ Error getting cameras: $e');
+    debugPrint('❌ Error getting cameras: $e');
   }
-  // (ไม่บังคับ) อุ่นเครื่องกล้องแบบไม่บล็อก UI เพื่อลดจอดำ
-  // ไม่ต้องรอให้เสร็จ เพื่อไม่ให้บูตช้า
+  // อุ่นเครื่องกล้องแบบไม่บล็อก UI
   // ignore: unawaited_futures
   Future(() async {
     try {
@@ -67,7 +70,6 @@ class AuthGate extends StatelessWidget {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-
         if (snapshot.hasData) {
           return const HomeScreen();
         } else {
@@ -106,7 +108,15 @@ class MyApp extends StatelessWidget {
           '/register': (_) => const RegisterScreen(),
           '/profile-setup': (_) => const ProfileSetupScreen(),
           '/home': (_) => const HomeScreen(),
+
+          '/home/profile': (_) => const HomeScreen(initialIndex: 3),
+          '/profile': (_) => const ProfileTab(),
+          '/family/hub': (_) => const FamilyHubScreen(),
+          '/family/account': (_) => const FamilyAccountScreen(),
         },
+        onUnknownRoute: (settings) => MaterialPageRoute(
+          builder: (_) => const ProfileTab(), // กันพลาด route แปลก
+        ),
         debugShowCheckedModeBanner: false,
       ),
     );

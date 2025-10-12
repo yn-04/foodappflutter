@@ -41,6 +41,15 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
   // debounce
   Timer? _searchDebounce;
+  late final StreamController<List<ShoppingItem>> _itemsController;
+  late final Stream<List<ShoppingItem>> _itemsStream;
+  final Map<String, StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
+  _memberItemSubs = {};
+  final Map<String, List<ShoppingItem>> _memberItems = {};
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userDocSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _familyMembersSub;
+  String? _currentFamilyId;
+  List<ShoppingItem> _latestItems = const [];
 
   String searchQuery = ''; // เก็บเป็น lower-case เสมอ
   String selectedCategory = _ALL;
@@ -64,12 +73,35 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   @override
   void initState() {
     super.initState();
+    _itemsController = StreamController<List<ShoppingItem>>.broadcast();
+    _itemsStream = _itemsController.stream;
     _searchFocusNode.addListener(_onSearchFocusChange);
+    // เริ่มฟังข้อมูลวัตถุดิบ (รวมของคนในครอบครัว)
+    _startInventoryListeners();
+    if (!_itemsController.isClosed) {
+      _itemsController.add(const []);
+    }
     _loadAvailableCategories();
   }
 
   @override
   void dispose() {
+    if (_userDocSub != null) {
+      unawaited(_userDocSub!.cancel());
+      _userDocSub = null;
+    }
+    if (_familyMembersSub != null) {
+      unawaited(_familyMembersSub!.cancel());
+      _familyMembersSub = null;
+    }
+    for (final sub in _memberItemSubs.values) {
+      unawaited(sub.cancel());
+    }
+    _memberItemSubs.clear();
+    _memberItems.clear();
+    if (!_itemsController.isClosed) {
+      _itemsController.close();
+    }
     _searchDebounce?.cancel();
     _searchCtrl.dispose();
     _customDaysCtrl.dispose();
@@ -101,27 +133,237 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   DateTime _stripDate(DateTime d) => DateTime(d.year, d.month, d.day);
 
   Future<void> _loadAvailableCategories() async {
-    if (currentUser == null) return;
-    try {
-      final qs = await _firestore
-          .collection('users')
-          .doc(currentUser!.uid)
-          .collection('raw_materials')
-          .get();
+    _scheduleAvailableCategoriesUpdate(_latestItems, immediate: true);
+  }
 
-      final activeItems = _activeItemsFromDocs(qs.docs);
-      _scheduleAvailableCategoriesUpdate(activeItems, immediate: true);
-    } catch (e) {
-      debugPrint('Load categories error: $e');
+  void _startInventoryListeners() {
+    final user = currentUser;
+    if (user == null) {
+      _updateMemberSubscriptions({});
+      _latestItems = const [];
+      if (!_itemsController.isClosed) {
+        _itemsController.add(const []);
+      }
+      return;
+    }
+
+    _updateMemberSubscriptions({user.uid});
+
+    _userDocSub = _firestore
+        .collection('users')
+        .doc(user.uid)
+        .snapshots()
+        .listen(
+          (snap) {
+            final data = snap.data();
+            final rawFamily = data?['familyId'] ?? data?['family_id'];
+            final familyId = rawFamily == null
+                ? null
+                : rawFamily.toString().trim();
+
+            if (familyId == null || familyId.isEmpty) {
+              if (_currentFamilyId != null) {
+                _currentFamilyId = null;
+                if (_familyMembersSub != null) {
+                  unawaited(_familyMembersSub!.cancel());
+                  _familyMembersSub = null;
+                }
+              }
+              _updateMemberSubscriptions({user.uid});
+              return;
+            }
+
+            final shouldResubscribe =
+                _currentFamilyId != familyId || _familyMembersSub == null;
+
+            if (shouldResubscribe) {
+              _currentFamilyId = familyId;
+              if (_familyMembersSub != null) {
+                unawaited(_familyMembersSub!.cancel());
+                _familyMembersSub = null;
+              }
+              // คงการฟังของตัวเองไว้ระหว่างรอข้อมูลสมาชิก
+              _updateMemberSubscriptions({user.uid});
+
+              _familyMembersSub = _firestore
+                  .collection('family_members')
+                  .where('familyId', isEqualTo: familyId)
+                  .snapshots()
+                  .listen(
+                    (memberSnap) {
+                      final ids = <String>{user.uid};
+                      for (final doc in memberSnap.docs) {
+                        final data = doc.data();
+                        final memberRaw = data['userId'] ?? data['uid'];
+                        if (memberRaw == null) continue;
+                        final memberId = memberRaw.toString().trim();
+                        if (memberId.isNotEmpty) ids.add(memberId);
+                      }
+                      _updateMemberSubscriptions(ids);
+                    },
+                    onError: (error, stack) {
+                      if (!_itemsController.isClosed) {
+                        _itemsController.addError(error, stack);
+                      }
+                    },
+                  );
+            }
+          },
+          onError: (error, stack) {
+            if (!_itemsController.isClosed) {
+              _itemsController.addError(error, stack);
+            }
+          },
+        );
+  }
+
+  void _updateMemberSubscriptions(Set<String> targetIds) {
+    final sanitized = targetIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+
+    final currentIds = _memberItemSubs.keys.toSet();
+    final toRemove = currentIds.difference(sanitized);
+    final toAdd = sanitized.difference(currentIds);
+
+    for (final id in toRemove) {
+      final sub = _memberItemSubs.remove(id);
+      if (sub != null) {
+        unawaited(sub.cancel());
+      }
+      _memberItems.remove(id);
+    }
+    if (toRemove.isNotEmpty) {
+      _emitAggregatedItems();
+    }
+
+    for (final id in toAdd) {
+      _memberItems[id] = const [];
+      final sub = _firestore
+          .collection('users')
+          .doc(id)
+          .collection('raw_materials')
+          .snapshots()
+          .listen(
+            (snap) {
+              final items = _activeItemsFromDocs(snap.docs, ownerId: id);
+              _memberItems[id] = items;
+              _emitAggregatedItems();
+            },
+            onError: (error, stack) {
+              if (!_itemsController.isClosed) {
+                _itemsController.addError(error, stack);
+              }
+            },
+          );
+      _memberItemSubs[id] = sub;
     }
   }
 
+  void _emitAggregatedItems() {
+    final aggregated = _memberItems.values
+        .expand((items) => items)
+        .toList(growable: false);
+    _latestItems = aggregated;
+    if (!_itemsController.isClosed) {
+      _itemsController.add(aggregated);
+    }
+    if (mounted) {
+      _scheduleAvailableCategoriesUpdate(aggregated);
+    }
+  }
+
+  DocumentReference<Map<String, dynamic>>? _itemDocRef(ShoppingItem item) {
+    if (item.reference != null) return item.reference;
+    final ownerId = item.ownerId.isNotEmpty
+        ? item.ownerId
+        : currentUser?.uid ?? '';
+    if (ownerId.isEmpty) return null;
+    return _firestore
+        .collection('users')
+        .doc(ownerId)
+        .collection('raw_materials')
+        .doc(item.id);
+  }
+
+  Future<void> _manualRefresh() async {
+    final user = currentUser;
+    if (user == null) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      return;
+    }
+
+    final ids = <String>{
+      ..._memberItems.keys,
+      ..._memberItemSubs.keys,
+      user.uid,
+    }..removeWhere((id) => id.trim().isEmpty);
+
+    if (ids.isEmpty) {
+      ids.add(user.uid);
+    }
+
+    try {
+      final futures = ids
+          .map((uid) async {
+            final snap = await _firestore
+                .collection('users')
+                .doc(uid)
+                .collection('raw_materials')
+                .get();
+            final items = _activeItemsFromDocs(snap.docs, ownerId: uid);
+            return MapEntry(uid, items);
+          })
+          .toList(growable: false);
+
+      final results = await Future.wait(futures);
+      for (final entry in results) {
+        _memberItems[entry.key] = entry.value;
+      }
+      _emitAggregatedItems();
+      if (mounted) setState(() {});
+    } catch (e, st) {
+      debugPrint('Manual refresh failed: $e');
+      debugPrintStack(stackTrace: st);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('รีเฟรชไม่สำเร็จ: $e')));
+      }
+    } finally {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+  }
+
+  Widget _placeholderList(Widget child) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 64),
+      children: [Center(child: child)],
+    );
+  }
+
   List<ShoppingItem> _activeItemsFromDocs(
-    Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-  ) {
+    Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs, {
+    required String ownerId,
+  }) {
     final today = _stripDate(DateTime.now());
     return docs
-        .map((d) => ShoppingItem.fromMap(d.data(), d.id))
+        .map((d) {
+          final data = d.data();
+          final rawFamily = data['familyId'] ?? data['family_id'];
+          final familyStr = rawFamily == null
+              ? null
+              : rawFamily.toString().trim();
+          return ShoppingItem.fromMap(
+            data,
+            d.id,
+            ownerId: ownerId,
+            familyId: familyStr,
+            reference: d.reference,
+          );
+        })
         .where((item) => item.quantity > 0)
         .where((item) {
           final expiry = item.expiryDate;
@@ -231,11 +473,14 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
               final user = _auth.currentUser;
               if (user == null) return;
 
-              final docRef = _firestore
-                  .collection('users')
-                  .doc(user.uid)
-                  .collection('raw_materials')
-                  .doc(item.id);
+              final docRef = _itemDocRef(item);
+              if (docRef == null) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('ไม่พบข้อมูลเจ้าของวัตถุดิบ')),
+                );
+                return;
+              }
 
               await docRef.collection('usage_logs').add({
                 'quantity': useQty,
@@ -270,7 +515,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                 debugPrint('Refresh categories failed: $err');
               }
               if (!mounted) return;
-              setState(() {}); // รีเฟรชลิสต์
+              setState(() {});
             } catch (e) {
               if (!mounted) return;
               ScaffoldMessenger.of(
@@ -280,7 +525,11 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
           },
         );
       },
-    );
+    ).then((used) {
+      if (used == true) {
+        unawaited(_manualRefresh());
+      }
+    });
   }
 
   // ===== Custom days dialog (กำหนดเอง) =====
@@ -527,51 +776,69 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     }
   }
 
-  // ===== Streams (ทำ filter ที่ server) =====
-  Stream<QuerySnapshot<Map<String, dynamic>>> _streamItems() {
-    if (currentUser == null) return const Stream.empty();
-    // ดึงทั้งหมด แล้วกรอง/เรียงที่ฝั่งแอป แก้ปัญหากดเลือกหมวดหมู่แล้วว่างจาก composite index
-    return _firestore
-        .collection('users')
-        .doc(currentUser!.uid)
-        .collection('raw_materials')
-        .snapshots();
-  }
-
-  Stream<QuerySnapshot<Map<String, dynamic>>> _streamCount() {
-    if (currentUser == null) return const Stream.empty();
-    return _firestore
-        .collection('users')
-        .doc(currentUser!.uid)
-        .collection('raw_materials')
-        .snapshots();
-  }
-
   // ===== Mutations =====
   Future<void> _deleteGroupItems(List<ShoppingItem> items) async {
     if (currentUser == null || items.isEmpty) return;
     try {
+      final refs = <DocumentReference<Map<String, dynamic>>>[];
+      final missing = <String>[];
+      for (final it in items) {
+        final ref = _itemDocRef(it);
+        if (ref == null) {
+          missing.add(it.name);
+          continue;
+        }
+        refs.add(ref);
+      }
+      if (refs.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                missing.isEmpty
+                    ? 'ไม่สามารถลบรายการได้'
+                    : 'ไม่พบข้อมูลสำหรับ ${missing.length} รายการ',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
       // Firestore จำกัด ~500 ops ต่อ batch → แบ่งก้อนกันพลาด
       const chunkSize = 450;
-      for (var i = 0; i < items.length; i += chunkSize) {
-        final chunk = items.sublist(i, (i + chunkSize).clamp(0, items.length));
-        var batch = _firestore.batch();
-        for (final it in chunk) {
-          final ref = _firestore
-              .collection('users')
-              .doc(currentUser!.uid)
-              .collection('raw_materials')
-              .doc(it.id);
+      for (var i = 0; i < refs.length; i += chunkSize) {
+        var end = i + chunkSize;
+        if (end > refs.length) end = refs.length;
+        final chunk = refs.sublist(i, end);
+        final batch = _firestore.batch();
+        for (final ref in chunk) {
           batch.delete(ref);
         }
         await batch.commit();
       }
 
       await _loadAvailableCategories();
+      await _manualRefresh();
       if (mounted) {
         setState(() {});
-        final removed = items.length;
-        final preview = items.take(3).map((e) => e.name).join(', ');
+        if (missing.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'ลบแล้ว ${refs.length} รายการ (${missing.length} รายการข้ามไป)',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          return;
+        }
+        final removed = refs.length;
+        final preview = items
+            .where((it) => _itemDocRef(it) != null)
+            .take(3)
+            .map((e) => e.name)
+            .join(', ');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -594,21 +861,32 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
     }
   }
 
-  Future<void> _deleteItem(String id) async {
+  Future<void> _deleteItem(ShoppingItem item) async {
     if (currentUser == null) return;
+    final ref = _itemDocRef(item);
+    if (ref == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('ไม่พบข้อมูลของ "${item.name}"')),
+        );
+      }
+      return;
+    }
     try {
-      await _firestore
-          .collection('users')
-          .doc(currentUser!.uid)
-          .collection('raw_materials')
-          .doc(id)
-          .delete();
+      await ref.delete();
       await _loadAvailableCategories();
+      await _manualRefresh();
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('ลบ "${item.name}" แล้ว')));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('เกิดข้อผิดพลาดในการลบรายการ'),
+        SnackBar(
+          content: Text('เกิดข้อผิดพลาดในการลบรายการ: $e'),
           backgroundColor: Colors.red,
         ),
       );
@@ -648,26 +926,12 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                     ),
                   ),
                   const Spacer(),
-                  StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                    stream: _streamCount(),
-                    builder: (_, s) {
-                      final docs = s.data?.docs;
-                      if (docs == null) {
-                        return Text(
-                          '0 ชิ้น',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontSize: 16,
-                          ),
-                        );
-                      }
-
-                      final activeItems = _activeItemsFromDocs(docs);
-                      _scheduleAvailableCategoriesUpdate(activeItems);
-                      final cnt = activeItems.length;
-
+                  StreamBuilder<List<ShoppingItem>>(
+                    stream: _itemsStream,
+                    builder: (_, snapshot) {
+                      final count = snapshot.data?.length ?? 0;
                       return Text(
-                        '$cnt ชิ้น',
+                        '$count ชิ้น',
                         style: TextStyle(color: Colors.grey[600], fontSize: 16),
                       );
                     },
@@ -961,135 +1225,162 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
               ),
             ),
           ],
-          body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: _streamItems(),
+          body: StreamBuilder<List<ShoppingItem>>(
+            stream: _itemsStream,
             builder: (_, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
+              Widget child;
+
               if (snap.hasError) {
-                return Center(
-                  child: Text(
+                child = _placeholderList(
+                  Text(
                     'เกิดข้อผิดพลาด: ${snap.error}',
                     style: const TextStyle(color: Colors.red),
                     textAlign: TextAlign.center,
                   ),
                 );
-              }
-              if (!snap.hasData || snap.data!.docs.isEmpty) {
-                return _emptyState();
-              }
+              } else {
+                final all = snap.data ?? const <ShoppingItem>[];
 
-              final all = _activeItemsFromDocs(snap.data!.docs);
-              List<ShoppingItem> filtered = List.of(all);
+                if (snap.connectionState == ConnectionState.waiting &&
+                    all.isEmpty) {
+                  child = _placeholderList(
+                    const SizedBox(
+                      height: 140,
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                  );
+                } else if (all.isEmpty) {
+                  child = _placeholderList(_emptyState());
+                } else {
+                  List<ShoppingItem> filtered = List.of(all);
 
-              // กรองหมวดหมู่
-              if (selectedCategory != _ALL) {
-                filtered = filtered
-                    .where((it) => (it.category) == selectedCategory)
-                    .toList();
-              }
+                  if (selectedCategory != _ALL) {
+                    filtered = filtered
+                        .where((it) => (it.category) == selectedCategory)
+                        .toList();
+                  }
 
-              // กรองคำค้นหา
-              if (searchQuery.isNotEmpty) {
-                filtered = filtered
-                    .where((it) => it.name.toLowerCase().contains(searchQuery))
-                    .toList();
-              }
+                  if (searchQuery.isNotEmpty) {
+                    filtered = filtered
+                        .where(
+                          (it) => it.name.toLowerCase().contains(searchQuery),
+                        )
+                        .toList();
+                  }
 
-              // กรองวันหมดอายุ: ภายใน N วันนับจาก "วันนี้" (รวมวันสิ้นสุด)
-              final int? withinDays = _effectiveDays();
-              if (withinDays != null && withinDays > 0) {
-                final today = _stripDate(DateTime.now());
-                final end = today.add(Duration(days: withinDays));
-                filtered = filtered.where((it) {
-                  final ed = it.expiryDate;
-                  if (ed == null) return false;
-                  final only = _stripDate(ed);
-                  final geToday = !only.isBefore(today);
-                  final leEnd = !only.isAfter(end);
-                  return geToday && leEnd;
-                }).toList();
-              }
+                  final int? withinDays = _effectiveDays();
+                  if (withinDays != null && withinDays > 0) {
+                    final today = _stripDate(DateTime.now());
+                    final end = today.add(Duration(days: withinDays));
+                    filtered = filtered.where((it) {
+                      final ed = it.expiryDate;
+                      if (ed == null) return false;
+                      final only = _stripDate(ed);
+                      final geToday = !only.isBefore(today);
+                      final leEnd = !only.isAfter(end);
+                      return geToday && leEnd;
+                    }).toList();
+                  }
 
-              // เรียงใกล้หมดอายุก่อน (null ไปท้าย)
-              filtered.sort((a, b) {
-                final ad = a.expiryDate;
-                final bd = b.expiryDate;
-                if (ad == null && bd == null) return 0;
-                if (ad == null) return 1;
-                if (bd == null) return -1;
-                return ad.compareTo(bd);
-              });
+                  filtered.sort((a, b) {
+                    final ad = a.expiryDate;
+                    final bd = b.expiryDate;
+                    if (ad == null && bd == null) return 0;
+                    if (ad == null) return 1;
+                    if (bd == null) return -1;
+                    return ad.compareTo(bd);
+                  });
 
-              if (filtered.isEmpty) {
-                return _emptyAfterFilter();
-              }
-
-              // กลุ่มตามชื่อ (key เป็น lower-case เพื่อรวมชื่อซ้ำ)
-              final Map<String, List<ShoppingItem>> grouped = {};
-              for (final it in filtered) {
-                final key = it.name.trim().toLowerCase();
-                grouped.putIfAbsent(key, () => []).add(it);
-              }
-
-              final entries = grouped.entries.toList(growable: false);
-
-              return ListView.builder(
-                padding: const EdgeInsets.only(bottom: 120),
-                itemCount: entries.length,
-                cacheExtent: 600,
-                itemBuilder: (_, idx) {
-                  final e = entries[idx];
-                  final groupItems = e.value;
-                  if (groupItems.length == 1) {
-                    final item = groupItems.first;
-                    return KeyedSubtree(
-                      key: ValueKey(item.id),
-                      child: ShoppingItemCard(
-                        item: item,
-                        onDelete: () => _deleteItem(item.id),
-                        onTap: () async {
-                          Navigator.of(context).push<bool>(
-                            PageRouteBuilder(
-                              opaque: false,
-                              barrierColor: Colors.transparent,
-                              pageBuilder: (_, __, ___) =>
-                                  ItemDetailPage(item: item),
-                              transitionsBuilder: (_, a, __, child) =>
-                                  FadeTransition(opacity: a, child: child),
-                            ),
-                          );
-                        },
-                        onQuickUse: () => _showQuickUseSheet(item),
-                        // ถ้าต้องการให้ยืนยันลบเฉพาะ parent ให้ใส่ confirmDelete: false แล้วทำ confirm ที่นี่แทน
-                        // confirmDelete: false,
-                      ),
-                    );
+                  if (filtered.isEmpty) {
+                    child = _placeholderList(_emptyAfterFilter());
                   } else {
-                    final displayName = groupItems.first.name;
-                    return KeyedSubtree(
-                      key: ValueKey('group-${e.key}'),
-                      child: GroupedItemCard(
-                        name: displayName,
-                        items: groupItems,
-                        onTap: () async {
-                          await showModalBottomSheet<bool>(
-                            context: context,
-                            isScrollControlled: true,
-                            backgroundColor: Colors.transparent,
-                            builder: (_) => ItemGroupDetailSheet(
-                              groupName: displayName,
-                              items: groupItems,
+                    final Map<String, List<ShoppingItem>> grouped = {};
+                    for (final it in filtered) {
+                      final key = it.name.trim().toLowerCase();
+                      grouped.putIfAbsent(key, () => []).add(it);
+                    }
+
+                    final entries = grouped.entries.toList(growable: false);
+
+                    child = ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: 120),
+                      itemCount: entries.length,
+                      cacheExtent: 600,
+                      itemBuilder: (_, idx) {
+                        final entry = entries[idx];
+                        final groupItems = entry.value;
+
+                        if (groupItems.length == 1) {
+                          final item = groupItems.first;
+                          return KeyedSubtree(
+                            key: ValueKey(item.id),
+                            child: ShoppingItemCard(
+                              item: item,
+                              onDelete: () => _deleteItem(item),
+                              onTap: () async {
+                                final changed = await Navigator.of(context)
+                                    .push<bool>(
+                                      PageRouteBuilder(
+                                        opaque: false,
+                                        barrierColor: Colors.transparent,
+                                        pageBuilder: (_, __, ___) =>
+                                            ItemDetailPage(item: item),
+                                        transitionsBuilder: (_, a, __, child) =>
+                                            FadeTransition(
+                                              opacity: a,
+                                              child: child,
+                                            ),
+                                      ),
+                                    );
+                                if (!mounted) return;
+                                if (changed == true) {
+                                  await _manualRefresh();
+                                }
+                              },
+                              onQuickUse: () => _showQuickUseSheet(item),
+                              // ถ้าต้องการให้ยืนยันลบเฉพาะ parent ให้ใส่ confirmDelete: false แล้วทำ confirm ที่นี่แทน
+                              // confirmDelete: false,
                             ),
                           );
-                        },
-                        // ✅ ผูกการลบทั้งกลุ่ม
-                        onDeleteGroup: () => _deleteGroupItems(groupItems),
-                      ),
+                        } else {
+                          final displayName = groupItems.first.name;
+                          return KeyedSubtree(
+                            key: ValueKey('group-${entry.key}'),
+                            child: GroupedItemCard(
+                              name: displayName,
+                              items: groupItems,
+                              onTap: () async {
+                                final changed =
+                                    await showModalBottomSheet<bool>(
+                                      context: context,
+                                      isScrollControlled: true,
+                                      backgroundColor: Colors.transparent,
+                                      builder: (_) => ItemGroupDetailSheet(
+                                        groupName: displayName,
+                                        items: groupItems,
+                                      ),
+                                    );
+                                if (!mounted) return;
+                                if (changed == true) {
+                                  await _manualRefresh();
+                                }
+                              },
+                              onDeleteGroup: () =>
+                                  _deleteGroupItems(groupItems),
+                            ),
+                          );
+                        }
+                      },
                     );
                   }
-                },
+                }
+              }
+
+              return RefreshIndicator(
+                onRefresh: _manualRefresh,
+                displacement: 60,
+                child: child,
               );
             },
           ),

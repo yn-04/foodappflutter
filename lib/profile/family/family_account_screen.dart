@@ -1,485 +1,566 @@
-// screens/family/family_account_screen.dart (Main Screen)
-import 'package:flutter/material.dart';
+﻿// lib/profile/family/family_account_screen.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'widgets/family_overview_card.dart';
-import 'widgets/quick_actions_row.dart';
-import 'widgets/family_members_list.dart';
-import 'widgets/health_summary_card.dart';
-import 'widgets/family_settings_card.dart';
-import 'widgets/emergency_contacts_card.dart';
-import 'dialogs/family_options_dialog.dart';
-import 'dialogs/add_member_options_dialog.dart';
-import 'dialogs/add_member_dialog.dart';
+import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'dialogs/create_family_dialog.dart';
+import 'dialogs/invite_code_dialog.dart';
 import 'dialogs/qr_code_dialog.dart';
+import 'family_hub_screen.dart';
 import 'services/family_service.dart';
 
+// ใช้ alias ป้องกันชื่อซ้อนกัน
+import 'widgets/family_members_grid.dart' as grid;
+import 'widgets/member_card.dart' as mc; // มี MemberCardAction
+import 'widgets/quick_actions_row.dart';
+
 class FamilyAccountScreen extends StatefulWidget {
-  const FamilyAccountScreen({super.key});
+  static const route = '/family/account';
+
+  const FamilyAccountScreen({
+    super.key,
+    this.fidOverride,
+    this.showBack = false,
+  });
+
+  final String? fidOverride;
+  final bool showBack;
 
   @override
   State<FamilyAccountScreen> createState() => _FamilyAccountScreenState();
 }
 
 class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
-  bool _isLoading = true;
-  List<Map<String, dynamic>> _familyMembers = [];
-  Map<String, dynamic>? _familyStats;
-  final user = FirebaseAuth.instance.currentUser;
-  late final FamilyService _familyService;
+  final _auth = FirebaseAuth.instance;
+  final _fs = FirebaseFirestore.instance;
+
+  bool _loading = true;
+  bool _isAdmin = false;
+  bool _navigatingToHub = false;
+
+  String? _fid;
+  String? _familyName;
+
+  FamilyService? _svc;
+  // ฟังสถานะ users/{me}.familyId เพื่อเด้งออกเมื่อถูกลบจากครอบครัว
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _meSub;
+
+  @override
+  void dispose() {
+    _meSub?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
-    _familyService = FamilyService(user!.uid);
-    _loadFamilyData();
+    _init();
   }
 
-  Future<void> _loadFamilyData() async {
-    setState(() {
-      _isLoading = true;
-    });
+  Future<void> _init() async {
+    setState(() => _loading = true);
 
     try {
-      final data = await _familyService.loadFamilyData();
+      final user = _auth.currentUser;
+      if (user == null) {
+        _showErr('Please sign in first');
+        _resetFamilyState();
+        _goToHub();
+        return;
+      }
+
+      // 1) หา fid เร็วที่สุดโดยไม่บล็อคด้วยงานอื่น
+      String? fid = widget.fidOverride;
+      if (fid == null || fid.isEmpty) {
+        final userDoc = await _fs.collection('users').doc(user.uid).get();
+        fid = (userDoc.data()?['familyId'] as String?)?.trim();
+      }
+      if (fid == null || fid.isEmpty) {
+        _resetFamilyState();
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+
+      _fid = fid;
+      _svc = FamilyService(fid);
+
+      // 2) ยิงงาน "สำคัญ" แบบขนาน (รอผล) และงาน "ไม่เร่งด่วน" แบบ background (ไม่ await)
+      final famDocF = _fs.collection('families').doc(fid).get();
+      final isAdminF = _svc!.isCurrentUserAdmin();
+
+      // งานไม่เร่งด่วน: ทำแบบไม่บล็อค UI
+      // - ensureMemberHasNameEmail: อัปเดตชื่อ/อีเมลใน member ถ้ายังไม่มี
+      // - syncFamilyMemberProfiles: ไล่ sync โปรไฟล์ทั้งบ้าน
+      // ไม่ต้อง await เพื่อให้ UI ขึ้นก่อน
+      unawaited(
+        _svc!.ensureMemberHasNameEmail(uid: user.uid).catchError((_) {}),
+      );
+      unawaited(_svc!.syncFamilyMemberProfiles().catchError((_) {}));
+
+      // 3) รอเฉพาะของที่ UI ต้องใช้ทันที (ชื่อบ้าน + สิทธิ์ admin)
+      final famDoc = await famDocF;
+      final isAdmin = await isAdminF;
+
+      final familyName = (famDoc.data()?['name'] as String?)?.trim();
+
+      if (!mounted) return;
       setState(() {
-        _familyMembers = data['members'];
-        _familyStats = data['stats'];
+        _familyName = familyName;
+        _isAdmin = isAdmin;
+      });
+
+      // 4) ตั้ง listener เด้งออกเมื่อโดนลบออกจากครอบครัว (ทำหลัง UI setState)
+      await _meSub?.cancel();
+      _meSub = _fs.collection('users').doc(user.uid).snapshots().listen((doc) {
+        final data = doc.data();
+        final fidLive = (data?['familyId'] as String?)?.trim();
+
+        if ((_fid != null && _fid!.isNotEmpty) &&
+            (fidLive == null || fidLive.isEmpty)) {
+          if (mounted) {
+            Navigator.of(context).pushAndRemoveUntil(
+              MaterialPageRoute(
+                builder: (_) => const FamilyHubScreen(showBack: true),
+              ),
+              (_) => false,
+            );
+          }
+          return;
+        }
+
+        if (fidLive != null && fidLive.isNotEmpty && fidLive != _fid) {
+          if (mounted) setState(() => _fid = fidLive);
+        }
       });
     } catch (e) {
-      print('Error loading family data: $e');
-      _showErrorSnackBar('ไม่สามารถโหลดข้อมูลครอบครัวได้');
+      _showErr('Failed to load data: $e');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+      if (mounted && !_navigatingToHub) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _handleMemberAction({
+    required String targetUserId,
+    required mc.MemberCardAction action, // ← ใช้ mc.
+  }) async {
+    if (_svc == null) return;
+    try {
+      if (action == mc.MemberCardAction.remove) {
+        // ← ใช้ mc.
+        await _svc!.removeMember(targetUserId: targetUserId);
+        _showOk('Member removed from family');
       }
+    } catch (e) {
+      _showErr('Operation failed: $e');
+    }
+  }
+
+  Future<void> _handleGridAction({
+    required String action,
+    required String targetUid,
+    required String role,
+  }) async {
+    final mc.MemberCardAction? mapped = switch (action) {
+      'remove' => mc.MemberCardAction.remove,
+      _ => null,
+    };
+    if (mapped == null) return;
+    await _handleMemberAction(targetUserId: targetUid, action: mapped);
+  }
+
+  Future<void> _showInviteQR() async {
+    if (_svc == null) return;
+    final current = _auth.currentUser;
+    if (current == null) {
+      _showErr('Please sign in first');
+      return;
+    }
+    try {
+      final result = await _svc!.createInviteCodeAndPayload(
+        createdBy: current.uid,
+      );
+      if (!mounted) return;
+      await QRCodeDialog.show(
+        context: context,
+        payload: result.payload,
+        inviteCode: result.code,
+      );
+    } catch (e) {
+      _showErr('Failed to create invite code: $e');
+    }
+  }
+
+  Future<void> _joinByCode() async {
+    final code = await InviteCodeDialog.show(context: context);
+    if (code == null || code.isEmpty) return;
+
+    final user = _auth.currentUser;
+    if (user == null) {
+      _showErr('Please sign in first');
+      return;
+    }
+
+    try {
+      await FamilyService('_tmp').joinFamilyByCode(code, userId: user.uid);
+      await _init();
+      _showOk('Joined family successfully');
+    } catch (e) {
+      _showErr('Failed to join family: $e');
+    }
+  }
+
+  Future<void> _leaveFamily() async {
+    final fid = _fid;
+    if (fid == null) return;
+    final ok = await _confirm(
+      title: 'Leave family',
+      message: 'Are you sure you want to leave this family?',
+      danger: true,
+    );
+    if (!ok) return;
+
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      await FamilyService.leaveFamily(uid: uid);
+      _showOk('Left family successfully');
+      _goToHub();
+    } catch (e) {
+      _showErr('Failed to leave family: $e');
+    }
+  }
+
+  Future<void> _disbandFamily() async {
+    final fid = _fid;
+    if (fid == null) return;
+
+    final ok = await _confirm(
+      title: 'Disband family',
+      message:
+          'Disbanding the family removes all members and related data. This cannot be undone. Continue?',
+      danger: true,
+    );
+    if (!ok) return;
+
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      await FamilyService.disbandFamilyByAdmin(familyId: fid, currentUid: uid);
+      _showOk('Family disbanded successfully');
+      _goToHub();
+    } catch (e) {
+      _showErr('Failed to disband family: $e');
+    }
+  }
+
+  Future<void> _createFamily() async {
+    await CreateFamilyDialog.show(
+      context: context,
+      onCreated: (_) async {
+        await _init();
+      },
+    );
+  }
+
+  Future<void> _renameFamily() async {
+    final svc = _svc;
+    if (svc == null) return;
+    final currentName = _familyName ?? '';
+
+    final controller = TextEditingController(text: currentName);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename family'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => Navigator.of(context).pop(controller.text),
+          decoration: const InputDecoration(
+            labelText: 'Family name',
+            hintText: 'e.g. My Family',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).maybePop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    final trimmed = result?.trim();
+    if (trimmed == null) return;
+    if (trimmed.isEmpty) {
+      _showErr('Please enter a family name');
+      return;
+    }
+    if (trimmed == _familyName) return;
+
+    try {
+      await svc.renameFamily(trimmed);
+      if (!mounted) return;
+      setState(() => _familyName = trimmed);
+      _showOk('Family name updated');
+    } catch (e) {
+      _showErr('Failed to update family name: $e');
+    }
+  }
+
+  void _goToHub() {
+    if (!mounted) return;
+    _navigatingToHub = true;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const FamilyHubScreen(showBack: true)),
+    );
+  }
+
+  void _resetFamilyState() {
+    _fid = null;
+    _svc = null;
+    _familyName = null;
+    _isAdmin = false;
+  }
+
+  void _showErr(String message) {
+    if (!mounted) return;
+    final sm = ScaffoldMessenger.of(context);
+    sm.hideCurrentSnackBar();
+    sm.showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
+  }
+
+  void _showOk(String message) {
+    if (!mounted) return;
+    final sm = ScaffoldMessenger.of(context);
+    sm.hideCurrentSnackBar();
+    sm.showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.green),
+    );
+  }
+
+  Future<bool> _confirm({
+    required String title,
+    required String message,
+    bool danger = false,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).maybePop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: danger ? Colors.red : null,
+            ),
+            onPressed: () => Navigator.of(context).maybePop(true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  PreferredSizeWidget _appBar() {
+    return AppBar(
+      title: const Text('Family Account'),
+      automaticallyImplyLeading: !widget.showBack,
+      leading: widget.showBack
+          ? IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: _handleBackToProfile,
+            )
+          : null,
+    );
+  }
+
+  void _handleBackToProfile() {
+    if (!mounted) return;
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.maybePop();
+    } else {
+      navigator.pushNamedAndRemoveUntil('/home/profile', (route) => false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return Scaffold(
+        appBar: _appBar(),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_fid == null) {
+      return const FamilyHubScreen(showBack: true);
+    }
+
     return Scaffold(
-      backgroundColor: Colors.grey[100],
-      appBar: AppBar(
-        backgroundColor: Colors.grey[100],
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'บัญชีครอบครัว',
-          style: TextStyle(
-            color: Colors.black,
-            fontWeight: FontWeight.w600,
-            fontSize: 18,
-          ),
-        ),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add, color: Colors.black),
-            onPressed: () => _showAddMemberOptions(),
-          ),
-          IconButton(
-            icon: const Icon(Icons.more_vert, color: Colors.black),
-            onPressed: () => _showFamilyOptions(),
-          ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.black))
-          : RefreshIndicator(
-              onRefresh: _loadFamilyData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    // Family Overview Card
-                    FamilyOverviewCard(
-                      totalMembers: _familyMembers.length + 1,
-                      familyStats: _familyStats,
-                      familyMembers: _familyMembers,
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Quick Actions
-                    QuickActionsRow(
-                      onInvite: () => _showAddMemberOptions(),
-                      onHealthCheck: () => _showHealthCheckDialog(),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Family Members List
-                    FamilyMembersList(
-                      familyMembers: _familyMembers,
-                      currentUser: user,
-                      onAddMember: () => _showAddMemberOptions(),
-                      onEditMember: _editMember,
-                      onRemoveMember: _removeMember,
-                      onViewHealth: _viewMemberHealth,
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Family Health Summary
-                    if (_familyMembers.isNotEmpty) ...[
-                      HealthSummaryCard(familyStats: _familyStats),
-                      const SizedBox(height: 20),
-                    ],
-
-                    // Family Settings
-                    FamilySettingsCard(
-                      onQRCode: _showQRCodeDialog,
-                      onPermissions: _showPermissionsDialog,
-                      onNotifications: _showFamilyNotificationSettings,
-                      onBackup: _showBackupOptions,
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Emergency Contacts
-                    EmergencyContactsCard(
-                      onAddContact: _showAddEmergencyContactDialog,
-                      onCallContact: _callEmergencyContact,
-                    ),
-                  ],
-                ),
+      appBar: _appBar(),
+      body: RefreshIndicator(
+        onRefresh: _init,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _FamilyHeaderCard(
+                familyName: _familyName ?? 'My Family',
+                isAdmin: _isAdmin,
+                onRename: _isAdmin ? _renameFamily : null,
               ),
-            ),
-    );
-  }
-
-  // Dialog Methods
-  void _showAddMemberOptions() {
-    AddMemberOptionsDialog.show(
-      context: context,
-      onAddManually: _showAddMemberDialog,
-      onScanQR: _showQRCodeDialog,
-      onShareLink: _shareInviteLink,
-    );
-  }
-
-  void _showFamilyOptions() {
-    FamilyOptionsDialog.show(
-      context: context,
-      onRefresh: _refreshFamilyData,
-      onExport: _exportFamilyData,
-      onDisband: _showDisbandFamilyDialog,
-    );
-  }
-
-  // Member Management
-  void _editMember(Map<String, dynamic> member) {
-    // Navigate to edit member screen or show dialog
-    // Implementation will be in separate dialog file
-  }
-
-  void _removeMember(String memberId, String memberName) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('ลบสมาชิก'),
-        content: Text('คุณต้องการลบ "$memberName" ออกจากครอบครัวหรือไม่?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ยกเลิก'),
+              const SizedBox(height: 24),
+              const Text(
+                'Family Members',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 12),
+              grid.FamilyMembersGrid(
+                familyId: _fid!,
+                onAction: _handleGridAction,
+              ),
+              const SizedBox(height: 24),
+              QuickActionsRow(
+                hasFamily: true,
+                isAdmin: _isAdmin,
+                onInvite: _showInviteQR,
+                onJoinFamily: _joinByCode,
+                onLeaveFamily: _leaveFamily,
+                onCreateFamily: _createFamily,
+                onDisbandFamily: _isAdmin ? _disbandFamily : null,
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () async {
-              await _familyService.deleteFamilyMember(memberId);
-              Navigator.pop(context);
-              await _loadFamilyData();
-              _showSuccessSnackBar('ลบสมาชิกสำเร็จ');
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('ลบสมาชิก'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _viewMemberHealth(Map<String, dynamic> member) {
-    // Show member health details
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('ข้อมูลสุขภาพ - ${member['name']}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildHealthInfoRow(
-              'สถานะสุขภาพ',
-              member['healthStatus'] ?? 'ไม่ทราบ',
-            ),
-            _buildHealthInfoRow('BMI', member['bmi']?.toString() ?? 'ไม่ทราบ'),
-            _buildHealthInfoRow('ภูมิแพ้', member['allergies'] ?? 'ไม่มี'),
-            _buildHealthInfoRow('ยาที่ใช้', member['medications'] ?? 'ไม่มี'),
-          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ปิด'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // Navigate to detailed health screen
-            },
-            child: const Text('ดูรายละเอียด'),
-          ),
-        ],
       ),
     );
   }
+}
 
-  Widget _buildHealthInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(color: Colors.grey[600])),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
-        ],
-      ),
-    );
-  }
+class _FamilyHeaderCard extends StatelessWidget {
+  const _FamilyHeaderCard({
+    required this.familyName,
+    required this.isAdmin,
+    this.onRename,
+  });
 
-  // Placeholder methods for dialogs that will be implemented in separate files
-  void _showAddMemberDialog() {
-    AddMemberDialog.show(
-      context: context,
-      onAddMember: (memberData) => _addMember(memberData),
-    );
-  }
+  final String familyName;
+  final bool isAdmin;
+  final Future<void> Function()? onRename;
 
-  Future<void> _addMember(Map<String, dynamic> memberData) async {
-    final name = (memberData['name'] as String? ?? '').trim();
-    final email = (memberData['email'] as String? ?? '').trim();
-    final phone = (memberData['phone'] as String? ?? '').trim();
-    final age = memberData['age'] as int?;
-    final gender = (memberData['gender'] as String? ?? 'ไม่ระบุ').trim();
-    final relationship = (memberData['relationship'] as String? ?? 'สมาชิก')
-        .trim();
+  @override
+  Widget build(BuildContext context) {
+    final canRename = isAdmin && onRename != null;
 
-    if (name.isEmpty) {
-      throw 'กรุณากรอกชื่อสมาชิก';
-    }
-    if (email.isNotEmpty && !_familyService.isValidEmail(email)) {
-      throw 'อีเมลไม่ถูกต้อง';
-    }
-    if (phone.isNotEmpty && !_familyService.isValidPhone(phone)) {
-      throw 'เบอร์โทรศัพท์ไม่ถูกต้อง';
-    }
-    if (age != null && !_familyService.isValidAge(age)) {
-      throw 'อายุไม่ถูกต้อง';
-    }
-
-    await _familyService.addFamilyMember(
-      name: name,
-      email: email,
-      phone: phone,
-      age: age,
-      gender: gender,
-      relationship: relationship,
-    );
-
-    await _loadFamilyData();
-    if (!mounted) return;
-    _showSuccessSnackBar('เพิ่มสมาชิก "$name" สำเร็จ');
-  }
-
-  void _showQRCodeDialog() {
-    QRCodeDialog.show(context: context, familyId: _familyService.familyId);
-  }
-
-  void _showPermissionsDialog() {
-    _showSuccessSnackBar('บันทึกสิทธิ์สำเร็จ (จำลอง)');
-  }
-
-  void _showFamilyNotificationSettings() {
-    _showSuccessSnackBar('บันทึกการตั้งค่าการแจ้งเตือนสำเร็จ (จำลอง)');
-  }
-
-  void _showBackupOptions() {
-    _showSuccessSnackBar('สำรองข้อมูลสำเร็จ (จำลอง)');
-  }
-
-  void _showAddEmergencyContactDialog() {
-    _showSuccessSnackBar('เพิ่มผู้ติดต่อฉุกเฉินสำเร็จ (จำลอง)');
-  }
-
-  void _showHealthCheckDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('ตรวจสอบสุขภาพครอบครัว'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildHealthCheckItem(
-              'สมาชิกที่ต้องตรวจสุขภาพ',
-              '2 คน',
-              Colors.orange,
-            ),
-            _buildHealthCheckItem(
-              'สมาชิกที่พลาดการออกกำลังกาย',
-              '1 คน',
-              Colors.red,
-            ),
-            _buildHealthCheckItem(
-              'สมาชิกที่ดูแลสุขภาพดี',
-              '3 คน',
-              Colors.green,
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'คุณต้องการส่งการแจ้งเตือนให้สมาชิกหรือไม่?',
-              style: TextStyle(fontSize: 14),
-            ),
-          ],
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.indigo.shade500, Colors.indigo.shade700],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ปิด'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _showSuccessSnackBar('ส่งการแจ้งเตือนสุขภาพให้สมาชิกแล้ว');
-            },
-            child: const Text('ส่งการแจ้งเตือน'),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.indigo.shade200.withValues(alpha: 0.4),
+            blurRadius: 10,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildHealthCheckItem(String title, String count, Color color) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
           Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            width: 46,
+            height: 46,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.groups, color: Colors.white),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Text(title)),
-          Text(
-            count,
-            style: TextStyle(fontWeight: FontWeight.bold, color: color),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  familyName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const _ChipLabel(text: 'My Family'),
+                    if (isAdmin) ...[
+                      const SizedBox(width: 6),
+                      const _ChipLabel(text: 'Admin'),
+                    ],
+                  ],
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
-    );
-  }
-
-  void _showDisbandFamilyDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('ยุบครอบครัว'),
-        content: const Text(
-          'การยุบครอบครัวจะลบสมาชิกทั้งหมดและข้อมูลที่เกี่ยวข้อง การดำเนินการนี้ไม่สามารถย้อนกลับได้',
-          style: TextStyle(color: Colors.red),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ยกเลิก'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              await _familyService.disbandFamily(_familyMembers);
-              Navigator.pop(context);
-              Navigator.pop(context);
-              _showSuccessSnackBar('ยุบครอบครัวสำเร็จ');
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('ยุบครอบครัว'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Action Methods
-  void _shareInviteLink() async {
-    try {
-      await _familyService.shareInviteLink();
-      _showSuccessSnackBar('แชร์ลิงก์เชิญสำเร็จ');
-    } catch (e) {
-      _showErrorSnackBar('ไม่สามารถแชร์ลิงก์ได้');
-    }
-  }
-
-  void _callEmergencyContact(String phoneNumber) {
-    _showSuccessSnackBar('กำลังโทรหา $phoneNumber');
-  }
-
-  void _refreshFamilyData() async {
-    await _loadFamilyData();
-    _showSuccessSnackBar('อัปเดตข้อมูลครอบครัวสำเร็จ');
-  }
-
-  void _exportFamilyData() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 16),
-            Text('กำลังส่งออกข้อมูล...'),
+          if (canRename) ...[
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: 'Rename family',
+              onPressed: onRename,
+              icon: const Icon(Icons.edit, color: Colors.white),
+            ),
           ],
-        ),
-      ),
-    );
-
-    Future.delayed(const Duration(seconds: 3), () {
-      Navigator.pop(context);
-      _showSuccessSnackBar('ส่งออกข้อมูลครอบครัวสำเร็จ');
-    });
-  }
-
-  // Utility Methods
-  void _showSuccessSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-        action: SnackBarAction(
-          label: 'ปิด',
-          textColor: Colors.white,
-          onPressed: () {
-            ScaffoldMessenger.of(context).hideCurrentSnackBar();
-          },
-        ),
+        ],
       ),
     );
   }
+}
 
-  void _showErrorSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-        action: SnackBarAction(
-          label: 'ปิด',
-          textColor: Colors.white,
-          onPressed: () {
-            ScaffoldMessenger.of(context).hideCurrentSnackBar();
-          },
+class _ChipLabel extends StatelessWidget {
+  const _ChipLabel({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: .2,
         ),
       ),
     );

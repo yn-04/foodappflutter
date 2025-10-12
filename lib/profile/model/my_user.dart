@@ -2,15 +2,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MyUser {
-  final String firstName;
-  final String lastName;
+  final String displayName;
   final String email;
   final String phoneNumber;
   final String gender;
   final double height;
   final double weight;
   final String allergies;
-  final String fullName;
   final DateTime birthDate;
   final DateTime createdAt;
   final bool profileCompleted;
@@ -19,15 +17,13 @@ class MyUser {
   final String? username;
 
   MyUser({
-    required this.firstName,
-    required this.lastName,
+    required this.displayName,
     required this.email,
     required this.phoneNumber,
     required this.gender,
     required this.height,
     required this.weight,
     required this.allergies,
-    required this.fullName,
     required this.birthDate,
     required this.createdAt,
     required this.profileCompleted,
@@ -36,8 +32,7 @@ class MyUser {
 
   // แสดงชื่อสำหรับ UI (เอาไว้ใช้ใน header)
   String displayNamePref({String? fallbackEmail}) {
-    if (firstName.trim().isNotEmpty) return firstName.trim();
-    if (fullName.trim().isNotEmpty) return fullName.trim();
+    if (displayName.trim().isNotEmpty) return displayName.trim();
     if ((username ?? '').trim().isNotEmpty) return username!.trim();
     if (fallbackEmail != null && fallbackEmail.contains('@')) {
       return fallbackEmail.split('@').first;
@@ -57,17 +52,16 @@ class MyUser {
     // ป้องกัน null timestamp
     final Timestamp? birthTs = data['birthDate'];
     final Timestamp? createdTs = data['createdAt'];
+    final String resolvedDisplay = (data['displayName'] ?? '') as String;
 
     return MyUser(
-      firstName: (data['firstName'] ?? '') as String,
-      lastName: (data['lastName'] ?? '') as String,
+      displayName: resolvedDisplay.trim(),
       email: (data['email'] ?? '') as String,
       phoneNumber: (data['phoneNumber'] ?? '') as String,
       gender: (data['gender'] ?? '') as String,
       height: (data['height'] ?? 0).toDouble(),
       weight: (data['weight'] ?? 0).toDouble(),
       allergies: (data['allergies'] ?? '') as String,
-      fullName: (data['fullName'] ?? '') as String,
       birthDate: birthTs != null ? birthTs.toDate() : DateTime(2000, 1, 1),
       createdAt: createdTs != null ? createdTs.toDate() : DateTime.now(),
       profileCompleted: (data['profileCompleted'] ?? false) as bool,
@@ -77,15 +71,13 @@ class MyUser {
 
   Map<String, dynamic> toFirestore() {
     return {
-      'firstName': firstName,
-      'lastName': lastName,
+      'displayName': displayName,
       'email': email,
       'phoneNumber': phoneNumber,
       'gender': gender,
       'height': height,
       'weight': weight,
       'allergies': allergies,
-      'fullName': fullName,
       'birthDate': Timestamp.fromDate(birthDate),
       'createdAt': Timestamp.fromDate(createdAt),
       'profileCompleted': profileCompleted,
@@ -140,30 +132,26 @@ class MyUser {
   }
 
   MyUser copyWith({
-    String? firstName,
-    String? lastName,
+    String? displayName,
     String? email,
     String? phoneNumber,
     String? gender,
     double? height,
     double? weight,
     String? allergies,
-    String? fullName,
     DateTime? birthDate,
     DateTime? createdAt,
     bool? profileCompleted,
     String? username, // NEW
   }) {
     return MyUser(
-      firstName: firstName ?? this.firstName,
-      lastName: lastName ?? this.lastName,
+      displayName: displayName ?? this.displayName,
       email: email ?? this.email,
       phoneNumber: phoneNumber ?? this.phoneNumber,
       gender: gender ?? this.gender,
       height: height ?? this.height,
       weight: weight ?? this.weight,
       allergies: allergies ?? this.allergies,
-      fullName: fullName ?? this.fullName,
       birthDate: birthDate ?? this.birthDate,
       createdAt: createdAt ?? this.createdAt,
       profileCompleted: profileCompleted ?? this.profileCompleted,
