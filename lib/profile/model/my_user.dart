@@ -37,22 +37,56 @@ class MyUser {
 
   factory MyUser.fromFirestore(DocumentSnapshot doc) {
     final data = (doc.data() as Map<String, dynamic>? ?? {});
-    // ป้องกัน null timestamp
-    final Timestamp? birthTs = data['birthDate'];
-    final Timestamp? createdTs = data['createdAt'];
-    final String resolvedDisplay = (data['displayName'] ?? '') as String;
+
+    double _readDouble(dynamic value) {
+      if (value is num) return value.toDouble();
+      if (value is String)
+        return double.tryParse(value.replaceAll(',', '.')) ?? 0;
+      return 0;
+    }
+
+    Timestamp? _readTimestamp(dynamic value) {
+      if (value is Timestamp) return value;
+      if (value is DateTime) return Timestamp.fromDate(value);
+      return null;
+    }
+
+    String _readString(dynamic value) {
+      if (value == null) return '';
+      if (value is String) return value;
+      return value.toString();
+    }
+
+    String _resolveAllergies(dynamic value) {
+      if (value is String) return value;
+      if (value is Iterable) {
+        return value.whereType<String>().join(', ');
+      }
+      return '';
+    }
+
+    bool _readBool(dynamic value) {
+      if (value is bool) return value;
+      if (value is num) return value != 0;
+      if (value is String) return value.toLowerCase() == 'true';
+      return false;
+    }
+
+    final Timestamp? birthTs = _readTimestamp(data['birthDate']);
+    final Timestamp? createdTs = _readTimestamp(data['createdAt']);
+    final String resolvedDisplay = _readString(data['displayName']).trim();
 
     return MyUser(
-      displayName: resolvedDisplay.trim(),
-      email: (data['email'] ?? '') as String,
-      phoneNumber: (data['phoneNumber'] ?? '') as String,
-      gender: (data['gender'] ?? '') as String,
-      height: (data['height'] ?? 0).toDouble(),
-      weight: (data['weight'] ?? 0).toDouble(),
-      allergies: (data['allergies'] ?? '') as String,
+      displayName: resolvedDisplay,
+      email: _readString(data['email']),
+      phoneNumber: _readString(data['phoneNumber']),
+      gender: _readString(data['gender']),
+      height: _readDouble(data['height']),
+      weight: _readDouble(data['weight']),
+      allergies: _resolveAllergies(data['allergies']),
       birthDate: birthTs != null ? birthTs.toDate() : DateTime(2000, 1, 1),
       createdAt: createdTs != null ? createdTs.toDate() : DateTime.now(),
-      profileCompleted: (data['profileCompleted'] ?? false) as bool,
+      profileCompleted: _readBool(data['profileCompleted']),
     );
   }
 
