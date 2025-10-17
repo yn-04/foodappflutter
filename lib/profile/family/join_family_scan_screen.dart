@@ -117,8 +117,8 @@ class _JoinFamilyScanScreenState extends State<JoinFamilyScanScreen> {
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                         colors: [
-                          Colors.white.withOpacity(0.08), // ← เปลี่ยน
-                          Colors.white.withOpacity(0.02), // ← เปลี่ยน
+                          Colors.white.withValues(alpha: 0.08), // ← เปลี่ยน
+                          Colors.white.withValues(alpha: 0.02), // ← เปลี่ยน
                         ],
                       ),
                     ),
@@ -182,7 +182,7 @@ class _JoinFamilyScanScreenState extends State<JoinFamilyScanScreen> {
               bottom: 72,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white.withOpacity(0.12), // ← เปลี่ยน
+                  backgroundColor: Colors.white.withValues(alpha: 0.12), // ← เปลี่ยน
                   foregroundColor: Colors.white,
                   elevation: 0,
                 ),
@@ -195,7 +195,7 @@ class _JoinFamilyScanScreenState extends State<JoinFamilyScanScreen> {
             if (_processing)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black87.withOpacity(0.7), // ← เปลี่ยน
+                  color: Colors.black87.withValues(alpha: 0.7), // ← เปลี่ยน
                   child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,

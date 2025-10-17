@@ -461,7 +461,10 @@ class _NotificationSettingsScreenState
         subtitle: subtitle == null ? null : Text(subtitle),
         value: value,
         onChanged: onChanged,
-        activeColor: Colors.black,
+        thumbColor: const WidgetStatePropertyAll<Color>(Colors.black),
+        trackColor: WidgetStatePropertyAll<Color?>(
+          Colors.black.withValues(alpha: 0.4),
+        ),
       ),
     );
   }

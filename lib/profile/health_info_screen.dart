@@ -4,8 +4,6 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:my_app/profile/model/my_user.dart';
 import 'package:my_app/services/firebase_storage_service.dart';
 
@@ -29,7 +27,6 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
   final TextEditingController _displayNameController = TextEditingController();
   File? _selectedProfileImage;
   String? _currentPhotoUrl;
-  final ImagePicker _imagePicker = ImagePicker();
 
   // ---- Base controllers ----
   final TextEditingController _heightController = TextEditingController();
@@ -378,149 +375,6 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     }
   }
 
-  void _showImagePickerSheet() {
-    if (_isSaving) return;
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
-              title: const Text('ถ่ายรูปใหม่'),
-              onTap: () async {
-                Navigator.of(ctx).pop();
-                await _pickProfileImage(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('เลือกรูปจากแกลเลอรี่'),
-              onTap: () async {
-                Navigator.of(ctx).pop();
-                await _pickProfileImage(ImageSource.gallery);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _pickProfileImage(ImageSource source) async {
-    if (_isSaving) return;
-    try {
-      final XFile? picked = await _imagePicker.pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 85,
-      );
-      if (picked != null) {
-        setState(() {
-          _selectedProfileImage = File(picked.path);
-        });
-      }
-    } catch (e) {
-      if (!mounted) return;
-      _showSnackBar('ไม่สามารถเลือกรูปภาพได้: $e', success: false);
-    }
-  }
-
-  Widget _buildProfileSection() {
-    ImageProvider<Object>? imageProvider;
-    if (_selectedProfileImage != null) {
-      imageProvider = FileImage(_selectedProfileImage!);
-    } else if (_currentPhotoUrl != null && _currentPhotoUrl!.isNotEmpty) {
-      imageProvider = NetworkImage(_currentPhotoUrl!);
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Stack(
-              children: [
-                CircleAvatar(
-                  radius: 42,
-                  backgroundColor: const Color(0xFFE5E6EB),
-                  backgroundImage: imageProvider,
-                  child: imageProvider == null
-                      ? const Icon(Icons.person, size: 42, color: Colors.white)
-                      : null,
-                ),
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: GestureDetector(
-                    onTap: _isSaving ? null : _showImagePickerSheet,
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: _isSaving ? Colors.grey[400] : Colors.black87,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                      ),
-                      child: const Icon(
-                        Icons.edit,
-                        size: 16,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 18),
-            Expanded(
-              child: TextFormField(
-                controller: _displayNameController,
-                decoration: const InputDecoration(
-                  labelText: 'ชื่อที่ต้องการแสดง',
-                  hintText: 'เช่น Nina',
-                ),
-                enabled: !_isSaving,
-                autovalidateMode: AutovalidateMode.onUserInteraction,
-                validator: _displayNameValidator,
-                inputFormatters: [
-                  FilteringTextInputFormatter.deny(RegExp(r'\s')),
-                ],
-                textInputAction: TextInputAction.next,
-              ),
-            ),
-          ],
-        ),
-        if (_selectedProfileImage != null) ...[
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: _isSaving
-                  ? null
-                  : () {
-                      setState(() {
-                        _selectedProfileImage = null;
-                      });
-                    },
-              icon: const Icon(Icons.cancel_outlined),
-              label: const Text('ยกเลิกรูปภาพที่เลือก'),
-            ),
-          ),
-        ],
-        const SizedBox(height: 8),
-        Text(
-          'ชื่อและรูปภาพของคุณจะแสดงกับสมาชิกครอบครัวและการแนะนำอาหาร',
-          style: TextStyle(fontSize: 11.5, color: Colors.grey[600]),
-        ),
-      ],
-    );
-  }
-
   // ------- UI -------
   @override
   Widget build(BuildContext context) {
@@ -547,12 +401,6 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                 children: [
-                  _ModernCard(
-                    title: 'โปรไฟล์ผู้ใช้',
-                    icon: Icons.person_outline,
-                    child: _buildProfileSection(),
-                  ),
-                  const SizedBox(height: 16),
                   _ModernCard(
                     title: 'ดัชนีมวลกาย (BMI)',
                     icon: Icons.health_and_safety,
@@ -665,17 +513,30 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.black,
+                                ),
+                              ),
                             )
-                          : const Icon(Icons.save_rounded),
+                          : const Icon(Icons.save_rounded, color: Colors.black),
                       label: const Text(
                         'บันทึกข้อมูล',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
+                          color: Color.fromARGB(255, 255, 255, 255), // ฟอนต์ดำ
                         ),
                       ),
                       style: FilledButton.styleFrom(
+                        backgroundColor: const Color.fromARGB(
+                          255,
+                          0,
+                          0,
+                          0,
+                        ), // เหลือง
+                        foregroundColor: Colors.black, // ไอคอน + ข้อความเป็นดำ
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -723,7 +584,7 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(.12),
+                  color: color.withValues(alpha: .12),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
@@ -810,7 +671,7 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
         hintText: hint,
         isDense: true,
         filled: true,
-        fillColor: const Color(0xFFF1F2F6),
+        fillColor: const Color.fromARGB(255, 246, 241, 243),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
@@ -824,15 +685,6 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
   }
 
   // ---- validators ----
-  String? _displayNameValidator(String? value) {
-    final trimmed = value?.trim() ?? '';
-    if (trimmed.isEmpty) return 'กรุณากรอกชื่อที่ต้องการแสดง';
-    if (trimmed.contains(RegExp(r'\s'))) {
-      return 'กรุณากรอกชื่อที่ติดกันไม่เว้นวรรค';
-    }
-    if (trimmed.length < 2) return 'กรุณากรอกชื่ออย่างน้อย 2 ตัวอักษร';
-    return null;
-  }
 
   String? _numberOrEmptyValidator(String? value) {
     if (value == null || value.trim().isEmpty) return null;

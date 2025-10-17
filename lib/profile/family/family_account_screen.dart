@@ -64,7 +64,7 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
     try {
       final user = _auth.currentUser;
       if (user == null) {
-        _showErr('Please sign in first');
+        _showErr('กรุณาเข้าสู่ระบบก่อน');
         _resetFamilyState();
         _goToHub();
         return;
@@ -134,7 +134,7 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
         }
       });
     } catch (e) {
-      _showErr('Failed to load data: $e');
+      _showErr('โหลดข้อมูลไม่สำเร็จ: $e');
     } finally {
       if (mounted && !_navigatingToHub) setState(() => _loading = false);
     }
@@ -149,10 +149,10 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
       if (action == mc.MemberCardAction.remove) {
         // ← ใช้ mc.
         await _svc!.removeMember(targetUserId: targetUserId);
-        _showOk('Member removed from family');
+        _showOk('นำสมาชิกออกจากครอบครัวแล้ว');
       }
     } catch (e) {
-      _showErr('Operation failed: $e');
+      _showErr('ดำเนินการไม่สำเร็จ: $e');
     }
   }
 
@@ -173,7 +173,7 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
     if (_svc == null) return;
     final current = _auth.currentUser;
     if (current == null) {
-      _showErr('Please sign in first');
+      _showErr('กรุณาเข้าสู่ระบบก่อน');
       return;
     }
     try {
@@ -187,7 +187,7 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
         inviteCode: result.code,
       );
     } catch (e) {
-      _showErr('Failed to create invite code: $e');
+      _showErr('ไม่สามารถสร้างรหัสเชิญได้: $e');
     }
   }
 
@@ -197,16 +197,16 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
 
     final user = _auth.currentUser;
     if (user == null) {
-      _showErr('Please sign in first');
+      _showErr('กรุณาเข้าสู่ระบบก่อน');
       return;
     }
 
     try {
       await FamilyService('_tmp').joinFamilyByCode(code, userId: user.uid);
       await _init();
-      _showOk('Joined family successfully');
+      _showOk('เข้าร่วมครอบครัวเรียบร้อยแล้ว');
     } catch (e) {
-      _showErr('Failed to join family: $e');
+      _showErr('ไม่สามารถเข้าร่วมครอบครัวได้: $e');
     }
   }
 
@@ -214,8 +214,8 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
     final fid = _fid;
     if (fid == null) return;
     final ok = await _confirm(
-      title: 'Leave family',
-      message: 'Are you sure you want to leave this family?',
+      title: 'ออกจากครอบครัว',
+      message: 'คุณแน่ใจหรือไม่ว่าต้องการออกจากครอบครัวนี้?',
       danger: true,
     );
     if (!ok) return;
@@ -225,10 +225,10 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
 
     try {
       await FamilyService.leaveFamily(uid: uid);
-      _showOk('Left family successfully');
+      _showOk('ออกจากครอบครัวเรียบร้อยแล้ว');
       _goToHub();
     } catch (e) {
-      _showErr('Failed to leave family: $e');
+      _showErr('ไม่สามารถออกจากครอบครัวได้: $e');
     }
   }
 
@@ -237,9 +237,9 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
     if (fid == null) return;
 
     final ok = await _confirm(
-      title: 'Disband family',
+      title: 'ยกเลิกการเป็นครอบครัว',
       message:
-          'Disbanding the family removes all members and related data. This cannot be undone. Continue?',
+          'การยกเลิกการเป็นครอบครัวจะลบสมาชิกทั้งหมดและข้อมูลที่เกี่ยวข้อง นี่ไม่สามารถย้อนกลับได้ ต้องการดำเนินการต่อหรือไม่?',
       danger: true,
     );
     if (!ok) return;
@@ -249,10 +249,10 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
 
     try {
       await FamilyService.disbandFamilyByAdmin(familyId: fid, currentUid: uid);
-      _showOk('Family disbanded successfully');
+      _showOk('ยกเลิกการเป็นครอบครัวเรียบร้อยแล้ว');
       _goToHub();
     } catch (e) {
-      _showErr('Failed to disband family: $e');
+      _showErr('ไม่สามารถยกเลิกการเป็นครอบครัวได้: $e');
     }
   }
 
@@ -274,25 +274,25 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
     final result = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Rename family'),
+        title: const Text('เปลี่ยนชื่อครอบครัว'),
         content: TextField(
           controller: controller,
           autofocus: true,
           textInputAction: TextInputAction.done,
           onSubmitted: (_) => Navigator.of(context).pop(controller.text),
           decoration: const InputDecoration(
-            labelText: 'Family name',
-            hintText: 'e.g. My Family',
+            labelText: 'ชื่อครอบครัว',
+            hintText: 'เช่น ครอบครัวของฉัน',
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).maybePop(),
-            child: const Text('Cancel'),
+            child: const Text('ยกเลิก'),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Save'),
+            child: const Text('บันทึก'),
           ),
         ],
       ),
@@ -301,7 +301,7 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
     final trimmed = result?.trim();
     if (trimmed == null) return;
     if (trimmed.isEmpty) {
-      _showErr('Please enter a family name');
+      _showErr('กรุณาใส่ชื่อครอบครัว');
       return;
     }
     if (trimmed == _familyName) return;
@@ -310,9 +310,9 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
       await svc.renameFamily(trimmed);
       if (!mounted) return;
       setState(() => _familyName = trimmed);
-      _showOk('Family name updated');
+      _showOk('เปลี่ยนชื่อครอบครัวเรียบร้อยแล้ว');
     } catch (e) {
-      _showErr('Failed to update family name: $e');
+      _showErr('ไม่สามารถเปลี่ยนชื่อครอบครัวได้: $e');
     }
   }
 
@@ -362,14 +362,18 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).maybePop(false),
-            child: const Text('Cancel'),
+            style: TextButton.styleFrom(foregroundColor: Colors.black87),
+            child: const Text('ยกเลิก'),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: danger ? Colors.red : null,
+              backgroundColor: danger
+                  ? Colors.red
+                  : Colors.black, // ดำ/แดง ไม่ม่วง
+              foregroundColor: Colors.white,
             ),
             onPressed: () => Navigator.of(context).maybePop(true),
-            child: const Text('Confirm'),
+            child: const Text('ยืนยัน'),
           ),
         ],
       ),
@@ -379,7 +383,11 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
 
   PreferredSizeWidget _appBar() {
     return AppBar(
-      title: const Text('Family Account'),
+      title: const Text('บัญชีครอบครัว'),
+      backgroundColor: Colors.white,
+      foregroundColor: Colors.black87,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent, // กัน M3 ใส่ทินท์ม่วง
       automaticallyImplyLeading: !widget.showBack,
       leading: widget.showBack
           ? IconButton(
@@ -430,7 +438,7 @@ class _FamilyAccountScreenState extends State<FamilyAccountScreen> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'Family Members',
+                'สมาชิกในครอบครัว',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
@@ -475,12 +483,20 @@ class _FamilyHeaderCard extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [Colors.indigo.shade500, Colors.indigo.shade700],
+          colors: [
+            Color.fromRGBO(255, 183, 0, 1),
+            Color.fromRGBO(251, 192, 45, 1),
+          ],
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.indigo.shade200.withValues(alpha: 0.4),
+            color: const Color.fromARGB(
+              255,
+              126,
+              126,
+              126,
+            ).withValues(alpha: 0.4),
             blurRadius: 10,
             offset: const Offset(0, 6),
           ),
@@ -496,7 +512,10 @@ class _FamilyHeaderCard extends StatelessWidget {
               color: Colors.white.withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.groups, color: Colors.white),
+            child: const Icon(
+              Icons.groups,
+              color: Color.fromARGB(255, 0, 0, 0),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -508,30 +527,22 @@ class _FamilyHeaderCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: Color.fromARGB(255, 0, 0, 0),
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const _ChipLabel(text: 'My Family'),
-                    if (isAdmin) ...[
-                      const SizedBox(width: 6),
-                      const _ChipLabel(text: 'Admin'),
-                    ],
-                  ],
-                ),
+                Row(children: [const _ChipLabel(text: 'ครอบครัวของคุณ')]),
               ],
             ),
           ),
           if (canRename) ...[
             const SizedBox(width: 4),
             IconButton(
-              tooltip: 'Rename family',
+              tooltip: 'เปลี่ยนชื่อครอบครัว',
               onPressed: onRename,
-              icon: const Icon(Icons.edit, color: Colors.white),
+              icon: const Icon(Icons.edit, color: Color.fromARGB(255, 0, 0, 0)),
             ),
           ],
         ],
@@ -550,14 +561,16 @@ class _ChipLabel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
+        color: const Color.fromARGB(255, 232, 232, 232).withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.5)),
+        border: Border.all(
+          color: Color.fromARGB(255, 61, 61, 61).withValues(alpha: 0.2),
+        ),
       ),
       child: Text(
         text,
         style: const TextStyle(
-          color: Colors.white,
+          color: Color.fromARGB(255, 61, 61, 61),
           fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: .2,

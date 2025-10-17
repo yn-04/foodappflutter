@@ -98,12 +98,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         },
       );
 
+      if (!mounted) return;
       if (picked != null && picked != _selectedDate) {
         setState(() {
           _selectedDate = picked;
         });
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('ไม่สามารถเปิดปฏิทินได้ กรุณาลองใหม่'),
@@ -143,11 +145,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         email: _email!,
         password: _password!,
       );
+      if (!mounted) return;
 
       // อัปเดต displayName
-      await userCredential.user!.updateDisplayName(
-        displayName,
-      );
+      await userCredential.user!.updateDisplayName(displayName);
+      if (!mounted) return;
 
       // (ออปชัน) ส่งอีเมลยืนยันตัวตน
       // await userCredential.user!.sendEmailVerification();
@@ -165,6 +167,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         'createdAt': FieldValue.serverTimestamp(),
         'profileCompleted': true,
       });
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -177,6 +180,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       // ➜ ไปหน้า Home (ถ้าอยากให้กลับไป Login แทน ให้เปลี่ยนเป็น '/login')
       Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
     } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
       String errorMessage = 'เกิดข้อผิดพลาดในการลงทะเบียน';
       if (e.code == 'weak-password') {
         errorMessage = 'รหัสผ่านไม่รัดกุมเพียงพอ';
@@ -191,6 +195,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('เกิดข้อผิดพลาด: $e'),
@@ -261,44 +266,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Phone
-              TextFormField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                decoration: InputDecoration(
-                  labelText: 'เบอร์โทรศัพท์ (ไม่บังคับ)',
-                  prefixIcon: const Icon(Icons.phone, color: Colors.grey),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.blue[600]!),
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[50],
-                  hintText: 'เช่น 081-234-5678',
-                ),
-                validator: (value) {
-                  if (value != null && value.isNotEmpty) {
-                    final cleaned = value.replaceAll(RegExp(r'[^\d]'), '');
-                    if (cleaned.length != 10 || !cleaned.startsWith('0')) {
-                      return 'กรุณากรอกเบอร์โทรที่ถูกต้อง (10 หลัก)';
-                    }
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
               // Gender
               DropdownButtonFormField<String>(
-                value: _selectedGender,
+                initialValue: _selectedGender,
                 decoration: InputDecoration(
                   labelText: 'เพศ',
                   prefixIcon: const Icon(Icons.wc, color: Colors.grey),

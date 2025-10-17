@@ -1,7 +1,6 @@
 // lib/profile/family/dialogs/qr_code_dialog.dart
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -35,7 +34,6 @@ import 'package:share_plus/share_plus.dart';
 /// ```
 class QRCodeDialog extends StatelessWidget {
   const QRCodeDialog._({
-    super.key,
     required this.title,
     required this.payload,
     this.inviteCode,
@@ -62,6 +60,8 @@ class QRCodeDialog extends StatelessWidget {
         payload = enriched;
       }
     }
+
+    if (!context.mounted) return;
 
     return showDialog<void>(
       context: context,
@@ -112,9 +112,13 @@ class QRCodeDialog extends StatelessWidget {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     final code = (inviteCode ?? '').trim();
+
     return Dialog(
+      backgroundColor: Colors.white, // << ขาว
+      surfaceTintColor: Colors.transparent, // << กันทินท์ม่วง
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
       insetPadding: const EdgeInsets.symmetric(
         horizontal: 24.0,
@@ -124,147 +128,216 @@ class QRCodeDialog extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 420),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // Header
-              Row(
+          child: DefaultTextStyle(
+            // << ฟ้อนดำทั้งหมดใน dialog
+            style: const TextStyle(color: Colors.black87),
+            child: IconTheme(
+              // << ไอคอนดำทั้งหมดใน dialog
+              data: const IconThemeData(color: Colors.black87),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        if (subtitle != null && subtitle!.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4.0),
-                            child: Text(
-                              subtitle!,
-                              style: Theme.of(context).textTheme.bodySmall,
+                  // Header
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.black87,
+                                  ),
                             ),
+                            if (subtitle != null && subtitle!.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4.0),
+                                child: Text(
+                                  subtitle!,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: Colors.black54),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'ปิด',
+                        icon: const Icon(Icons.close, color: Colors.black87),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.black.withOpacity(0.06),
+                          shape: const CircleBorder(),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12.0),
+
+                  // QR Box (ขาวล้วน)
+                  Container(
+                    padding: const EdgeInsets.all(12.0),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12.0),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: QrImageView(
+                      data: payload,
+                      version: QrVersions.auto,
+                      size: qrSize,
+                      gapless: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12.0),
+
+                  // Invite code
+                  if (code.isNotEmpty) ...[
+                    SelectableText(
+                      code,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Colors.black87,
+                        fontFeatures: const [ui.FontFeature.tabularFigures()],
+                        letterSpacing: 1.0,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8.0),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        TextButton.icon(
+                          icon: const Icon(Icons.copy, color: Colors.black87),
+                          label: const Text(
+                            'คัดลอก',
+                            style: TextStyle(color: Colors.black87),
                           ),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.black87, // hover/pressed
+                          ),
+                          onPressed: () async {
+                            await Clipboard.setData(ClipboardData(text: code));
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('คัดลอกโค้ดแล้ว')),
+                              );
+                            }
+                          },
+                        ),
+                        const SizedBox(width: 8.0),
+                        TextButton.icon(
+                          icon: const Icon(Icons.share, color: Colors.black87),
+                          label: const Text(
+                            'แชร์โค้ด',
+                            style: TextStyle(color: Colors.black87),
+                          ),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.black87,
+                          ),
+                          onPressed: () async {
+                            await SharePlus.instance.share(
+                              ShareParams(text: code),
+                            );
+                          },
+                        ),
                       ],
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'ปิด',
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12.0),
-
-              // QR Box
-              Container(
-                padding: const EdgeInsets.all(12.0),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12.0),
-                ),
-                child: QrImageView(
-                  data: payload,
-                  version: QrVersions.auto,
-                  size: qrSize,
-                  gapless: true,
-                ),
-              ),
-              const SizedBox(height: 12.0),
-
-              // Invite code (ถ้ามี)
-              if (code.isNotEmpty) ...[
-                SelectableText(
-                  code,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontFeatures: const [ui.FontFeature.tabularFigures()],
-                    letterSpacing: 1.0,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8.0),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    TextButton.icon(
-                      icon: const Icon(Icons.copy),
-                      label: const Text('คัดลอก'),
-                      onPressed: () async {
-                        await Clipboard.setData(ClipboardData(text: code));
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('คัดลอกโค้ดแล้ว')),
-                          );
-                        }
-                      },
-                    ),
-                    const SizedBox(width: 8.0),
-                    TextButton.icon(
-                      icon: const Icon(Icons.share),
-                      label: const Text('แชร์โค้ด'),
-                      onPressed: () async {
-                        await Share.share(code);
-                      },
-                    ),
                   ],
-                ),
-              ],
 
-              const SizedBox(height: 12.0),
-              // Actions (Save / Share QR)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  FilledButton.icon(
-                    icon: const Icon(Icons.download),
-                    label: const Text('บันทึกภาพ QR'),
-                    onPressed: () async {
-                      try {
-                        final file = await _saveQrToFile(
-                          payload,
-                          size: (qrSize + 24.0),
-                        );
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('บันทึกแล้ว: ${file.path}')),
-                          );
-                        }
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('บันทึกไม่สำเร็จ: $e')),
-                          );
-                        }
-                      }
-                    },
-                  ),
-                  const SizedBox(width: 12.0),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.ios_share),
-                    label: const Text('แชร์รูป QR'),
-                    onPressed: () async {
-                      try {
-                        final file = await _saveQrToFile(
-                          payload,
-                          size: (qrSize + 24.0),
-                        );
-                        await Share.shareXFiles([XFile(file.path)]);
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('แชร์ไม่สำเร็จ: $e')),
-                          );
-                        }
-                      }
-                    },
+                  const SizedBox(height: 12.0),
+
+                  // Actions: ปุ่มเหลือง + ปุ่มขาว
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // ปุ่มเหลือง (พื้นเหลือง ตัวหนังสือ/ไอคอนดำ)
+                      FilledButton.icon(
+                        icon: const Icon(Icons.download, color: Colors.black),
+                        label: const Text(
+                          'บันทึกภาพ QR',
+                          style: TextStyle(color: Colors.black),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color.fromRGBO(
+                            251,
+                            192,
+                            45,
+                            1,
+                          ),
+                          foregroundColor: Colors.black,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () async {
+                          try {
+                            final file = await _saveQrToFile(
+                              payload,
+                              size: (qrSize + 24.0),
+                            );
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('บันทึกแล้ว: ${file.path}'),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('บันทึกไม่สำเร็จ: $e')),
+                              );
+                            }
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 12.0),
+
+                      // ปุ่มขาว (พื้นขาว เส้นเทา ตัวหนังสือ/ไอคอนดำ)
+                      OutlinedButton.icon(
+                        icon: const Icon(
+                          Icons.ios_share,
+                          color: Colors.black87,
+                        ),
+                        label: const Text(
+                          'แชร์รูป QR',
+                          style: TextStyle(color: Colors.black87),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.black87,
+                          side: BorderSide(color: Colors.grey[300]!),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () async {
+                          try {
+                            final file = await _saveQrToFile(
+                              payload,
+                              size: (qrSize + 24.0),
+                            );
+                            await SharePlus.instance.share(
+                              ShareParams(files: [XFile(file.path)]),
+                            );
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('แชร์ไม่สำเร็จ: $e')),
+                              );
+                            }
+                          }
+                        },
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
         ),
       ),

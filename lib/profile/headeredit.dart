@@ -65,7 +65,12 @@ class HeaderEditDialog {
                           ),
                           child: CircleAvatar(
                             radius: 50,
-                            backgroundColor: Colors.red,
+                            backgroundColor: const Color.fromRGBO(
+                              251,
+                              192,
+                              45,
+                              1,
+                            ),
                             backgroundImage: selectedImage != null
                                 ? FileImage(selectedImage!)
                                 : (user?.photoURL != null
@@ -76,7 +81,7 @@ class HeaderEditDialog {
                                 selectedImage == null && user?.photoURL == null
                                 ? const Icon(
                                     Icons.person,
-                                    color: Colors.white,
+                                    color: Color.fromARGB(255, 255, 255, 255),
                                     size: 50,
                                   )
                                 : null,

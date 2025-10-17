@@ -1,4 +1,4 @@
-// lib/rawmaterial/widgets/shopping_item_card.dart การ์ดแสดงรายการวัตถุดิบ (เดี่ยว/กลุ่ม)
+// lib/rawmaterial/widgets/shopping_item_card.dart
 import 'package:flutter/material.dart';
 import 'package:my_app/rawmaterial/constants/categories.dart';
 import 'package:my_app/rawmaterial/constants/units.dart';
@@ -7,25 +7,27 @@ import 'package:my_app/rawmaterial/models/shopping_item.dart';
 class ShoppingItemCard extends StatelessWidget {
   final ShoppingItem item;
   final VoidCallback? onTap;
-  final Future<void> Function()? onDelete; // รองรับ async
+
+  // เดิมมี onDelete อยู่แล้ว (ลบจริง)
+  final Future<void> Function()? onDelete;
+
+  // ใหม่: ใช้หมดแล้ว (บันทึก usage_logs + ตั้งจำนวนเป็น 0)
+  // จะถูกเรียกพร้อมจำนวน/หน่วยที่กำลังแสดงบนการ์ด
+  final Future<void> Function(int usedQty, String usedUnit)? onUseUp;
+
   final VoidCallback? onQuickUse;
 
-  /// ====== ตัวเลือกควบคุมการยืนยันลบ ======
-  /// ถ้า true (default) -> การ์ดจะแสดง dialog ยืนยันก่อนเรียก onDelete()
-  /// ถ้า false -> การ์ดจะเรียก onDelete() ตรงๆ (ให้ parent เป็นคนยืนยัน)
+  /// ถ้า true (default) -> แสดง dialog ยืนยันก่อน "ใช้หมดแล้ว"
+  /// ใช้กับ onUseUp
+  final bool confirmUseUp;
+
+  /// เดิม: ควบคุมการยืนยันลบ (ยังคงไว้เพื่อ backward-compat)
   final bool confirmDelete;
 
-  /// ====== โหมดกลุ่ม (ออปชัน) ======
-  /// จำนวนรวมทั้งหมดในกลุ่ม (ถ้า null จะใช้ item.quantity)
+  /// โหมดกลุ่ม (ตัวเลือก)
   final int? groupTotalQuantity;
-
-  /// หน่วยของกลุ่ม (ถ้า null จะใช้ item.unit)
   final String? groupUnit;
-
-  /// หมวดหมู่ของกลุ่ม (ถ้า null จะใช้ item.category)
   final String? groupCategory;
-
-  /// วันหมดอายุที่ "ใกล้ที่สุด" ในกลุ่ม (ถ้า null จะใช้ item.expiryDate)
   final DateTime? groupEarliestExpiry;
 
   const ShoppingItemCard({
@@ -34,22 +36,27 @@ class ShoppingItemCard extends StatelessWidget {
     this.onTap,
     this.onDelete,
     this.onQuickUse,
+
+    // 👇 เพิ่มสองบรรทัดนี้
+    this.onUseUp,
+    this.confirmUseUp = true,
+
     this.groupTotalQuantity,
     this.groupUnit,
     this.groupCategory,
     this.groupEarliestExpiry,
-    this.confirmDelete = true, // 👈 ค่าเริ่มต้น: ถามยืนยันเหมือนเดิม
+
+    // เดิม
+    this.confirmDelete = true,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    // ====== เลือกค่าที่จะแสดง (โหมดกลุ่ม > เดี่ยว) ======
     final int displayQty = groupTotalQuantity ?? item.quantity;
     final String displayUnit = Units.safe(groupUnit ?? item.unit);
     final String displayCategory = groupCategory ?? item.category;
     final DateTime? displayExpiry = groupEarliestExpiry ?? item.expiryDate;
 
-    // คำนวณต่างวันแบบ day-precision (ตัดเวลาออก)
     int? d;
     if (displayExpiry != null) {
       final today = DateTime.now();
@@ -62,15 +69,12 @@ class ShoppingItemCard extends StatelessWidget {
       d = onlyExpiry.difference(onlyToday).inDays;
     }
 
-    // ---- สถานะวันหมดอายุ (สี/ข้อความ) ----
     Color? statusColor;
     String? statusText;
-
     if (d == null) {
       statusColor = Colors.grey;
       statusText = 'ไม่ระบุวันหมดอายุ';
     } else if (d < 0) {
-      // หมดอายุแล้ว -> ไม่แสดงสถานะ/วันที่
       statusColor = null;
       statusText = null;
     } else if (d == 0) {
@@ -112,7 +116,6 @@ class ShoppingItemCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ---- ชื่อวัตถุดิบ: ตัดบรรทัด + ใส่ ... ----
                   Text(
                     item.name,
                     maxLines: 1,
@@ -123,15 +126,11 @@ class ShoppingItemCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-
-                  // บรรทัดสรุปจำนวนรวม + หน่วย + หมวดหมู่ (รองรับกลุ่ม/เดี่ยว)
                   Text(
                     '$displayQty $displayUnit • $displayCategory',
                     style: TextStyle(color: Colors.grey[700], fontSize: 13),
                   ),
                   const SizedBox(height: 4),
-
-                  // ---- แสดงสถานะ/วันที่ตามเงื่อนไข ----
                   if (statusText != null && statusColor != null)
                     Row(
                       children: [
@@ -142,7 +141,7 @@ class ShoppingItemCard extends StatelessWidget {
                           ),
                           decoration: BoxDecoration(
                             // ignore: deprecated_member_use
-                            color: statusColor.withOpacity(0.12),
+                            color: statusColor.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -160,44 +159,79 @@ class ShoppingItemCard extends StatelessWidget {
               ),
             ),
 
-            // ปุ่มลบ
+            // ปุ่ม “ใช้หมดแล้ว” (แทนการลบ)
             IconButton(
-              icon: Icon(Icons.delete_outline, color: Colors.grey[700]),
-              tooltip: 'ลบรายการ',
-              onPressed: onDelete == null
-                  ? null
-                  : () async {
-                      if (!confirmDelete) {
-                        // ไม่ต้องยืนยันที่การ์ด -> ให้ parent จัดการ
-                        await onDelete!();
-                        return;
-                      }
-
-                      // โหมดเดิม: ยืนยันที่การ์ดก่อน
-                      final ok = await showDialog<bool>(
-                        context: context,
-                        builder: (_) => AlertDialog(
-                          title: const Text('ลบรายการ'),
-                          content: Text('ต้องการลบ "${item.name}" ใช่หรือไม่?'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text('ยกเลิก'),
-                            ),
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              child: Text(
-                                'ลบ',
-                                style: TextStyle(color: Colors.grey[700]),
-                              ),
-                            ),
-                          ],
+              icon: Icon(
+                onUseUp != null
+                    ? Icons.inventory_2_outlined
+                    : Icons.delete_outline,
+                color: Colors.grey[700],
+              ),
+              tooltip: onUseUp != null ? 'ใช้หมดแล้ว' : 'ลบรายการ',
+              onPressed: () async {
+                // ถ้ามี onUseUp ให้ทำ flow ใช้หมดแล้ว
+                if (onUseUp != null) {
+                  if (confirmUseUp) {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text('ยืนยัน: ใช้หมดแล้ว'),
+                        content: Text(
+                          'ต้องการบันทึกว่า "${item.name}" ใช้หมดแล้วหรือไม่?\n',
                         ),
-                      );
-                      if (ok == true) {
-                        await onDelete!();
-                      }
-                    },
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('ยกเลิก'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: Text(
+                              'ยืนยัน',
+                              style: TextStyle(color: Colors.grey[700]),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok != true) return;
+                  }
+                  await onUseUp!(displayQty, displayUnit);
+                  return;
+                }
+
+                // fallback: ยังไม่มี onUseUp → ใช้ลบแบบเดิม
+                if (onDelete == null) return;
+
+                if (!confirmDelete) {
+                  await onDelete!();
+                  return;
+                }
+
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text('ลบรายการ'),
+                    content: Text('ต้องการลบ "${item.name}" ใช่หรือไม่?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('ยกเลิก'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: Text(
+                          'ลบ',
+                          style: TextStyle(color: Colors.grey[700]),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok == true) {
+                  await onDelete!();
+                }
+              },
             ),
             const SizedBox(width: 8),
 

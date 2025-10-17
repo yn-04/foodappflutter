@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
 import 'package:my_app/rawmaterial/addraw.dart';
+import 'package:my_app/rawmaterial/constants/categories.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -83,7 +84,7 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
       if (barcodes.isNotEmpty) {
         final barcode = barcodes.first.rawValue;
         if (barcode != null && barcode.isNotEmpty) {
-          // print('Barcode found: $barcode');
+          // logDebug('Barcode found: $barcode');
           await _handleBarcodeFound(barcode);
         } else {
           _showError('ไม่พบบาร์โค้ดในรูปภาพ');
@@ -92,7 +93,7 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
         _showError('ไม่พบบาร์โค้ดในรูปภาพ');
       }
     } catch (e) {
-      // print('Process image error: $e');
+      // logDebug('Process image error: $e');
       _showError('ไม่สามารถประมวลผลรูปภาพได้');
     } finally {
       if (mounted) {
@@ -140,7 +141,7 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
     String barcode,
   ) async {
     try {
-      // print('Fetching product data from OpenFoodFacts for barcode: $barcode');
+      // logDebug('Fetching product data from OpenFoodFacts for barcode: $barcode');
       final url =
           'https://world.openfoodfacts.org/api/v0/product/$barcode.json';
       final response = await http
@@ -179,7 +180,7 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
       }
       return null;
     } catch (e) {
-      // print('Error fetching from OpenFoodFacts: $e');
+      // logDebug('Error fetching from OpenFoodFacts: $e');
       return null;
     }
   }
@@ -187,69 +188,72 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
   // แปลงหน่วยและปริมาณจากข้อมูล OpenFoodFacts
   Map<String, dynamic> _parseQuantityAndUnit(Map<String, dynamic> product) {
     String quantityStr = product['quantity']?.toString().toLowerCase() ?? '';
-
-    // ลบช่องว่างและจัดรูปแบบ
     quantityStr = quantityStr.replaceAll(' ', '');
 
-    // Pattern สำหรับจับค่าตัวเลขและหน่วย
+    // รองรับ pattern อย่าง "2x100g" ด้วย
+    final packMatch = RegExp(
+      r'(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(g|kg|ml|l)\b',
+      caseSensitive: false,
+    ).firstMatch(quantityStr);
+    if (packMatch != null) {
+      final packs = int.tryParse(packMatch.group(1)!);
+      final per = double.tryParse(packMatch.group(2)!);
+      final u = packMatch.group(3)!.toLowerCase();
+      if (packs != null && packs > 0 && per != null && per > 0) {
+        return {
+          'quantity': (packs * per).round(),
+          'unit': u,
+        }; // u คือ g/kg/ml/l
+      }
+    }
+
     final patterns = [
-      // กรัม: g, gram, grams, กรัม
-      RegExp(r'(\d+(?:\.\d+)?)\s*g(?:ram)?s?(?![a-z])', caseSensitive: false),
-      RegExp(r'(\d+(?:\.\d+)?)\s*กรัม'),
-
-      // กิโลกรัม: kg, kilogram, kilograms, กก, กิโลกรัม
-      RegExp(r'(\d+(?:\.\d+)?)\s*kg(?:s)?(?![a-z])', caseSensitive: false),
-      RegExp(r'(\d+(?:\.\d+)?)\s*กก'),
-      RegExp(r'(\d+(?:\.\d+)?)\s*กิโลกรัม'),
-
-      // มิลลิลิตร: ml, milliliter, มล, มิลลิลิตร
-      RegExp(r'(\d+(?:\.\d+)?)\s*ml(?![a-z])', caseSensitive: false),
-      RegExp(r'(\d+(?:\.\d+)?)\s*มล'),
-      RegExp(r'(\d+(?:\.\d+)?)\s*มิลลิลิตร'),
-
-      // ลิตร: l, liter, liters, ลิตร
-      RegExp(r'(\d+(?:\.\d+)?)\s*l(?:iter)?s?(?![a-z])', caseSensitive: false),
-      RegExp(r'(\d+(?:\.\d+)?)\s*ลิตร'),
-
-      // ชิ้น/ฟอง: pieces, pcs, count, x
+      RegExp(r'(\d+(?:\.\d+)?)\s*g(?:ram)?s?\b', caseSensitive: false),
+      RegExp(r'(\d+(?:\.\d+)?)\s*kg\b', caseSensitive: false),
+      RegExp(r'(\d+(?:\.\d+)?)\s*ml\b', caseSensitive: false),
+      RegExp(r'(\d+(?:\.\d+)?)\s*l(?:iter)?s?\b', caseSensitive: false),
       RegExp(
         r'(\d+)\s*(?:pieces?|pcs?|count|x|ชิ้น|ฟอง)',
         caseSensitive: false,
       ),
+      // ไทย
+      RegExp(r'(\d+(?:\.\d+)?)\s*กรัม'),
+      RegExp(r'(\d+(?:\.\d+)?)\s*(?:กก|กิโลกรัม)'),
+      RegExp(r'(\d+(?:\.\d+)?)\s*(?:มล|มิลลิลิตร)'),
+      RegExp(r'(\d+(?:\.\d+)?)\s*ลิตร'),
     ];
 
-    for (int i = 0; i < patterns.length; i++) {
-      final match = patterns[i].firstMatch(quantityStr);
-      if (match != null) {
-        final value = double.tryParse(match.group(1) ?? '');
-        if (value != null) {
-          String unit;
-          int quantity;
+    for (final p in patterns) {
+      final m = p.firstMatch(quantityStr);
+      if (m != null) {
+        final numStr = m.group(1);
+        final value = double.tryParse(numStr ?? '');
+        if (value == null) break;
 
-          if (i <= 1) {
-            unit = 'กรัม';
-            quantity = value.round();
-          } else if (i <= 4) {
-            unit = 'กิโลกรัม';
-            quantity = value.round();
-          } else if (i <= 7) {
-            unit = 'มิลลิลิตร';
-            quantity = value.round();
-          } else if (i <= 9) {
-            unit = 'ลิตร';
-            quantity = value.round();
-          } else {
-            unit = 'ชิ้น';
-            quantity = value.round();
-          }
+        String unit = 'g';
+        if (p.pattern.contains('kg') ||
+            p.pattern.contains('กก') ||
+            p.pattern.contains('กิโลกรัม'))
+          unit = 'kg';
+        else if (p.pattern.contains('ml') ||
+            p.pattern.contains('มล') ||
+            p.pattern.contains('มิลลิลิตร'))
+          unit = 'ml';
+        else if (p.pattern.contains('l') || p.pattern.contains('ลิตร'))
+          unit = 'l';
+        else if (p.pattern.contains('pieces') ||
+            p.pattern.contains('pcs') ||
+            p.pattern.contains('count') ||
+            p.pattern.contains('ชิ้น') ||
+            p.pattern.contains('ฟอง'))
+          unit = 'ฟอง';
 
-          return {'quantity': quantity, 'unit': unit};
-        }
+        return {'quantity': value.round(), 'unit': unit};
       }
     }
 
-    // ถ้าไม่พบ pattern ใดๆ ให้ใช้ค่าเริ่มต้น
-    return {'quantity': 1, 'unit': 'ชิ้น'};
+    // ไม่เจออะไรเลย → ดีฟอลต์ปลอดภัย
+    return {'quantity': 1, 'unit': 'g'};
   }
 
   // ดึงข้อมูลจาก Firebase
@@ -288,7 +292,7 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
 
       return null;
     } catch (e) {
-      // print('Error searching product: $e');
+      // logDebug('Error searching product: $e');
       return null;
     }
   }
@@ -312,48 +316,78 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
 
   String _mapToOurCategory(Map<String, dynamic> product) {
     final categories = product['categories']?.toString().toLowerCase() ?? '';
-    final categoryTags = product['categories_tags'] as List? ?? [];
+    final List categoryTags = (product['categories_tags'] as List?) ?? [];
 
-    if (categories.contains('meat') ||
-        categories.contains('เนื้อ') ||
-        categoryTags.any((tag) => tag.toString().contains('meat'))) {
-      return 'เนื้อสัตว์';
-    } else if (categories.contains('vegetable') ||
-        categories.contains('ผัก') ||
-        categoryTags.any((tag) => tag.toString().contains('vegetable'))) {
-      return 'ผัก';
-    } else if (categories.contains('fruit') ||
-        categories.contains('ผลไม้') ||
-        categoryTags.any((tag) => tag.toString().contains('fruit'))) {
-      return 'ผลไม้';
-    } else if (categories.contains('spice') ||
-        categories.contains('เครื่องเทศ') ||
-        categoryTags.any((tag) => tag.toString().contains('spice'))) {
-      return 'เครื่องเทศ';
-    } else if (categories.contains('dairy') ||
-        categories.contains('milk') ||
-        categories.contains('นม') ||
-        categoryTags.any(
-          (tag) =>
-              tag.toString().contains('dairy') ||
-              tag.toString().contains('milk'),
-        )) {
-      return 'ผลิตภัณฑ์จากนม';
-    } else if (categories.contains('beverage') ||
-        categories.contains('drink') ||
-        categories.contains('เครื่องดื่ม') ||
-        categoryTags.any(
-          (tag) =>
-              tag.toString().contains('beverage') ||
-              tag.toString().contains('drink'),
-        )) {
-      return 'เครื่องดื่ม';
-    } else if (categories.contains('oil') ||
-        categories.contains('น้ำมัน') ||
-        categoryTags.any((tag) => tag.toString().contains('oil'))) {
-      return 'น้ำมัน';
+    bool hasTag(String key) =>
+        categories.contains(key) ||
+        categoryTags.any((t) => t.toString().toLowerCase().contains(key));
+
+    String mapped;
+    if (hasTag('meat') ||
+        hasTag('เนื้อ') ||
+        hasTag('seafood') ||
+        hasTag('ปลา') ||
+        hasTag('ไก่') ||
+        hasTag('กุ้ง') ||
+        hasTag('หมู') ||
+        hasTag('beef')) {
+      mapped = 'เนื้อสัตว์/อาหารทะเล';
+    } else if (hasTag('vegetable') ||
+        hasTag('ผัก') ||
+        hasTag('ผลไม้') ||
+        hasTag('fruit')) {
+      mapped = 'ผักผลไม้สด';
+    } else if (hasTag('dairy') ||
+        hasTag('milk') ||
+        hasTag('นม') ||
+        hasTag('cheese') ||
+        hasTag('โยเกิร์ต')) {
+      mapped = 'นม/ชีส/ไข่';
+    } else if (hasTag('beverage') ||
+        hasTag('drink') ||
+        hasTag('เครื่องดื่ม') ||
+        hasTag('น้ำดื่ม') ||
+        hasTag('coffee') ||
+        hasTag('tea') ||
+        hasTag('juice')) {
+      mapped = 'เครื่องดื่ม';
+    } else if (hasTag('oil') ||
+        hasTag('น้ำมัน') ||
+        hasTag('olive') ||
+        hasTag('canola') ||
+        hasTag('palm') ||
+        hasTag('sesame') ||
+        hasTag('rice-bran') ||
+        hasTag('corn-oil') ||
+        hasTag('coconut')) {
+      mapped = 'น้ำมัน';
+    } else if (hasTag('spice') ||
+        hasTag('condiment') ||
+        hasTag('seasoning') ||
+        hasTag('ซอส') ||
+        hasTag('เครื่องปรุง') ||
+        hasTag('ธัญพืช') ||
+        hasTag('แป้ง')) {
+      mapped = 'ของแห้ง/เครื่องปรุง';
+    } else if (hasTag('bread') ||
+        hasTag('bakery') ||
+        hasTag('ขนมปัง') ||
+        hasTag('เบเกอรี่') ||
+        hasTag('snack') ||
+        hasTag('ขนม')) {
+      mapped = 'เบเกอรี่/ขนม';
+    } else if (hasTag('canned') ||
+        hasTag('กระป๋อง') ||
+        hasTag('พร้อมทาน') ||
+        hasTag('ready-meals')) {
+      mapped = 'กับข้าว/พร้อมทาน';
+    } else {
+      mapped = 'ของแห้ง/เครื่องปรุง'; // ✅ fallback ที่ตรงกับ dataset
     }
-    return 'ของแห้ง';
+
+    // กันเคสสะกดเพี้ยนด้วย normalize และยืนยันว่าเป็นหมวดที่ระบบรู้จัก
+    final normalized = Categories.normalize(mapped);
+    return Categories.isKnown(normalized) ? normalized : 'ของแห้ง/เครื่องปรุง';
   }
 
   String? _getBrand(Map<String, dynamic> product) {
@@ -499,7 +533,7 @@ class _WorkingBarcodeScannerState extends State<WorkingBarcodeScanner> {
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.9),
+                        color: Colors.white.withValues(alpha: 0.9),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Icon(

@@ -26,7 +26,7 @@ const gap24 = SizedBox(height: 24);
 /// ------------------------------
 final kSoftShadow = [
   BoxShadow(
-    color: Colors.black.withOpacity(0.06),
+    color: Colors.black.withValues(alpha: 0.06),
     blurRadius: 16,
     offset: const Offset(0, 6),
   ),
@@ -205,7 +205,7 @@ class LoadingOverlay extends StatelessWidget {
         child,
         Positioned.fill(
           child: Container(
-            color: Colors.black.withOpacity(0.12),
+            color: Colors.black.withValues(alpha: 0.12),
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 260),

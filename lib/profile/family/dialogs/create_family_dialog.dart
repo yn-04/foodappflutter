@@ -90,17 +90,22 @@ class _CreateFamilyDialogBodyState extends State<_CreateFamilyDialogBody> {
         familyName: familyName, // ✅ ชื่อครอบครัวจากฟอร์ม
       );
 
+      if (!mounted) return;
       Navigator.of(context).pop(fid);
     } on FirebaseException catch (e) {
-      setState(() {
-        _error = e.message ?? e.code;
-        _submitting = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = e.message ?? e.code;
+          _submitting = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _submitting = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _submitting = false;
+        });
+      }
     }
   }
 
@@ -163,9 +168,9 @@ class _CreateFamilyDialogBodyState extends State<_CreateFamilyDialogBody> {
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.08),
+                    color: Colors.red.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.red.withOpacity(0.3)),
+                    border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
                   ),
                   child: Text(
                     _error!,

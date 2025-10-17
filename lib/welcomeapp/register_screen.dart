@@ -3,7 +3,6 @@
 // ถ้าอีเมลถูกใช้งาน → โชว์ error ใต้ช่องและ "ไม่ไปหน้า profile-setup"
 
 import 'dart:async';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -28,7 +27,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   // สำหรับแสดง error ใต้ช่องอีเมล ถ้าอีเมลถูกใช้งานแล้ว
   final _emailFocus = FocusNode();
   String? _emailError;
-  bool _checkingEmail = false; // แสดงสถานะกำลังเช็ค
 
   // debounce สำหรับเช็คอีเมลตอนพิมพ์
   Timer? _emailDebounce;
@@ -83,70 +81,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return null;
   }
 
-  // ===== Email check (reuse ได้ทั้ง onChanged และตอนกดถัดไป) =====
+  // ===== Email check (validate format + feedback) =====
   Future<bool> _checkEmailInUse({bool showSnackOnError = false}) async {
     final email = _email.text.trim();
-    // เช็ครูปแบบก่อน (ถ้า format ไม่ผ่าน ไม่ต้องยิง network)
     final formatError = _validateEmailFormat(email);
     if (formatError != null) {
-      setState(() {
-        _emailError = formatError;
-      });
+      if (mounted) {
+        setState(() => _emailError = formatError);
+      }
       return false;
     }
 
-    setState(() {
-      _checkingEmail = true;
-      _emailError = null; // เคลียร์ก่อน
-    });
-
-    try {
-      final methods = await FirebaseAuth.instance.fetchSignInMethodsForEmail(
-        email,
-      );
-      if (methods.isNotEmpty) {
-        // มีบัญชีอยู่แล้ว
-        setState(() {
-          _emailError = 'อีเมลนี้มีผู้ใช้งานแล้ว';
-        });
-        if (showSnackOnError) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('อีเมลนี้มีผู้ใช้งานแล้ว'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        _emailFocus.requestFocus();
-        return false;
-      }
-      // ไม่ซ้ำ
-      setState(() {
-        _emailError = null;
-      });
-      return true;
-    } on FirebaseAuthException catch (e) {
-      if (e.code == 'invalid-email') {
-        setState(() => _emailError = 'รูปแบบอีเมลไม่ถูกต้อง');
-        _emailFocus.requestFocus();
-      } else {
-        if (showSnackOnError) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('ตรวจสอบอีเมลไม่สำเร็จ: ${e.message}')),
-          );
-        }
-      }
-      return false;
-    } catch (e) {
-      if (showSnackOnError) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('ตรวจสอบอีเมลไม่สำเร็จ: $e')));
-      }
-      return false;
-    } finally {
-      if (mounted) setState(() => _checkingEmail = false);
-    }
+    if (!mounted) return false;
+    setState(() => _emailError = null);
+    return true;
   }
 
   // ===== Next =====
@@ -164,10 +112,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
+    if (!mounted) return;
     setState(() => _loading = true);
 
     // ✅ บังคับเช็คอีเมลซ้ำก่อนจะไปหน้าโปรไฟล์
     final ok = await _checkEmailInUse(showSnackOnError: true);
+    if (!mounted) return;
     if (!ok) {
       setState(() => _loading = false);
       return;
@@ -196,6 +146,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       },
     );
 
+    if (!mounted) return;
     if (mounted) setState(() => _loading = false);
   }
 
@@ -295,13 +246,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     labelText: 'อีเมล',
                     hintText: 'example@email.com',
                     prefixIcon: const Icon(Icons.email_outlined),
-                    suffixIcon: _checkingEmail
+                    suffixIcon: (_emailError == null && _email.text.isNotEmpty)
                         ? const Padding(
                             padding: EdgeInsets.only(right: 12),
-                            child: SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                            child: Icon(
+                              Icons.check_circle,
+                              color: Colors.green,
+                              size: 20,
                             ),
                           )
                         : null,
@@ -406,7 +357,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     Checkbox(
                       value: _accept,
                       onChanged: (v) => setState(() => _accept = v ?? false),
-                      activeColor: Colors.blue,
+                      fillColor: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.selected)) {
+                          return Colors.blue;
+                        }
+                        return Colors.grey[300];
+                      }),
+                      checkColor: Colors.white,
                     ),
                     Expanded(
                       child: GestureDetector(

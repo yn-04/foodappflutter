@@ -4,13 +4,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import 'package:my_app/rawmaterial/constants/units.dart';
 import 'package:my_app/rawmaterial/models/shopping_item.dart';
 import 'package:my_app/rawmaterial/pages/item_detail_page.dart';
 import 'package:my_app/rawmaterial/widgets/shopping_item_card.dart';
 import 'package:my_app/rawmaterial/widgets/quick_use_sheet.dart'; // ✅ เพิ่มบรรทัดนี้
 import 'package:my_app/rawmaterial/utils/unit_converter.dart';
-import 'package:my_app/welcomeapp/home.dart';
 
 class ItemGroupDetailSheet extends StatefulWidget {
   final String groupName;
@@ -27,8 +25,6 @@ class ItemGroupDetailSheet extends StatefulWidget {
 }
 
 class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
-  bool _busy = false;
-
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
@@ -37,14 +33,13 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
       maxChildSize: 0.95,
       builder: (context, scrollCtrl) {
         return SafeArea(
-          top: false, // ไม่ดันลงด้านบน เพราะเป็นชีตเลื่อนขึ้นมา
+          top: false,
           child: Material(
-            // ✅ ใช้ Material ให้ทึบ (ไม่โปร่ง)
             color: Colors.white,
             elevation: 8,
-            shadowColor: Colors.black.withOpacity(0.15),
+            shadowColor: Colors.black.withValues(alpha: 0.15),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-            clipBehavior: Clip.antiAlias, // ✅ ตัดขอบ ink/ripple ให้โค้งตามมุม
+            clipBehavior: Clip.antiAlias,
             child: Column(
               children: [
                 const SizedBox(height: 10),
@@ -58,7 +53,6 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
                 ),
                 const SizedBox(height: 10),
 
-                // ... ที่เหลือเหมือนเดิม ...
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
@@ -117,10 +111,16 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
                             Navigator.pop(context, true);
                           }
                         },
+
+                        // ⬇️ ให้ไอคอนบนการ์ดทำงานเป็น "ใช้หมดแล้ว"
+                        onUseUp: (usedQty, usedUnit) =>
+                            _useUpItem(i, usedQty: usedQty, usedUnit: usedUnit),
+                        confirmUseUp: true,
+
+                        // จะยังคงมีปุ่มลบ (fallback) ถ้าอยากใช้ก็ยังเรียกได้
                         onDelete: () => _deleteItem(context, i),
+                        confirmDelete: false, // ยืนยันนอกการ์ดเหมือนเดิม
                         onQuickUse: () => _showQuickUseSheet(i),
-                        // ในชีตนี้ปิดปุ่ม Quick use อยู่แล้ว
-                        confirmDelete: false, // 👈 ปิดการยืนยันบนการ์ด
                       );
                     },
                   ),
@@ -133,42 +133,49 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
     );
   }
 
-  Future<void> _duplicateFromFirst(BuildContext context) async {
-    if (widget.items.isEmpty) return;
-    await _duplicateItem(context, widget.items.first);
-  }
-
-  Future<void> _duplicateItem(BuildContext context, ShoppingItem i) async {
+  // ✅ ใช้หมดแล้ว: บันทึก usage_logs + ตั้ง quantity = 0 (ไม่ลบเอกสาร)
+  Future<void> _useUpItem(
+    ShoppingItem item, {
+    required int usedQty,
+    required String usedUnit,
+  }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    setState(() => _busy = true);
     try {
-      await FirebaseFirestore.instance
+      final docRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .collection('raw_materials')
-          .add({
-            'name': i.name,
-            'category': i.category,
-            'quantity': i.quantity,
-            'unit': Units.safe(i.unit),
-            'expiry_date': i.expiryDate != null
-                ? Timestamp.fromDate(i.expiryDate!)
-                : null,
-            'imageUrl': i.imageUrl,
-            'created_at': FieldValue.serverTimestamp(),
-            'updated_at': FieldValue.serverTimestamp(),
-            'user_id': user.uid,
-          });
+          .doc(item.id);
+
+      // บันทึกลง log ว่าใช้จนหมด
+      await docRef.collection('usage_logs').add({
+        'quantity': usedQty, // จำนวนที่แสดงบนการ์ด
+        'unit': usedUnit, // หน่วยที่แสดง
+        'note': 'use_up', // tag สั้นๆ ว่าเป็นการใช้หมด
+        'used_at': FieldValue.serverTimestamp(),
+      });
+
+      // ตั้งจำนวนคงเหลือเป็น 0 (ไม่ลบเอกสาร)
+      await docRef.update({
+        'quantity': 0,
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+
       if (!mounted) return;
+      // ปิดชีตด้วยค่า true ให้หน้าพ่อรีเฟรช
       Navigator.pop(context, true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('บันทึกว่าใช้หมดแล้ว'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('ทำซ้ำไม่สำเร็จ: $e')));
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      ).showSnackBar(SnackBar(content: Text('บันทึกไม่สำเร็จ: $e')));
     }
   }
 
@@ -196,7 +203,6 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
 
     if (ok != true) return;
 
-    setState(() => _busy = true);
     try {
       await FirebaseFirestore.instance
           .collection('users')
@@ -214,17 +220,8 @@ class _ItemGroupDetailSheetState extends State<ItemGroupDetailSheet> {
         context,
       ).showSnackBar(SnackBar(content: Text('ลบไม่สำเร็จ: $e')));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) ;
     }
-  }
-
-  void _goToShoppingList() {
-    Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => const HomeScreen(initialIndex: 1),
-      ),
-      (route) => false,
-    );
   }
 
   void _showQuickUseSheet(ShoppingItem item) {

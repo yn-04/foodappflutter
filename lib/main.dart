@@ -1,32 +1,40 @@
+// lib/main.dart
+import 'dart:async';
+
 import 'package:camera/camera.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:provider/provider.dart';
+
+import 'package:my_app/firebase_options.dart';
+import 'package:my_app/foodreccom/providers/enhanced_recommendation_provider.dart';
+import 'package:my_app/foodreccom/utils/ingredient_translator.dart';
+
 import 'package:my_app/profile/family/family_account_screen.dart';
 import 'package:my_app/profile/family/family_hub_screen.dart';
 import 'package:my_app/profile/profile_tab.dart';
-import 'package:provider/provider.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-import 'package:my_app/foodreccom/providers/enhanced_recommendation_provider.dart';
-import 'package:my_app/foodreccom/utils/ingredient_translator.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/material.dart';
-
-import 'package:my_app/firebase_options.dart';
-import 'package:my_app/welcomeapp/login_screen.dart';
-import 'package:my_app/welcomeapp/register_screen.dart';
-import 'package:my_app/welcomeapp/profile_setup_screen.dart';
 import 'package:my_app/welcomeapp/home.dart';
+import 'package:my_app/welcomeapp/login_screen.dart';
+import 'package:my_app/welcomeapp/profile_setup_screen.dart';
+import 'package:my_app/welcomeapp/register_screen.dart';
+
+import 'package:my_app/notifications/notifications_center_screen.dart';
+
+/// ใช้แสดง SnackBar จากทุกที่
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Init Firebase ด้วย options
+  // ✅ Prod Firebase (ไม่แตะ emulator)
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await FirebaseAuth.instance.setLanguageCode('th');
 
-  // ✅ เปิดใช้ App Check (โหมด Dev ใช้ Debug provider ทั้ง Android/iOS)
-  //    ถ้าจะไปโปรดักชัน ค่อยสลับเป็น playIntegrity/deviceCheck (ดูโน้ตด้านล่าง)
-  // โหลดไฟล์ .env
+  // โหลด .env
   await dotenv.load(fileName: ".env");
   final apiKeys = dotenv.env['GEMINI_API_KEYS'];
   if (apiKeys == null || apiKeys.isEmpty) {
@@ -39,20 +47,20 @@ Future<void> main() async {
   // โหลด Ingredient Translator cache
   await IngredientTranslator.loadCache();
 
-  // ตรวจสอบกล้อง
+  // ตรวจสอบกล้อง (optional; ไม่บล็อก UI)
   try {
     final cameras = await availableCameras();
     debugPrint('📷 Available cameras: ${cameras.length}');
+    // อุ่นเครื่องแบบไม่รบกวน UI
+    // ignore: unawaited_futures
+    Future(() async {
+      try {
+        await availableCameras();
+      } catch (_) {}
+    });
   } catch (e) {
     debugPrint('❌ Error getting cameras: $e');
   }
-  // อุ่นเครื่องกล้องแบบไม่บล็อก UI
-  // ignore: unawaited_futures
-  Future(() async {
-    try {
-      await availableCameras();
-    } catch (_) {}
-  });
 
   runApp(const MyApp());
 }
@@ -71,6 +79,7 @@ class AuthGate extends StatelessWidget {
           );
         }
         if (snapshot.hasData) {
+          // ✅ เข้าระบบแล้ว → Home ทันที (ไม่พันกับ FCM)
           return const HomeScreen();
         } else {
           return const LoginScreen();
@@ -90,6 +99,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => EnhancedRecommendationProvider()),
       ],
       child: MaterialApp(
+        navigatorKey: navigatorKey,
         title: 'ระบบผู้ใช้งาน (Dev)',
         theme: ThemeData(
           primarySwatch: Colors.blue,
@@ -108,15 +118,14 @@ class MyApp extends StatelessWidget {
           '/register': (_) => const RegisterScreen(),
           '/profile-setup': (_) => const ProfileSetupScreen(),
           '/home': (_) => const HomeScreen(),
-
           '/home/profile': (_) => const HomeScreen(initialIndex: 3),
           '/profile': (_) => const ProfileTab(),
           '/family/hub': (_) => const FamilyHubScreen(),
           '/family/account': (_) => const FamilyAccountScreen(),
+          '/notifications': (_) => const NotificationsCenterScreen(),
         },
-        onUnknownRoute: (settings) => MaterialPageRoute(
-          builder: (_) => const ProfileTab(), // กันพลาด route แปลก
-        ),
+        onUnknownRoute: (settings) =>
+            MaterialPageRoute(builder: (_) => const ProfileTab()),
         debugShowCheckedModeBanner: false,
       ),
     );

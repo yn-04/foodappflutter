@@ -78,7 +78,7 @@ class EmptyStateCard extends StatelessWidget {
               ] else if (icon != null) ...[
                 CircleAvatar(
                   radius: (iconSize / 2) + 12,
-                  backgroundColor: (iconColor ?? Colors.indigo).withOpacity(
+                  backgroundColor: (iconColor ?? Colors.indigo).withValues(alpha: 
                     0.08,
                   ),
                   child: Icon(

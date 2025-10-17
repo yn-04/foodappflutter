@@ -123,20 +123,22 @@ class Categories {
   /// ไอคอนสำหรับชื่อหมวดที่ "ตรงกับ dataset ปัจจุบัน"
   static IconData iconFor(String category) {
     switch (normalize(category)) {
-      case 'ผักและผลไม้สด':
+      case 'ผักผลไม้สด':
         return Icons.eco;
-      case 'เนื้อสัตว์และอาหารทะเล':
+      case 'เนื้อสัตว์/อาหารทะเล':
         return Icons.set_meal;
-      case 'ผลิตภัณฑ์นมและไข่':
+      case 'นม/ชีส/ไข่':
         return Icons.egg_alt_outlined;
-      case 'ของแห้งและเครื่องปรุง':
+      case 'ของแห้ง/เครื่องปรุง':
         return Icons.rice_bowl;
-      case 'อาหารพร้อมทาน-กับข้าว':
+      case 'กับข้าว/พร้อมทาน':
         return Icons.restaurant_menu;
-      case 'อาหารสำเร็จรูป-เบเกอรี่-ขนม':
+      case 'เบเกอรี่/ขนม':
         return Icons.bakery_dining;
       case 'เครื่องดื่ม':
         return Icons.local_drink_outlined;
+      case 'น้ำมัน':
+        return Icons.oil_barrel;
       default:
         return _defaultIcon;
     }

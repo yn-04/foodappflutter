@@ -5,12 +5,12 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:my_app/profile/account_details/account_details_screen.dart';
-import 'package:my_app/profile/account_settings/account_settings_screen.dart';
+import 'package:my_app/profile/account_settings_screen.dart';
 import 'package:my_app/profile/family/family_account_screen.dart';
 import 'package:my_app/profile/health_info_screen.dart';
 
 import 'headeredit.dart';
+import 'package:my_app/utils/app_logger.dart';
 
 class ProfileTab extends StatefulWidget {
   static const route = '/profile';
@@ -85,7 +85,6 @@ class _ProfileTabState extends State<ProfileTab> {
           if (data == null) return;
 
           String? resolved = (data['displayName'] as String?)?.trim();
-          resolved ??= (data['username'] as String?)?.trim();
 
           if (resolved != null &&
               resolved.isNotEmpty &&
@@ -98,6 +97,7 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   Future<void> _loadUserData() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
@@ -106,6 +106,7 @@ class _ProfileTabState extends State<ProfileTab> {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
         await user.reload();
+        if (!mounted) return;
         final updatedUser = FirebaseAuth.instance.currentUser;
 
         String? displayFromFs;
@@ -117,14 +118,14 @@ class _ProfileTabState extends State<ProfileTab> {
 
           if (doc.exists) {
             final data = doc.data();
-            // ✅ ใช้ displayName จาก Firestore เป็นหลัก (fallback เป็น username)
+            // ✅ ใช้ displayName จาก Firestore เป็นหลัก
             displayFromFs = (data?['displayName'] as String?)?.trim();
-            displayFromFs ??= (data?['username'] as String?)?.trim();
           }
         } catch (_) {
           // เงียบไว้ไม่ให้ล่มหาก Firestore ยังไม่พร้อม
         }
 
+        if (!mounted) return;
         setState(() {
           _updatedDisplayName = (displayFromFs?.isNotEmpty == true)
               ? displayFromFs
@@ -138,7 +139,7 @@ class _ProfileTabState extends State<ProfileTab> {
         });
       }
     } catch (e) {
-      print('Error loading user data: $e');
+      logDebug('Error loading user data: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -205,14 +206,22 @@ class _ProfileTabState extends State<ProfileTab> {
                       margin: const EdgeInsets.symmetric(horizontal: 16),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.black,
+                        color: const Color.fromRGBO(251, 192, 45, 1),
                         borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.12),
+                            blurRadius: 16,
+                            spreadRadius: 0,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
                       ),
                       child: Row(
                         children: [
                           CircleAvatar(
                             radius: 25,
-                            backgroundColor: Colors.red,
+                            backgroundColor: const Color.fromARGB(255, 0, 0, 0),
                             backgroundImage: _selectedImage != null
                                 ? FileImage(_selectedImage!)
                                 : (user?.photoURL != null
@@ -241,7 +250,7 @@ class _ProfileTabState extends State<ProfileTab> {
                                       user?.displayName ??
                                       'ผู้ใช้',
                                   style: const TextStyle(
-                                    color: Colors.white,
+                                    color: Color.fromARGB(255, 0, 0, 0),
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -250,7 +259,7 @@ class _ProfileTabState extends State<ProfileTab> {
                                 Text(
                                   user?.email ?? '',
                                   style: const TextStyle(
-                                    color: Colors.grey,
+                                    color: Color.fromARGB(255, 0, 0, 0),
                                     fontSize: 14,
                                   ),
                                 ),
@@ -262,12 +271,17 @@ class _ProfileTabState extends State<ProfileTab> {
                             child: Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.1),
+                                color: const Color.fromARGB(
+                                  255,
+                                  0,
+                                  0,
+                                  0,
+                                ).withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: const Icon(
                                 Icons.edit,
-                                color: Colors.white,
+                                color: Color.fromARGB(255, 0, 0, 0),
                                 size: 20,
                               ),
                             ),
@@ -279,65 +293,6 @@ class _ProfileTabState extends State<ProfileTab> {
                     const SizedBox(height: 30),
 
                     // ข้อมูลส่วนตัว Section
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        children: [
-                          _buildProfileMenuItem(
-                            icon: Icons.person_outline,
-                            title: 'บัญชีของฉัน',
-                            subtitle: 'ข้อมูลส่วนตัวและการติดต่อ',
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const ModernAccountDetailsScreen(),
-                                ),
-                              );
-                            },
-                          ),
-                          _buildDivider(),
-                          _buildProfileMenuItem(
-                            icon: Icons.health_and_safety_outlined,
-                            title: 'ข้อมูลสุขภาพ',
-                            subtitle: 'BMI, เป้าหมาย, ภูมิแพ้',
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const HealthInfoScreen(),
-                                ),
-                              );
-                            },
-                          ),
-                          _buildDivider(),
-                          _buildProfileMenuItem(
-                            icon: Icons.family_restroom_outlined,
-                            title: 'บัญชีครอบครัว',
-                            subtitle: 'จัดการสมาชิกในครอบครัว',
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const FamilyAccountScreen(),
-                                ),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 30),
-
-                    // การตั้งค่า Section
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16),
                       child: Column(
@@ -364,7 +319,7 @@ class _ProfileTabState extends State<ProfileTab> {
                                 _buildProfileMenuItem(
                                   icon: Icons.settings_outlined,
                                   title: 'การตั้งค่าบัญชี',
-                                  subtitle: 'ความปลอดภัย, การแจ้งเตือน',
+                                  subtitle: 'ข้อมูลส่วนตัวและความปลอดภัย',
                                   onTap: () {
                                     Navigator.push(
                                       context,
@@ -375,13 +330,36 @@ class _ProfileTabState extends State<ProfileTab> {
                                     );
                                   },
                                 ),
+
                                 _buildDivider(),
                                 _buildProfileMenuItem(
-                                  icon: Icons.fingerprint,
-                                  title: 'Face ID / Touch ID',
-                                  subtitle: 'ความปลอดภัยชีวมิติ',
-                                  onTap: () {},
-                                  hasSwitch: true,
+                                  icon: Icons.health_and_safety_outlined,
+                                  title: 'ข้อมูลสุขภาพ',
+                                  subtitle: 'BMI, เป้าหมาย, ภูมิแพ้',
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            const HealthInfoScreen(),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                _buildDivider(),
+                                _buildProfileMenuItem(
+                                  icon: Icons.family_restroom_outlined,
+                                  title: 'บัญชีครอบครัว',
+                                  subtitle: 'จัดการสมาชิกในครอบครัว',
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            const FamilyAccountScreen(),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ],
                             ),
@@ -420,7 +398,7 @@ class _ProfileTabState extends State<ProfileTab> {
                                 _buildProfileMenuItem(
                                   icon: Icons.logout,
                                   title: 'ออกจากระบบ',
-                                  onTap: () => _showLogoutDialog(context),
+                                  onTap: _showLogoutDialog,
                                   isDestructive: true,
                                 ),
                               ],
@@ -512,7 +490,10 @@ class _ProfileTabState extends State<ProfileTab> {
               Switch(
                 value: false,
                 onChanged: (value) {},
-                activeColor: Colors.black,
+                thumbColor: const WidgetStatePropertyAll<Color>(Colors.black),
+                trackColor: WidgetStatePropertyAll<Color?>(
+                  Colors.black.withValues(alpha: 0.4),
+                ),
               )
             else
               Icon(Icons.arrow_forward_ios, color: Colors.grey[400], size: 16),
@@ -530,10 +511,10 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 
-  void _showLogoutDialog(BuildContext context) {
+  void _showLogoutDialog() {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return AlertDialog(
           backgroundColor: Colors.white,
           shape: RoundedRectangleBorder(
@@ -549,7 +530,7 @@ class _ProfileTabState extends State<ProfileTab> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(dialogContext).pop(),
               child: Text(
                 'ยกเลิก',
                 style: TextStyle(color: Colors.grey[600], fontSize: 16),
@@ -559,7 +540,7 @@ class _ProfileTabState extends State<ProfileTab> {
               onPressed: () async {
                 try {
                   // Close dialog first
-                  Navigator.of(context).pop();
+                  Navigator.of(dialogContext).pop();
 
                   // Sign out from Firebase
                   await FirebaseAuth.instance.signOut();

@@ -47,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
           elevation: 0,
           items: [
             _navItem(icon: Icons.home, index: 0),
-            _navItem(icon: Icons.description, index: 1),
+            _navItem(icon: Icons.inventory_2_outlined, index: 1),
             _navItem(icon: Icons.restaurant_menu, index: 2),
             _navItem(icon: Icons.person, index: 3),
           ],

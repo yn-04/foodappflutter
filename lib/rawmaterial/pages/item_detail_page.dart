@@ -301,7 +301,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
               child: Material(
                 color: Colors.white,
                 elevation: 24,
-                shadowColor: Colors.black.withOpacity(0.25),
+                shadowColor: Colors.black.withValues(alpha: 0.25),
                 borderRadius: BorderRadius.circular(20),
                 clipBehavior: Clip.antiAlias,
                 child: StatefulBuilder(
@@ -403,24 +403,62 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                 const SizedBox(height: 10),
                                 DropdownButtonFormField<String>(
                                   value: category,
-                                  items: Categories.list
-                                      .map(
-                                        (c) => DropdownMenuItem(
-                                          value: c,
-                                          child: Text(c),
-                                        ),
-                                      )
-                                      .toList(),
+                                  isExpanded: true,
+                                  menuMaxHeight: 320,
+                                  items: Categories.list.map((c) {
+                                    final icon = Categories.iconFor(c);
+                                    return DropdownMenuItem(
+                                      value: c,
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            icon,
+                                            size: 18,
+                                            color: Colors.black87,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              c,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+
+                                  selectedItemBuilder: (context) {
+                                    return Categories.list.map((c) {
+                                      final icon = Categories.iconFor(c);
+                                      return Row(
+                                        children: [
+                                          Icon(
+                                            icon,
+                                            size: 18,
+                                            color: Colors.black87,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Flexible(
+                                            child: Text(
+                                              c,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    }).toList();
+                                  },
+
                                   onChanged: (v) => setState(
                                     () => category = Categories.normalize(
                                       v ?? category,
                                     ),
                                   ),
+
                                   decoration: _decoration().copyWith(
                                     labelText: 'หมวดหมู่',
-                                    prefixIcon: const Icon(
-                                      Icons.category_outlined,
-                                    ),
+                                    // prefixIcon ตัดออกได้เหมือนกัน
                                   ),
                                 ),
                                 const SizedBox(height: 10),
@@ -550,6 +588,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                               Expanded(
                                 child: OutlinedButton(
                                   onPressed: () => doCloseWith(null),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors
+                                        .black, // ✅ ตัวหนังสือ + ripple เป็นสีดำ
+                                  ),
+
                                   child: const Text('ยกเลิก'),
                                 ),
                               ),
@@ -557,8 +600,21 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                               Expanded(
                                 child: FilledButton.icon(
                                   onPressed: validateAndSubmit,
-                                  icon: const Icon(Icons.check_circle),
+                                  icon: const Icon(
+                                    Icons.check_circle,
+                                    color: Color.fromARGB(255, 0, 0, 0),
+                                  ),
                                   label: const Text('ยืนยันทำซ้ำ'),
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor:
+                                        Colors.yellow[600], // ✅ สีพื้นหลังเขียว
+                                    foregroundColor: const Color.fromARGB(
+                                      255,
+                                      0,
+                                      0,
+                                      0,
+                                    ), // ✅ สีข้อความ/ไอคอนขาว
+                                  ),
                                 ),
                               ),
                             ],
@@ -682,7 +738,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     final cardMaxHeight = math.min(availableHeight * 0.92, 560.0);
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      backgroundColor: Colors.black.withOpacity(0.45),
+      backgroundColor: Colors.black.withValues(alpha: 0.45),
       body: SafeArea(
         child: Center(
           child: AnimatedPadding(
@@ -704,7 +760,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                 child: Material(
                   color: Colors.white,
                   elevation: 16,
-                  shadowColor: Colors.black.withOpacity(0.25),
+                  shadowColor: Colors.black.withValues(alpha: 0.25),
                   borderRadius: BorderRadius.circular(20),
                   clipBehavior: Clip.antiAlias,
                   child: Column(
@@ -739,14 +795,54 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                   ),
                                   DropdownButtonFormField<String>(
                                     value: _category,
-                                    items: Categories.list
-                                        .map(
-                                          (c) => DropdownMenuItem(
-                                            value: c,
-                                            child: Text(c),
-                                          ),
-                                        )
-                                        .toList(),
+                                    isExpanded: true,
+                                    menuMaxHeight: 320,
+                                    items: Categories.list.map((c) {
+                                      final icon = Categories.iconFor(c);
+                                      return DropdownMenuItem(
+                                        value: c,
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              icon,
+                                              size: 18,
+                                              color: Colors.black87,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                c,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }).toList(),
+
+                                    // แสดงค่าเลือกปัจจุบันพร้อมไอคอนใน “ช่อง”
+                                    selectedItemBuilder: (context) {
+                                      return Categories.list.map((c) {
+                                        final icon = Categories.iconFor(c);
+                                        return Row(
+                                          children: [
+                                            Icon(
+                                              icon,
+                                              size: 18,
+                                              color: Colors.black87,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Flexible(
+                                              child: Text(
+                                                c,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      }).toList();
+                                    },
+
                                     onChanged: (v) {
                                       if (v == null || _isPopping) return;
                                       setState(
@@ -754,11 +850,11 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                             _category = Categories.normalize(v),
                                       );
                                     },
+
                                     decoration: _decoration().copyWith(
                                       labelText: 'หมวดหมู่',
-                                      prefixIcon: const Icon(
-                                        Icons.category_outlined,
-                                      ),
+                                      // prefixIcon ไม่จำเป็นแล้วเพราะเราแสดงไอคอนในค่าเลือกอยู่แล้ว
+                                      // ถ้ายังอยากคงไว้ก็ได้ แต่จะเห็นไอคอนสองจุด
                                     ),
                                   ),
                                 ],
@@ -940,12 +1036,16 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                           vertical: 8,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: info.$2.withOpacity(0.10),
+                                          color: info.$2.withValues(
+                                            alpha: 0.10,
+                                          ),
                                           borderRadius: BorderRadius.circular(
                                             999,
                                           ),
                                           border: Border.all(
-                                            color: info.$2.withOpacity(0.25),
+                                            color: info.$2.withValues(
+                                              alpha: 0.25,
+                                            ),
                                           ),
                                         ),
                                         child: Row(
@@ -1018,7 +1118,7 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Material(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         shape: const CircleBorder(),
         child: InkWell(
           customBorder: const CircleBorder(),

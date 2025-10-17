@@ -71,7 +71,7 @@ class ShelfLife {
   static final Map<String, List<String>> _normalizedItemIndex =
       Map.unmodifiable({
         for (final entry in shelfLifeItemIndex.entries)
-          entry.key: List.unmodifiable(entry.value),
+          _normalize(entry.key): List.unmodifiable(entry.value),
       });
 
   static final Map<String, String> _exactItemToSubcategory = Map.unmodifiable({

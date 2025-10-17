@@ -238,30 +238,86 @@ class _FamilyHubScreenState extends State<FamilyHubScreen> {
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 480),
+                  constraints: const BoxConstraints(maxWidth: 560),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const _HeaderCard(),
-                      const SizedBox(height: 16),
-                      _ActionButton(
+                      // Header
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.diversity_3_outlined,
+                            size: 56,
+                            color: const Color.fromRGBO(
+                              251,
+                              192,
+                              45,
+                              1,
+                            ), // << ,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'คุณยังไม่มีบัญชีครอบครัว',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.black87,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'สร้างหรือเข้าร่วมครอบครัวเพื่อแชร์\nข้อมูลสต็อกวัตถุดิบกับสมาชิกครอบครัวของคุณ',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: Colors.grey[700]),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Cards
+                      _ActionCard(
                         icon: Icons.add_home,
                         title: 'สร้างครอบครัว',
                         subtitle: 'ตั้งค่าครอบครัวใหม่ คุณจะเป็นผู้ดูแล',
                         onTap: _createFamilyFlow,
-                        type: _ActionType.primary,
+                        variant: _ActionVariant.primary, // ให้เป็นการ์ดหลัก
+                        bgColor: const Color.fromRGBO(
+                          251,
+                          192,
+                          45,
+                          1,
+                        ), // << สีพื้นหลัง
+                        fgColor: Colors.black, // << สีตัวหนังสือ/ไอคอน
                       ),
+
                       const SizedBox(height: 12),
-                      _ActionButton(
+                      _ActionCard(
                         icon: Icons.qr_code_scanner,
-                        title: 'เข้าร่วม (สแกน QR)',
-                        subtitle: 'สแกนจากผู้ดูแลหรือสมาชิกในครอบครัว',
+                        title: 'เข้าร่วมครอบครัว',
+                        subtitle: 'สแกนจากผู้ดูแลหรือกรอกโค้ดเชิญ',
                         onTap: _joinByScan,
+                        // variant: _ActionVariant.neutral (ค่าเริ่มต้น)
                       ),
+
+                      // ปุ่มเสริม (ถ้าต้องการแยกเข้าร่วมด้วยโค้ด)
                       const SizedBox(height: 8),
                       TextButton.icon(
                         onPressed: _joinByCode,
-                        icon: const Icon(Icons.vpn_key),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.black87, // สีตัวหนังสือ
+                        ),
+                        icon: Icon(
+                          Icons.vpn_key,
+                          color: const Color.fromRGBO(
+                            251,
+                            192,
+                            45,
+                            1,
+                          ), // << สีไอคอน
+                        ), // สีไอคอน
                         label: const Text('เข้าร่วมด้วยโค้ดเชิญ'),
                       ),
                     ],
@@ -289,6 +345,7 @@ class _FamilyHubScreenState extends State<FamilyHubScreen> {
 
 // ───────────────── UI pieces
 
+// ignore: unused_element
 class _HeaderCard extends StatelessWidget {
   const _HeaderCard();
 
@@ -309,12 +366,12 @@ class _HeaderCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'สร้างเพื่อแชร์ข้อมูลสต็อกวัตถุดิบและจัดการสมาชิก\nหรือเข้าร่วมด้วยโค้ด/สแกน QR',
+            'แชร์ข้อมูลสต็อกวัตถุดิบกับสมาชิกครอบครัวของคุณ',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.color?.withOpacity(0.85),
+              ).textTheme.bodyMedium?.color?.withValues(alpha: 0.85),
             ),
           ),
         ],
@@ -323,8 +380,10 @@ class _HeaderCard extends StatelessWidget {
   }
 }
 
+// ignore: unused_field
 enum _ActionType { primary, normal }
 
+// ignore: unused_element
 class _ActionButton extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -337,7 +396,7 @@ class _ActionButton extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
-    this.type = _ActionType.normal,
+    required this.type,
   });
 
   @override
@@ -358,8 +417,8 @@ class _ActionButton extends StatelessWidget {
             CircleAvatar(
               radius: 22,
               backgroundColor: isPrimary
-                  ? Colors.white.withOpacity(.15)
-                  : Colors.black.withOpacity(.06),
+                  ? Colors.white.withValues(alpha: .15)
+                  : Colors.black.withValues(alpha: .06),
               child: Icon(
                 icon,
                 color: isPrimary ? Colors.white : Colors.black87,
@@ -410,6 +469,122 @@ class UpperCaseTextFormatter extends TextInputFormatter {
       text: newValue.text.toUpperCase(),
       selection: newValue.selection,
       composing: TextRange.empty,
+    );
+  }
+}
+
+enum _ActionVariant { primary, neutral }
+
+class _ActionCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final _ActionVariant variant;
+  final Color? bgColor; // สีพื้นหลังแบบกำหนดเอง (เฉพาะ primary)
+  final Color? fgColor; // สีตัวอักษร/ไอคอนแบบกำหนดเอง (เฉพาะ primary)
+
+  const _ActionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.variant = _ActionVariant.neutral,
+    this.bgColor,
+    this.fgColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isPrimary = variant == _ActionVariant.primary;
+
+    // ถ้าเป็น primary และมีสีส่งมา → ใช้สีที่ส่งมา
+    final Color bg = isPrimary
+        ? (bgColor ?? theme.colorScheme.primary)
+        : Colors.white;
+    final Color fg = isPrimary
+        ? (fgColor ?? theme.colorScheme.onPrimary)
+        : Colors.black87;
+
+    final Color sub = isPrimary ? fg.withOpacity(0.85) : Colors.grey[700]!;
+    final Color? border = isPrimary ? null : Colors.grey[300];
+    final Color iconBg = isPrimary
+        ? fg.withOpacity(0.08)
+        : Colors.black.withOpacity(0.05);
+    final Color chevron = isPrimary ? fg.withOpacity(0.9) : Colors.black54;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        // เงาซ้อน 2 ชั้น: ชั้นใหญ่ฟุ้ง + ชั้นเล็กคม
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.16),
+            blurRadius: 25, // ฟุ้งมาก
+            spreadRadius: 0,
+            offset: const Offset(0, 18),
+          ),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 12, // คมขึ้นใกล้ตัว
+            spreadRadius: 0,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Material(
+        color: bg,
+        elevation: isPrimary ? 10 : 6, // ดัน elevation เพิ่ม
+        shadowColor: Colors.black.withOpacity(0.20), // เงาหนักขึ้น
+        surfaceTintColor: Colors.transparent, // ปิดทินท์ M3 (ให้สี bg เดิมชัด)
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: border == null ? BorderSide.none : BorderSide(color: border),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: iconBg,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, color: fg),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: fg,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.bodyMedium?.copyWith(color: sub),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right, color: chevron),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

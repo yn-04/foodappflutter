@@ -81,9 +81,18 @@ class MemberCard extends StatelessWidget {
   }
 
   Widget _buildAvatar() {
-    // ถ้ามีรูปค่อยเปลี่ยนมาใช้ NetworkImage ได้
     final initials = _resolveInitial(email, name);
-    return CircleAvatar(radius: 20.0, child: Text(initials));
+    return CircleAvatar(
+      radius: 20.0,
+      backgroundColor: Colors.grey.shade200, // พื้นเทาอ่อน
+      child: Text(
+        initials,
+        style: const TextStyle(
+          color: Colors.black87, // ตัวอักษรดำ
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
   }
 
   Widget _buildSubtitle(BuildContext context) {
@@ -170,17 +179,28 @@ class _RolePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = isAdminRole ? 'ผู้ดูแล' : 'สมาชิก';
-    final color = isAdminRole
-        ? Theme.of(context).colorScheme.primary
-        : Colors.grey.shade700;
+    final bool admin = isAdminRole;
+
+    // พาเล็ตแบบไม่ม่วง
+    const adminBg = Color(0xFFFFF3CD); // เหลืองอ่อน
+    const adminLine = Color(0xFFFBC02D); // เหลืองอำพัน
+    const adminText = Colors.black;
+
+    final memberBg = Colors.grey.shade100;
+    final memberLine = Colors.grey.shade300;
+    const memberText = Colors.black87;
+
+    final bg = admin ? adminBg : memberBg;
+    final line = admin ? adminLine : memberLine;
+    final color = admin ? adminText : memberText;
+    final label = admin ? 'ผู้ดูแล' : 'สมาชิก';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: bg,
         borderRadius: BorderRadius.circular(999.0),
-        border: Border.all(color: color.withOpacity(0.5), width: 1.0),
+        border: Border.all(color: line, width: 1.0),
       ),
       child: Text(
         label,
@@ -199,18 +219,21 @@ class _SelfPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.secondary;
+    final bg = Colors.black.withOpacity(0.06);
+    final line = Colors.black.withOpacity(0.15);
+    const txt = Colors.black87;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: bg,
         borderRadius: BorderRadius.circular(999.0),
-        border: Border.all(color: color.withOpacity(0.5), width: 1.0),
+        border: Border.all(color: line, width: 1.0),
       ),
       child: Text(
         'คุณ',
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: color,
+          color: txt,
           fontWeight: FontWeight.w700,
         ),
       ),

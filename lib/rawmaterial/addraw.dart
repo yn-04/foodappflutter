@@ -63,6 +63,40 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
   final List<String> _nameSuggestions = <String>[];
   late final List<String> _dictionaryTerms;
 
+  InputDecoration _softInput({
+    String? label,
+    String? hint,
+    Widget? suffixIcon,
+    String? errorText,
+    EdgeInsetsGeometry contentPadding = const EdgeInsets.symmetric(
+      horizontal: 12,
+      vertical: 12,
+    ),
+  }) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      errorText: errorText,
+      isDense: true,
+      contentPadding: contentPadding,
+      filled: true,
+      fillColor: Colors.grey[50],
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Colors.grey[300]!, width: 1),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Colors.grey[300]!, width: 1),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Colors.grey[400]!, width: 1.2),
+      ),
+      suffixIcon: suffixIcon,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -333,7 +367,9 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
     _fridgeDuration = ShelfLife.forFridge(sub);
     _freezerDuration = ShelfLife.forFreezer(sub);
 
-    if (_fridgeDuration == null && _freezerDuration == null) {
+    if (_fridgeDuration == null &&
+        _freezerDuration == null &&
+        _roomDuration == null) {
       setState(() {
         _selectedExpiryMode = 'custom';
         _customExpiryDate = null;
@@ -343,18 +379,71 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
       return;
     }
 
-    if (_selectedExpiryMode == 'custom') return;
-    if (_selectedExpiryMode == 'fridge' && _fridgeDuration == null) {
-      setState(
-        () => _selectedExpiryMode = _freezerDuration != null
-            ? 'freezer'
-            : 'custom',
+    // ถ้าโหมดที่เลือกอยู่ใช้ไม่ได้ ให้สลับให้เหมาะสม
+    if (_selectedExpiryMode != 'custom') {
+      if (_selectedExpiryMode == 'fridge' && _fridgeDuration == null) {
+        setState(
+          () => _selectedExpiryMode = _freezerDuration != null
+              ? 'freezer'
+              : (_roomDuration != null ? 'room' : 'custom'),
+        );
+      } else if (_selectedExpiryMode == 'freezer' && _freezerDuration == null) {
+        setState(
+          () => _selectedExpiryMode = _fridgeDuration != null
+              ? 'fridge'
+              : (_roomDuration != null ? 'room' : 'custom'),
+        );
+      } else if (_selectedExpiryMode == 'room' && _roomDuration == null) {
+        setState(
+          () => _selectedExpiryMode = _fridgeDuration != null
+              ? 'fridge'
+              : (_freezerDuration != null ? 'freezer' : 'custom'),
+        );
+      }
+    }
+
+    // 🆕 อัตโนมัติเลือกโหมดเมื่อเหลือตัวเลือกเดียว (เช่น น้ำมัน)
+    _autoPickStorageMode();
+  }
+
+  void _autoPickStorageMode() {
+    // ถ้า user ตั้ง custom เองแล้ว ไม่ไปยุ่ง
+    if (_selectedExpiryMode == 'custom' && _customExpiryDate != null) return;
+
+    // กรณีมีเฉพาะ room
+    if (_roomDuration != null &&
+        _fridgeDuration == null &&
+        _freezerDuration == null) {
+      setState(() => _selectedExpiryMode = 'room');
+      _applyComputedExpiryFrom(_roomDuration);
+      _showAction(
+        'เลือกรูปแบบการเก็บ: อุณหภูมิห้อง · หมดอายุ ${_customExpiryDate != null ? _formatDate(_customExpiryDate!) : ''}',
       );
-    } else if (_selectedExpiryMode == 'freezer' && _freezerDuration == null) {
-      setState(
-        () =>
-            _selectedExpiryMode = _fridgeDuration != null ? 'fridge' : 'custom',
+      return;
+    }
+
+    // กรณีมี Fridge อย่างเดียว
+    if (_roomDuration == null &&
+        _fridgeDuration != null &&
+        _freezerDuration == null) {
+      setState(() => _selectedExpiryMode = 'fridge');
+      _applyComputedExpiryFrom(_fridgeDuration);
+      _showAction(
+        'เลือกรูปแบบการเก็บ: ตู้เย็น · หมดอายุ ${_customExpiryDate != null ? _formatDate(_customExpiryDate!) : ''}',
       );
+      return;
+    }
+
+    // กรณีมี Freezer อย่างเดียว
+    if (_roomDuration == null &&
+        _fridgeDuration == null &&
+        _freezerDuration != null) {
+      setState(() => _selectedExpiryMode = 'freezer');
+      _applyComputedExpiryFrom(_freezerDuration);
+      _showAction(
+        'เลือกรูปแบบการเก็บ: ช่องแช่แข็ง · หมดอายุ ${_customExpiryDate != null ? _formatDate(_customExpiryDate!) : ''}',
+      );
+      return;
     }
   }
 
@@ -551,7 +640,7 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
       return;
     }
     if (!Units.isValid(_selectedUnit)) {
-      _showSnackBar('กรุณาเลือกหน่วยนับให้ถูกต้อง');
+      _showSnackBar('กรุณาเลือกหน่วยให้ถูกต้อง');
       return;
     }
 
@@ -651,7 +740,7 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
             ? null
             : _selectedExpiryMode,
         'expiry_mode': _selectedExpiryMode,
-        'expiry_date': expiryDate?.toIso8601String(),
+        'expiry_date': expiryDate.toIso8601String(),
         'recommended_fridge_days': _fridgeDuration?.inDays,
         'recommended_freezer_days': _freezerDuration?.inDays,
         'custom_expiry_input': _customExpiryTextController.text.trim(),
@@ -674,9 +763,7 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
       await Future<void>.delayed(const Duration(milliseconds: 250));
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(
-          builder: (_) => const HomeScreen(initialIndex: 1),
-        ),
+        MaterialPageRoute(builder: (_) => const HomeScreen(initialIndex: 1)),
         (route) => false,
       );
     } catch (e) {
@@ -768,12 +855,12 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
         TextField(
           controller: _nameController,
           textCapitalization: TextCapitalization.sentences,
-          decoration: InputDecoration(
-            labelText: 'ชื่อวัตถุดิบ',
-            hintText: 'เช่น ไข่ไก่, แป้งสาลี',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          decoration: _softInput(
+            label: 'ชื่อวัตถุดิบ',
+            hint: 'เช่น ไข่ไก่, แป้งสาลี',
           ),
         ),
+
         const SizedBox(height: 8),
         _buildDetectStatus(),
         if (_nameSuggestions.isNotEmpty) ...[
@@ -805,38 +892,70 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
   }
 
   Widget _buildCategoryDropdown() {
+    final items = Categories.list.toSet().toList()
+      ..sort((a, b) => a.compareTo(b));
     final String? safeValue =
         (_selectedCategory != null &&
             Categories.list.contains(_selectedCategory))
         ? _selectedCategory
         : null;
 
-    return DropdownButtonFormField<String>(
-      value: safeValue, // ✅ ใช้ค่าเฉพาะที่อยู่ใน items
-      decoration: InputDecoration(
-        labelText: 'หมวดหมู่',
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+    return SizedBox(
+      width: double.infinity, // 👈 กว้างเท่าช่องกรอกอื่น
+      child: DropdownButtonFormField<String>(
+        value: safeValue,
+        isExpanded: true,
+        menuMaxHeight: 320,
+        borderRadius: BorderRadius.circular(16),
+        decoration: _softInput(label: 'หมวดหมู่'),
+        icon: const Icon(Icons.arrow_drop_down),
+
+        // แสดงไอคอนบนค่าที่เลือก (ในช่อง)
+        selectedItemBuilder: (context) {
+          return items.map((cat) {
+            final icon = Categories.iconFor(cat);
+            return Row(
+              children: [
+                Icon(icon, size: 18, color: Colors.black87),
+                const SizedBox(width: 8),
+                Flexible(child: Text(cat, overflow: TextOverflow.ellipsis)),
+              ],
+            );
+          }).toList();
+        },
+
+        // รายการในเมนู
+        items: items.map((cat) {
+          final icon = Categories.iconFor(cat);
+          return DropdownMenuItem<String>(
+            value: cat,
+            child: Row(
+              children: [
+                Icon(icon, size: 18, color: Colors.black87),
+                const SizedBox(width: 8),
+                Expanded(child: Text(cat, overflow: TextOverflow.ellipsis)),
+              ],
+            ),
+          );
+        }).toList(),
+
+        onChanged: (value) {
+          setState(() {
+            _selectedCategory = value;
+            _categoryLocked = true;
+            _subcategoryLocked = false;
+
+            final subs = value == null
+                ? const <String>[]
+                : Categories.subcategoriesOf(value);
+            if (!subs.contains(_selectedSubcategory)) {
+              _selectedSubcategory = Categories.defaultSubcategoryFor(value);
+            }
+          });
+          _refreshStorageDurations();
+          _showAction('ตั้งค่าหมวดหมู่');
+        },
       ),
-      icon: const Icon(Icons.arrow_drop_down),
-      items: Categories.list
-          .toSet() // ✅ กันรายชื่อซ้ำเผื่อ list เผลอมี duplicate
-          .map((cat) => DropdownMenuItem(value: cat, child: Text(cat)))
-          .toList(),
-      onChanged: (value) {
-        setState(() {
-          _selectedCategory = value;
-          _categoryLocked = true;
-          _subcategoryLocked = false;
-          final subs = value == null
-              ? const <String>[]
-              : Categories.subcategoriesOf(value);
-          if (!subs.contains(_selectedSubcategory)) {
-            _selectedSubcategory = Categories.defaultSubcategoryFor(value);
-          }
-        });
-        _refreshStorageDurations();
-        _showAction('ตั้งค่าหมวดหมู่');
-      },
     );
   }
 
@@ -844,116 +963,67 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
     final subs = _selectedCategory == null
         ? const <String>[]
         : Categories.subcategoriesOf(_selectedCategory!);
-    return DropdownButtonFormField<String>(
-      value: subs.contains(_selectedSubcategory) ? _selectedSubcategory : null,
-      decoration: InputDecoration(
-        labelText: 'หมวดย่อย',
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+
+    return SizedBox(
+      width: double.infinity, // 👈 กว้างเต็ม
+      child: DropdownButtonFormField<String>(
+        value: subs.contains(_selectedSubcategory)
+            ? _selectedSubcategory
+            : null,
+        isExpanded: true,
+        menuMaxHeight: 320,
+        borderRadius: BorderRadius.circular(16),
+        decoration: _softInput(label: 'หมวดย่อย'),
+        icon: const Icon(Icons.arrow_drop_down),
+
+        items: subs.map((sub) {
+          // ใส่ไอคอนหมวดหลักให้รองรับภาพรวมสวยๆ (optional)
+          final parentIcon = Categories.iconFor(_selectedCategory ?? '');
+          return DropdownMenuItem<String>(
+            value: sub,
+            child: Row(
+              children: [
+                Icon(parentIcon, size: 16, color: Colors.black54),
+                const SizedBox(width: 8),
+                Expanded(child: Text(sub, overflow: TextOverflow.ellipsis)),
+              ],
+            ),
+          );
+        }).toList(),
+
+        onChanged: (value) {
+          setState(() {
+            _selectedSubcategory = value;
+            _subcategoryLocked = true;
+          });
+          _refreshStorageDurations();
+          _showAction('ตั้งค่าหมวดย่อย');
+        },
       ),
-      items: subs
-          .map((sub) => DropdownMenuItem(value: sub, child: Text(sub)))
-          .toList(),
-      onChanged: (value) {
-        setState(() {
-          _selectedSubcategory = value;
-          _subcategoryLocked = true;
-        });
-        _refreshStorageDurations();
-        _showAction('ตั้งค่าหมวดย่อย');
+    );
+  }
+
+  Widget _iconOnlyButton({
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return IconButton(
+      onPressed: () {
+        FocusScope.of(context).unfocus();
+        onTap();
       },
+      icon: Icon(icon, size: 18, color: Colors.black), // ไอคอนล้วน ๆ
+      padding: EdgeInsets.zero,
+      visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+      constraints: const BoxConstraints.tightFor(
+        width: 32,
+        height: 32,
+      ), // เล็กมาก
+      splashRadius: 18, // ripple เล็กพอดีมือ
     );
   }
 
-  Widget _buildQuantitySelector() {
-    return Row(
-      children: [
-        _squareButton(
-          icon: Icons.remove,
-          onTap: () {
-            if (_quantity <= 1) return;
-            setState(() {
-              _quantity -= 1;
-              _quantityController.text = _quantity.toString();
-            });
-            _showAction('จำนวน: $_quantity');
-          },
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: TextField(
-            controller: _quantityController,
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.center,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(vertical: 12),
-              hintText: '1',
-            ),
-            onChanged: (value) {
-              final parsed = int.tryParse(value);
-              setState(
-                () => _quantity = parsed == null || parsed <= 0 ? 1 : parsed,
-              );
-            },
-          ),
-        ),
-        const SizedBox(width: 8),
-        _squareButton(
-          icon: Icons.add,
-          onTap: () {
-            setState(() {
-              _quantity += 1;
-              _quantityController.text = _quantity.toString();
-            });
-            _showAction('จำนวน: $_quantity');
-          },
-        ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 140,
-          child: DropdownButtonFormField<String>(
-            value: Units.isValid(_selectedUnit)
-                ? _selectedUnit
-                : Units.all.first,
-            decoration: InputDecoration(
-              labelText: 'หน่วยนับ',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            items: Units.all
-                .map((unit) => DropdownMenuItem(value: unit, child: Text(unit)))
-                .toList(),
-            onChanged: (value) {
-              if (value == null) return;
-              setState(() {
-                _selectedUnit = Units.safe(value);
-                _unitLocked = true;
-              });
-              _showAction('หน่วย: $_selectedUnit');
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _squareButton({required IconData icon, required VoidCallback onTap}) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Ink(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          color: Colors.grey[200],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey[300]!),
-        ),
-        child: Icon(icon, color: Colors.black),
-      ),
-    );
-  }
+  // 1) ปรับปุ่มให้กำหนดขนาดได้ (เล็กลงได้)
 
   Widget _buildStorageButtons() {
     if (_roomDuration == null &&
@@ -1025,7 +1095,7 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
             boxShadow: selected
                 ? [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
+                      color: Colors.black.withValues(alpha: 0.08),
                       offset: const Offset(0, 3),
                       blurRadius: 8,
                     ),
@@ -1079,9 +1149,9 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
         FilteringTextInputFormatter.allow(RegExp(r'[0-9/]')),
         _DdMmYyyyFormatter(),
       ],
-      decoration: InputDecoration(
-        labelText: 'วันหมดอายุ (วว/ดด/ปปปป)',
-        hintText: 'เช่น 25/12/2025',
+      decoration: _softInput(
+        label: 'วันหมดอายุ (วว/ดด/ปปปป)',
+        hint: 'เช่น 25/12/2025',
         errorText: _dateErrorText,
         suffixIcon: IconButton(
           icon: const Icon(Icons.calendar_month_outlined),
@@ -1090,7 +1160,6 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
             _pickCustomDate();
           },
         ),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       ),
       onTap: () => _selectExpiryMode('custom'),
       onChanged: _onCustomExpiryChanged,
@@ -1221,6 +1290,8 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
         ),
       ),
       body: GestureDetector(
+        behavior: HitTestBehavior
+            .deferToChild, // ✅ ให้ลูก (เช่น ปุ่ม) ได้ gesture ก่อน
         onTap: () => FocusScope.of(context).unfocus(),
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
@@ -1263,9 +1334,94 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
             ),
             const SizedBox(height: 16),
             _buildSection(
-              title: 'จำนวนและหน่วย',
+              title: 'ปริมาณวัตถุดิบ',
               icon: Icons.scale_outlined,
-              children: [_buildQuantitySelector()],
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.grey[300]!, width: 1),
+                  ),
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      _iconOnlyButton(
+                        icon: Icons.remove,
+                        onTap: () {
+                          if (_quantity <= 1) return;
+                          setState(() {
+                            _quantity -= 1;
+                            _quantityController.text = _quantity.toString();
+                          });
+                          _showAction('จำนวน: $_quantity');
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      SizedBox(
+                        width: 110, // 👈 ช่องกว้างขึ้น ใส่หลายหลักได้สบาย
+                        child: TextField(
+                          controller: _quantityController,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          decoration: _softInput(
+                            hint: '1',
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                          ),
+                          onChanged: (value) {
+                            final n = int.tryParse(value);
+                            setState(
+                              () => _quantity = (n == null || n <= 0) ? 1 : n,
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      _iconOnlyButton(
+                        icon: Icons.add,
+                        onTap: () {
+                          setState(() {
+                            _quantity += 1;
+                            _quantityController.text = _quantity.toString();
+                          });
+                          _showAction('จำนวน: $_quantity');
+                        },
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 120,
+                        child: DropdownButtonFormField<String>(
+                          value: Units.isValid(_selectedUnit)
+                              ? _selectedUnit
+                              : Units.all.first,
+                          isExpanded: true,
+                          decoration: _softInput(), // << กรอบมนอ่อน
+                          items: Units.all
+                              .map(
+                                (u) =>
+                                    DropdownMenuItem(value: u, child: Text(u)),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setState(() {
+                              _selectedUnit = Units.safe(value);
+                              _unitLocked = true;
+                            });
+                            _showAction('หน่วย: $_selectedUnit');
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             _buildSection(
@@ -1288,24 +1444,18 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
-                  decoration: InputDecoration(
-                    labelText: 'ราคา (บาท)',
-                    hintText: 'เช่น 45.50',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                  decoration: _softInput(
+                    label: 'ราคา (บาท)',
+                    hint: 'เช่น 45.50',
                   ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _notesController,
                   maxLines: 1,
-                  decoration: InputDecoration(
-                    labelText: 'หมายเหตุ',
-                    hintText: 'รายละเอียดเพิ่มเติม (ถ้ามี)',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                  decoration: _softInput(
+                    label: 'หมายเหตุ',
+                    hint: 'รายละเอียดเพิ่มเติม (ถ้ามี)',
                   ),
                 ),
               ],

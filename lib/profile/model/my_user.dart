@@ -13,9 +13,6 @@ class MyUser {
   final DateTime createdAt;
   final bool profileCompleted;
 
-  // NEW: optional username (เก็บไว้ใช้เป็น @handle/แสดงผลสั้นๆ)
-  final String? username;
-
   MyUser({
     required this.displayName,
     required this.email,
@@ -27,24 +24,15 @@ class MyUser {
     required this.birthDate,
     required this.createdAt,
     required this.profileCompleted,
-    this.username,
   });
 
   // แสดงชื่อสำหรับ UI (เอาไว้ใช้ใน header)
   String displayNamePref({String? fallbackEmail}) {
     if (displayName.trim().isNotEmpty) return displayName.trim();
-    if ((username ?? '').trim().isNotEmpty) return username!.trim();
     if (fallbackEmail != null && fallbackEmail.contains('@')) {
       return fallbackEmail.split('@').first;
     }
     return 'ผู้ใช้';
-  }
-
-  // sanitize ชื่อให้เป็น username
-  static String toUsername(String source) {
-    final s = source.trim().toLowerCase();
-    final only = s.replaceAll(RegExp(r'[^a-z0-9._-]'), '');
-    return only.isEmpty ? 'user' : only;
   }
 
   factory MyUser.fromFirestore(DocumentSnapshot doc) {
@@ -65,7 +53,6 @@ class MyUser {
       birthDate: birthTs != null ? birthTs.toDate() : DateTime(2000, 1, 1),
       createdAt: createdTs != null ? createdTs.toDate() : DateTime.now(),
       profileCompleted: (data['profileCompleted'] ?? false) as bool,
-      username: data['username'] as String?, // NEW
     );
   }
 
@@ -81,7 +68,6 @@ class MyUser {
       'birthDate': Timestamp.fromDate(birthDate),
       'createdAt': Timestamp.fromDate(createdAt),
       'profileCompleted': profileCompleted,
-      if (username != null) 'username': username, // NEW
     };
   }
 
@@ -142,7 +128,6 @@ class MyUser {
     DateTime? birthDate,
     DateTime? createdAt,
     bool? profileCompleted,
-    String? username, // NEW
   }) {
     return MyUser(
       displayName: displayName ?? this.displayName,
@@ -155,7 +140,6 @@ class MyUser {
       birthDate: birthDate ?? this.birthDate,
       createdAt: createdAt ?? this.createdAt,
       profileCompleted: profileCompleted ?? this.profileCompleted,
-      username: username ?? this.username,
     );
   }
 }

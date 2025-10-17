@@ -1,4 +1,4 @@
-// lib/rawmaterial/widgets/grouped_item_card.dart — การ์ดแสดงกลุ่มไอเท็มชื่อซ้ำ (stacked card เลื่อนลง + แผ่นหลังแคบกว่า)
+// lib/rawmaterial/widgets/grouped_item_card.dart
 import 'package:flutter/material.dart';
 import 'package:my_app/rawmaterial/constants/categories.dart';
 import 'package:my_app/rawmaterial/constants/units.dart';
@@ -9,8 +9,14 @@ class GroupedItemCard extends StatelessWidget {
   final List<ShoppingItem> items;
   final VoidCallback? onTap;
 
-  /// เรียกเมื่อยืนยันลบทั้งกลุ่ม
+  /// ลบทั้งกลุ่ม (fallback ถ้าไม่ได้ส่ง onUseUpGroup มา)
   final Future<void> Function()? onDeleteGroup;
+
+  /// ใช้หมดทั้งกลุ่ม (แนะนำให้ parent ไป log usage และตั้ง qty=0 รายการย่อย)
+  final Future<void> Function(List<ShoppingItem> items)? onUseUpGroup;
+
+  /// แสดง dialog ยืนยันก่อน "ใช้หมดทั้งกลุ่ม"
+  final bool confirmUseUpGroup;
 
   const GroupedItemCard({
     super.key,
@@ -18,6 +24,8 @@ class GroupedItemCard extends StatelessWidget {
     required this.items,
     this.onTap,
     this.onDeleteGroup,
+    this.onUseUpGroup,
+    this.confirmUseUpGroup = true,
   });
 
   int? _daysLeft(DateTime? expiry) {
@@ -63,23 +71,19 @@ class GroupedItemCard extends StatelessWidget {
     final status = _status(days);
 
     const radius = 15.0;
-    const frontHeight = 118.0; // ความสูงการ์ดหน้า
+    const frontHeight = 118.0;
 
-    // ===== การ์ดซ้อน (stacked แบบเลื่อนลง + แผ่นหลังแคบกว่า) =====
+    // ถ้ามี onUseUpGroup ให้แสดงโหมด "ใช้หมด"
+
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        // แผ่นหลัง: เลื่อนลงเล็กน้อย และแคบกว่าการ์ดหน้า
+        // แผ่นหลัง
         Transform.translate(
           offset: const Offset(0, 10),
           child: IgnorePointer(
             child: Container(
-              margin: const EdgeInsets.fromLTRB(
-                24,
-                6,
-                24,
-                15,
-              ), // แคบ + เว้นด้านล่างให้การ์ดอื่น
+              margin: const EdgeInsets.fromLTRB(24, 6, 24, 15),
               height: frontHeight,
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -87,7 +91,7 @@ class GroupedItemCard extends StatelessWidget {
                 border: Border.all(color: Colors.grey.shade200),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
+                    color: Colors.black.withValues(alpha: 0.08),
                     blurRadius: 12,
                     offset: const Offset(0, 6),
                   ),
@@ -97,13 +101,13 @@ class GroupedItemCard extends StatelessWidget {
           ),
         ),
 
-        // การ์ดหน้า (เต็มกว่าด้านหลัง)
+        // การ์ดหน้า
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Material(
             color: Colors.white,
             elevation: 6,
-            shadowColor: Colors.black.withOpacity(0.12),
+            shadowColor: Colors.black.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(radius),
             child: InkWell(
               borderRadius: BorderRadius.circular(radius),
@@ -130,7 +134,6 @@ class GroupedItemCard extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ชื่อกลุ่ม (อนุญาต 2 บรรทัด)
                           Text(
                             name,
                             maxLines: 2,
@@ -142,8 +145,6 @@ class GroupedItemCard extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 4),
-
-                          // รายละเอียด: ตัดด้วย ellipsis เสมอ กัน overflow แนวนอน
                           Text(
                             hasSingleUnit
                                 ? '$totalQty $displayUnit • $category • ${items.length} รายการ'
@@ -157,8 +158,6 @@ class GroupedItemCard extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 6),
-
-                          // สถานะวันหมดอายุ
                           if (status.color != null && status.text != null)
                             Align(
                               alignment: Alignment.centerLeft,
@@ -168,7 +167,7 @@ class GroupedItemCard extends StatelessWidget {
                                   vertical: 3,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: status.color!.withOpacity(0.12),
+                                  color: status.color!.withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Text(
@@ -185,74 +184,21 @@ class GroupedItemCard extends StatelessWidget {
                       ),
                     ),
 
-                    // ปุ่มลบ
-                    SizedBox(
-                      width: 48,
-                      height: 48,
-                      child: IconButton(
-                        tooltip: 'ลบทั้งกลุ่ม',
+                    // ปุ่มขวา: ใช้หมดทั้งกลุ่ม (ถ้ามี onUseUpGroup) มิฉะนั้น fallback เป็นลบกลุ่ม
+                    if (onUseUpGroup != null)
+                      IconButton(
+                        tooltip: 'ใช้หมดทั้งกลุ่ม',
                         icon: Icon(
-                          Icons.delete_outline,
-                          color: Colors.grey[600],
-                        ),
-                        padding: const EdgeInsets.all(8),
-                        constraints: const BoxConstraints(
-                          minWidth: 48,
-                          minHeight: 48,
+                          Icons.inventory_2_outlined,
+                          color: Colors.grey[700],
                         ),
                         onPressed: () async {
-                          if (onDeleteGroup == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'กลุ่มนี้ยังไม่ได้ผูกการลบ (onDeleteGroup)',
-                                ),
-                                duration: Duration(seconds: 2),
-                              ),
-                            );
-                            return;
-                          }
-
                           final ok = await showDialog<bool>(
                             context: context,
                             builder: (_) => AlertDialog(
-                              title: const Text('ยืนยันการลบ'),
-                              content: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxHeight:
-                                      MediaQuery.of(context).size.height * 0.5,
-                                  maxWidth:
-                                      MediaQuery.of(context).size.width * 0.9,
-                                ),
-                                child: SingleChildScrollView(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        'คุณต้องการลบกลุ่ม "$name" ใช่หรือไม่?\n',
-                                      ),
-                                      const Text('รายการที่จะถูกลบ:'),
-                                      const SizedBox(height: 8),
-                                      ...items.map(
-                                        (e) => Padding(
-                                          padding: const EdgeInsets.only(
-                                            bottom: 4,
-                                          ),
-                                          child: Text(
-                                            '• ${e.name} (${e.quantity} ${Units.safe(e.unit)})',
-                                            style: const TextStyle(
-                                              fontSize: 13,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                              title: const Text('ยืนยัน: ใช้หมดทั้งกลุ่ม'),
+                              content: Text(
+                                'ต้องการบันทึกว่าใช้ "$name" ทั้งกลุ่มจนหมดหรือไม่?',
                               ),
                               actions: [
                                 TextButton(
@@ -262,21 +208,19 @@ class GroupedItemCard extends StatelessWidget {
                                 ),
                                 TextButton(
                                   onPressed: () => Navigator.pop(context, true),
-                                  child: const Text(
-                                    'ลบ',
-                                    style: TextStyle(color: Colors.red),
+                                  child: Text(
+                                    'ยืนยัน',
+                                    style: TextStyle(color: Colors.grey[700]),
                                   ),
                                 ),
                               ],
                             ),
                           );
-
                           if (ok == true) {
-                            await onDeleteGroup!();
+                            await onUseUpGroup!(items);
                           }
                         },
                       ),
-                    ),
                   ],
                 ),
               ),
