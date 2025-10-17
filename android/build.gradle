@@ -1,0 +1,18 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Google Services plugin (ใช้ตัวนี้แทน plugins DSL)
+        classpath 'com.google.gms:google-services:4.4.3'
+    }
+}
+
+// (ออปชัน) ย้าย buildDir ทั้งโปรเจกต์ออกไปนอกโฟลเดอร์ android
+subprojects { project ->
+    project.buildDir = "${rootProject.projectDir}/../build/${project.name}"
+}
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

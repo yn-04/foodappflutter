@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:my_app/utils/app_logger.dart';
 
 /// บริการสำหรับจัดการ Firebase Storage และ User Profile
 class FirebaseStorageService {
@@ -15,16 +16,16 @@ class FirebaseStorageService {
     try {
       final user = _auth.currentUser;
       if (user == null) {
-        print('DEBUG: User not authenticated');
+        logDebug('DEBUG: User not authenticated');
         return false;
       }
 
-      print('DEBUG: Storage bucket: ${_storage.bucket}');
-      print('DEBUG: User authenticated: ${user.uid}');
+      logDebug('DEBUG: Storage bucket: ${_storage.bucket}');
+      logDebug('DEBUG: User authenticated: ${user.uid}');
 
       return true;
     } catch (e) {
-      print('DEBUG: Storage connection check failed: $e');
+      logDebug('DEBUG: Storage connection check failed: $e');
       return false;
     }
   }
@@ -34,39 +35,39 @@ class FirebaseStorageService {
     try {
       final user = _auth.currentUser;
       if (user == null) {
-        print('❌ User not logged in');
+        logDebug('❌ User not logged in');
         return;
       }
 
-      print('=== TESTING STORAGE CONNECTION ===');
-      print('✅ User authenticated: ${user.uid}');
-      print('✅ User email: ${user.email}');
+      logDebug('=== TESTING STORAGE CONNECTION ===');
+      logDebug('✅ User authenticated: ${user.uid}');
+      logDebug('✅ User email: ${user.email}');
 
-      print('✅ Storage instance created');
-      print('✅ Storage bucket: ${_storage.bucket}');
+      logDebug('✅ Storage instance created');
+      logDebug('✅ Storage bucket: ${_storage.bucket}');
 
       // ทดสอบสร้าง reference
       final testRef = _storage.ref().child(
         'test_${DateTime.now().millisecondsSinceEpoch}.txt',
       );
-      print('✅ Reference created: ${testRef.fullPath}');
+      logDebug('✅ Reference created: ${testRef.fullPath}');
 
       // ทดสอบอัปโหลดข้อความ
       final testData = 'Hello Firebase Storage!';
       await testRef.putString(testData);
-      print('✅ String upload successful');
+      logDebug('✅ String upload successful');
 
       // ทดสอบดาวน์โหลด URL
       final downloadURL = await testRef.getDownloadURL();
-      print('✅ Download URL: $downloadURL');
+      logDebug('✅ Download URL: $downloadURL');
 
       // ลบไฟล์ทดสอบ
       await testRef.delete();
-      print('✅ Test file deleted');
+      logDebug('✅ Test file deleted');
 
-      print('🎉 Storage connection test PASSED!');
+      logDebug('🎉 Storage connection test PASSED!');
     } catch (e) {
-      print('❌ Storage connection test FAILED: $e');
+      logDebug('❌ Storage connection test FAILED: $e');
       rethrow;
     }
   }
@@ -89,9 +90,9 @@ class FirebaseStorageService {
       }
 
       final fileSize = imageFile.lengthSync();
-      print('DEBUG: Starting image upload...');
-      print('DEBUG: User UID: ${user.uid}');
-      print('DEBUG: File size: $fileSize bytes');
+      logDebug('DEBUG: Starting image upload...');
+      logDebug('DEBUG: User UID: ${user.uid}');
+      logDebug('DEBUG: File size: $fileSize bytes');
 
       // ตรวจสอบขนาดไฟล์ (5MB = 5 * 1024 * 1024 bytes)
       if (fileSize > 5 * 1024 * 1024) {
@@ -109,13 +110,13 @@ class FirebaseStorageService {
           .child(userId)
           .child(fileName);
 
-      print('DEBUG: Upload path: ${storageRef.fullPath}');
+      logDebug('DEBUG: Upload path: ${storageRef.fullPath}');
 
       // ลบไฟล์เก่าถ้ามี (ไม่บังคับ)
       await _deleteOldProfileImages(userId);
 
       // อัปโหลดไฟล์
-      print('DEBUG: Starting upload...');
+      logDebug('DEBUG: Starting upload...');
       final uploadTask = await storageRef.putFile(
         imageFile,
         SettableMetadata(
@@ -131,14 +132,14 @@ class FirebaseStorageService {
 
       // ดึง Download URL
       final downloadURL = await uploadTask.ref.getDownloadURL();
-      print('DEBUG: Upload successful, URL: $downloadURL');
+      logDebug('DEBUG: Upload successful, URL: $downloadURL');
 
       return downloadURL;
     } on FirebaseException catch (e) {
-      print('Firebase Storage Error: ${e.code} - ${e.message}');
+      logDebug('Firebase Storage Error: ${e.code} - ${e.message}');
       throw StorageException(_getFirebaseErrorMessage(e));
     } catch (e) {
-      print('General Upload Error: $e');
+      logDebug('General Upload Error: $e');
       throw StorageException('ไม่สามารถอัปโหลดรูปภาพได้: $e');
     }
   }
@@ -152,11 +153,11 @@ class FirebaseStorageService {
       for (final item in listResult.items) {
         if (item.name.startsWith('profile_')) {
           await item.delete();
-          print('DEBUG: Deleted old file: ${item.name}');
+          logDebug('DEBUG: Deleted old file: ${item.name}');
         }
       }
     } catch (e) {
-      print('DEBUG: Could not delete old files (this is normal): $e');
+      logDebug('DEBUG: Could not delete old files (this is normal): $e');
       // ไม่ throw error เพราะไม่สำคัญมาก
     }
   }
@@ -172,7 +173,7 @@ class FirebaseStorageService {
         throw ProfileException('ไม่พบผู้ใช้');
       }
 
-      print('DEBUG: Updating user profile...');
+      logDebug('DEBUG: Updating user profile...');
 
       // อัปเดต Firebase Auth Profile
       await user.updateDisplayName(displayName);
@@ -190,9 +191,9 @@ class FirebaseStorageService {
 
       // Reload user data
       await user.reload();
-      print('DEBUG: Profile update completed');
+      logDebug('DEBUG: Profile update completed');
     } catch (e) {
-      print('Error updating profile: $e');
+      logDebug('Error updating profile: $e');
       rethrow;
     }
   }
@@ -222,15 +223,15 @@ class FirebaseStorageService {
 
       if (docSnapshot.exists) {
         await docRef.update(data);
-        print('DEBUG: Firestore document updated');
+        logDebug('DEBUG: Firestore document updated');
       } else {
         data['createdAt'] = FieldValue.serverTimestamp();
         data['profileVersion'] = 1;
         await docRef.set(data);
-        print('DEBUG: New Firestore document created');
+        logDebug('DEBUG: New Firestore document created');
       }
     } catch (e) {
-      print('Error updating Firestore: $e');
+      logDebug('Error updating Firestore: $e');
       throw ProfileException('ไม่สามารถบันทึกข้อมูลได้');
     }
   }
@@ -259,7 +260,7 @@ class FirebaseStorageService {
       // อัปเดตโปรไฟล์
       await updateUserProfile(displayName: displayName, photoURL: downloadURL);
     } catch (e) {
-      print('Error in complete profile update: $e');
+      logDebug('Error in complete profile update: $e');
       rethrow;
     }
   }
@@ -303,7 +304,7 @@ class FirebaseStorageService {
 
       return validExtensions.any((ext) => fileName.endsWith(ext));
     } catch (e) {
-      print('Error validating image: $e');
+      logDebug('Error validating image: $e');
       return false;
     }
   }

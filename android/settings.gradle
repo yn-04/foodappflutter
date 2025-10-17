@@ -1,0 +1,48 @@
+// android/settings.gradle  (Groovy DSL)
+
+import java.util.Properties
+
+pluginManagement {
+    // โหลด path ของ Flutter SDK จาก local.properties
+    def props = new Properties()
+    def lp = file("local.properties")
+    if (!lp.exists()) {
+        throw new RuntimeException("local.properties not found at: ${lp.absolutePath}")
+    }
+    lp.withInputStream { props.load(it) }
+
+    def flutterSdkPath = props.getProperty("flutter.sdk")
+    if (flutterSdkPath == null || flutterSdkPath.trim().isEmpty()) {
+        throw new RuntimeException("flutter.sdk not set in local.properties")
+    }
+
+    // ให้ Gradle มองเห็น Flutter Tooling
+    includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
+
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven { url "https://storage.googleapis.com/download.flutter.io" }   // ⭐ เพิ่ม repo ของ Flutter ที่นี่
+    }
+}
+
+plugins {
+    id "dev.flutter.flutter-plugin-loader" version "1.0.0"
+    id "com.android.application" version "8.7.3" apply false
+    // END: FlutterFire Configuration
+    id "org.jetbrains.kotlin.android" version "2.1.0" apply false
+}
+
+dependencyResolutionManagement {
+        // ⭐ เปลี่ยนโหมดจาก FAIL_ON_PROJECT_REPOS → PREFER_SETTINGS
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url "https://storage.googleapis.com/download.flutter.io" }   // ⭐ ใส่ซ้ำที่นี่ด้วย
+    }
+}
+
+rootProject.name = "android"
+include(":app")
