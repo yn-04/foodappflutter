@@ -1,6 +1,7 @@
 //lib/foodreccom/widgets/recipe_detail/nutrition_info.dart
 import 'package:flutter/material.dart';
 import '../../models/recipe/recipe.dart';
+import '../../models/recipe/nutrition_info.dart';
 
 class NutritionInfoSection extends StatelessWidget {
   final RecipeModel recipe;
@@ -14,7 +15,8 @@ class NutritionInfoSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final multiplier = servings / recipe.servings;
+    final baseServings = recipe.servings == 0 ? servings : recipe.servings;
+    final multiplier = servings / baseServings;
     final adjusted = NutritionInfo(
       calories: recipe.nutrition.calories * multiplier,
       protein: recipe.nutrition.protein * multiplier,

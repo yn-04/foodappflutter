@@ -5,6 +5,7 @@ export 'basic_info.dart';
 export 'source_reference.dart';
 export 'servings_selector.dart';
 export 'ingredients_list.dart';
+export 'missing_ingredients.dart';
 export 'nutrition_info.dart';
 export 'cooking_steps.dart';
 export 'bottom_actions.dart';

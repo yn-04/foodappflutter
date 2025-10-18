@@ -30,54 +30,29 @@ class BottomActions extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.blue[50],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('ต้นทุนโดยประมาณ:'),
-                Text(
-                  'คำนวณจากสต็อก',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue[700],
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: isStarting ? null : onStartCooking,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green[600],
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+          icon: isStarting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
                   ),
-                ),
-              ],
-            ),
+                )
+              : const Icon(Icons.play_arrow),
+          label: Text(
+            isStarting ? 'กำลังเตรียม...' : 'เริ่มทำเมนูนี้ ($servings คน)',
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: isStarting ? null : onStartCooking,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green[600],
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-              icon: isStarting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.play_arrow),
-              label: Text(
-                isStarting ? 'กำลังเตรียม...' : 'เริ่มทำเมนูนี้ ($servings คน)',
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

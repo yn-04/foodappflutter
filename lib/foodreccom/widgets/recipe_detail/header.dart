@@ -23,11 +23,6 @@ class RecipeHeader extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  recipe.description,
-                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                ),
               ],
             ),
           ),
