@@ -1,4 +1,5 @@
-import '../models/recipe/nutrition_info.dart';
+import 'package:my_app/common/measurement_constants.dart';
+
 import '../models/recipe/recipe.dart';
 
 class NutritionEstimator {
@@ -84,7 +85,7 @@ class NutritionEstimator {
       return amount;
     }
     if (unit == 'kg' || unit == 'กก' || unit == 'กิโลกรัม') {
-      return amount * 1000;
+      return amount * MeasurementConstants.gramsPerKilogram;
     }
 
     // volume/simple units (approx to grams)
@@ -92,16 +93,16 @@ class NutritionEstimator {
       return amount; // assume density 1
     }
     if (unit == 'l' || unit == 'ลิตร') {
-      return amount * 1000;
+      return amount * MeasurementConstants.millilitersPerLiter;
     }
     if (unit == 'tbsp' || unit == 'tablespoon' || unit == 'ช้อนโต๊ะ') {
-      return amount * 15;
+      return amount * MeasurementConstants.millilitersPerTablespoon;
     }
     if (unit == 'tsp' || unit == 'teaspoon' || unit == 'ช้อนชา') {
-      return amount * 5;
+      return amount * MeasurementConstants.millilitersPerTeaspoon;
     }
     if (unit == 'cup' || unit == 'ถ้วย') {
-      return amount * 240;
+      return amount * MeasurementConstants.millilitersPerCup;
     }
     if (unit == 'pcs' || unit == 'pc' || unit == 'ชิ้น' || unit == 'ฟอง') {
       final n = name.toLowerCase();
@@ -112,4 +113,3 @@ class NutritionEstimator {
     return amount * 100; // fallback
   }
 }
-

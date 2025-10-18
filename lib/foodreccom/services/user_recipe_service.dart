@@ -44,22 +44,31 @@ class UserRecipeService {
 
   Future<String> addUserRecipe(RecipeModel recipe) async {
     final user = _auth.currentUser;
-    final data = recipe
+    final payload = recipe
         .copyWith(source: 'ผู้ใช้', sourceUrl: null)
         .toJson();
-    data['is_user_recipe'] = true;
-    data['created_at'] = DateTime.now().millisecondsSinceEpoch;
+    payload['is_user_recipe'] = true;
+    payload['created_at'] =
+        payload['created_at'] ?? DateTime.now().millisecondsSinceEpoch;
+
+    String ensureId(Map<String, dynamic> json) {
+      final existing = (json['id'] ?? '').toString().trim();
+      if (existing.isNotEmpty) return existing;
+      final generated = 'user_${DateTime.now().millisecondsSinceEpoch}';
+      json['id'] = generated;
+      return generated;
+    }
+
+    final docId = ensureId(payload);
 
     if (user == null) {
       // เก็บเป็น draft ชั่วคราว
-      final id = 'draft_${DateTime.now().millisecondsSinceEpoch}';
-      data['id'] = id;
-      await _addDraft(data);
-      return id;
+      await _addDraft(Map<String, dynamic>.from(payload));
+      return docId;
     }
 
-    final ref = await _collection().add(data);
-    return ref.id;
+    await _collection().doc(docId).set(payload, SetOptions(merge: true));
+    return docId;
   }
 
   Future<void> updateUserRecipe(String id, RecipeModel recipe) async {
@@ -95,8 +104,14 @@ class UserRecipeService {
     final col = _collection();
     for (final data in drafts) {
       final copy = Map<String, dynamic>.from(data);
-      copy.remove('id');
-      await col.add(copy);
+      final id = (copy['id'] ?? '').toString().trim();
+      if (id.isEmpty) {
+        copy['id'] = 'user_${DateTime.now().millisecondsSinceEpoch}';
+      }
+      copy['is_user_recipe'] = true;
+      copy['created_at'] =
+          copy['created_at'] ?? DateTime.now().millisecondsSinceEpoch;
+      await col.doc(copy['id'] as String).set(copy, SetOptions(merge: true));
     }
 
     final prefs = await SharedPreferences.getInstance();

@@ -14,20 +14,29 @@ class ApiKeyChecker {
 
   ApiKeyChecker(this._apiKeys);
 
+  String _mask(String key) {
+    if (key.isEmpty) return '(empty)';
+    final previewLength = key.length >= 6 ? 6 : key.length;
+    final preview = key.substring(0, previewLength);
+    final suffix = key.length > previewLength ? '...' : '';
+    return '$preview$suffix';
+  }
+
   Future<List<String>> checkKeys() async {
     _validKeys.clear();
     for (var key in _apiKeys) {
-      final model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: key);
+      final primary = (dotenv.env['GEMINI_PRIMARY_MODEL'] ?? 'gemini-1.5-flash-8b').trim();
+      final model = GenerativeModel(model: primary.isEmpty ? 'gemini-1.5-flash-8b' : primary, apiKey: key);
       try {
         final response = await model
             .generateContent([Content.text("ping")])
             .timeout(const Duration(seconds: 5));
         if (response.text != null && response.text!.isNotEmpty) {
-          print("✅ Key ใช้ได้: ${key.substring(0, 6)}...");
+          print("✅ Key ใช้ได้: ${_mask(key)}");
           _validKeys.add(key);
         }
       } catch (e) {
-        print("❌ Key ใช้ไม่ได้/Quota หมด: ${key.substring(0, 6)}... → $e");
+        print("❌ Key ใช้ไม่ได้/Quota หมด: ${_mask(key)} → $e");
       }
     }
     return _validKeys;
@@ -54,7 +63,11 @@ class AIRecommendationService {
     if (apiKeysStr == null || apiKeysStr.isEmpty) {
       throw Exception('❌ GEMINI_API_KEYS is missing in .env');
     }
-    _apiKeys = apiKeysStr.split(',').map((k) => k.trim()).toList();
+    _apiKeys = apiKeysStr
+        .split(',')
+        .map((k) => k.trim())
+        .where((k) => k.isNotEmpty)
+        .toList();
 
     _rateLimitMs = int.tryParse(dotenv.env['AI_RATE_LIMIT'] ?? '') ?? 30000;
     _cacheDurationMs =
@@ -64,21 +77,32 @@ class AIRecommendationService {
 
     final checker = ApiKeyChecker(_apiKeys);
     checker.checkKeys().then((validKeys) {
-      if (validKeys.isEmpty) throw Exception("❌ ไม่มี API Key ไหนที่ใช้ได้");
+      if (validKeys.isEmpty) {
+        print("⚠️ ไม่มี Gemini key ที่ใช้ได้ — จะใช้ fallback เท่านั้น");
+        return;
+      }
       _apiKeys = validKeys;
       print("🔑 ใช้งานได้ ${_apiKeys.length} keys");
       _initModels();
     });
   }
 
+  String _maskKey(String key) {
+    if (key.isEmpty) return '(empty)';
+    final previewLength = key.length >= 6 ? 6 : key.length;
+    final preview = key.substring(0, previewLength);
+    final suffix = key.length > previewLength ? '...' : '';
+    return '$preview$suffix';
+  }
+
   void _initModels() {
     final apiKey = _apiKeys[_currentKeyIndex];
     print(
-      "👉 Using API Key[${_currentKeyIndex + 1}/${_apiKeys.length}]: ${apiKey.substring(0, 6)}...",
+      "👉 Using API Key[${_currentKeyIndex + 1}/${_apiKeys.length}]: ${_maskKey(apiKey)}",
     );
 
     _primaryModel = GenerativeModel(
-      model: 'gemini-1.5-flash',
+      model: 'gemini-1.5-flash-8b',
       apiKey: apiKey,
       generationConfig: GenerationConfig(
         temperature: 0.7,
@@ -90,7 +114,7 @@ class AIRecommendationService {
     );
 
     _fallbackModel = GenerativeModel(
-      model: 'gemini-2.5-pro',
+      model: 'gemini-1.5-pro-002',
       apiKey: apiKey,
       generationConfig: GenerationConfig(
         temperature: 0.7,
@@ -117,6 +141,17 @@ class AIRecommendationService {
     List<IngredientModel> ingredients, {
     bool forceRefresh = false, // ✅ เพิ่ม parameter นี้
   }) async {
+    bool _geminiEnabled() {
+      final v = (dotenv.env['AI_GEMINI_ENABLED'] ?? 'true').trim().toLowerCase();
+      return !(v == 'false' || v == '0' || v == 'off');
+    }
+
+    if (!_geminiEnabled()) {
+      print('🧠 Gemini disabled via env → use cache/fallback');
+      final cached = await _getCachedRecommendations(ingredients);
+      if (cached != null) return cached;
+      return _getFallbackRecommendations(ingredients);
+    }
     final userId = _auth.currentUser?.uid ?? 'guest';
     final now = DateTime.now().millisecondsSinceEpoch;
     final lastTime = _lastRequestTime[userId] ?? 0;

@@ -4,8 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import '../models/ingredient_model.dart';
 import '../models/cooking_history_model.dart';
-import '../utils/date_utils.dart';
 import '../models/recipe/used_ingredient.dart';
+import '../utils/purchase_item_utils.dart';
 
 class IngredientAnalyticsService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -20,35 +20,74 @@ class IngredientAnalyticsService {
 
     try {
       final batch = _firestore.batch();
+      final collection = _firestore
+          .collection('users')
+          .doc(user.uid)
+          .collection('raw_materials');
 
       for (final usedIngredient in usedIngredients) {
-        final snapshot = await _firestore
-            .collection('users')
-            .doc(user.uid)
-            .collection('raw_materials')
-            .where('name', isEqualTo: usedIngredient.name)
-            .get();
+        final usedCanonical = toCanonicalQuantity(
+          usedIngredient.amount,
+          usedIngredient.unit,
+          usedIngredient.name,
+        );
+        if (usedCanonical.amount <= 0) continue;
 
-        if (snapshot.docs.isNotEmpty) {
-          final doc = snapshot.docs.first;
+        final nameKey = usedIngredient.name.trim().toLowerCase();
+        if (nameKey.isEmpty) continue;
+
+        final snapshot =
+            await collection.where('name_key', isEqualTo: nameKey).get();
+        if (snapshot.docs.isEmpty) continue;
+
+        var remainingToDeduct = usedCanonical.amount;
+        for (final doc in snapshot.docs) {
+          if (remainingToDeduct <= 0) break;
           final data = doc.data();
+          final currentQuantity = (data['quantity'] ?? 0);
+          final currentUnit = (data['unit'] ?? '').toString();
+          if (currentUnit.isEmpty) continue;
 
-          final currentUsageCount = data['usage_count'] ?? 0;
-          final currentUtilizationRate = (data['utilization_rate'] ?? 0.0)
-              .toDouble();
-          final totalQuantity = data['total_added'] ?? data['quantity'] ?? 1;
+          final currentCanonical = toCanonicalQuantity(
+            (currentQuantity as num).toDouble(),
+            currentUnit,
+            usedIngredient.name,
+          );
+          if (currentCanonical.amount <= 0) continue;
+          if (currentCanonical.unit != usedCanonical.unit) continue;
 
+          final deduction = remainingToDeduct > currentCanonical.amount
+              ? currentCanonical.amount
+              : remainingToDeduct;
+          if (deduction <= 0) continue;
+
+          final newCanonicalAmount = currentCanonical.amount - deduction;
+          remainingToDeduct -= deduction;
+
+          final newQuantity =
+              _canonicalToStoredQuantity(newCanonicalAmount, currentCanonical.unit);
+          final newUnit =
+              displayUnitForCanonical(currentCanonical.unit, usedIngredient.name);
+          final currentUsageCount = (data['usage_count'] ?? 0) as int;
+          final currentUtilizationRate =
+              (data['utilization_rate'] ?? 0.0).toDouble();
+          final baseline = currentCanonical.amount <= 0
+              ? deduction
+              : currentCanonical.amount;
           final newUtilizationRate = _calculateNewUtilizationRate(
             currentUtilizationRate,
-            usedIngredient.amount,
-            (totalQuantity as num).toDouble(),
+            deduction,
+            baseline,
           );
 
           batch.update(doc.reference, {
+            'quantity': newQuantity,
+            'unit': newUnit,
+            'unit_key': newUnit.toLowerCase(),
             'usage_count': currentUsageCount + 1,
-            'last_used_date': DateTime.now().toIso8601String(),
+            'last_used_date': FieldValue.serverTimestamp(),
             'utilization_rate': newUtilizationRate,
-            'updated_at': DateTime.now().toIso8601String(),
+            'updated_at': FieldValue.serverTimestamp(),
           });
         }
       }
@@ -68,6 +107,16 @@ class IngredientAnalyticsService {
   ) {
     final usageRatio = usedAmount / totalQuantity;
     return ((currentRate * 0.8) + (usageRatio * 0.2)).clamp(0.0, 1.0);
+  }
+
+  int _canonicalToStoredQuantity(
+    double canonicalAmount,
+    String canonicalUnit,
+  ) {
+    if (canonicalAmount <= 0) return 0;
+    final rounded = canonicalAmount.round();
+    // ถ้ายังเหลือน้อยกว่าหน่วยย่อยสุดให้ปัดขึ้นเป็น 1 เพื่อไม่ให้หายจากหน้าสต็อก
+    return rounded == 0 ? 1 : rounded;
   }
 
   /// วิเคราะห์แนวโน้มการใช้วัตถุดิบ (30 วันล่าสุด)

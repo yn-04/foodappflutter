@@ -103,6 +103,48 @@ class ApiUsageService {
     return _respectMinInterval(_rapidLastKey, rapidMinIntervalMs);
   }
 
+  static Future<Duration?> _timeUntilRapidAllowed() async {
+    await initDaily();
+    final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final cooldownUntil = prefs.getInt(_rapidCooldownKey) ?? 0;
+    if (now < cooldownUntil) {
+      return Duration(milliseconds: cooldownUntil - now);
+    }
+    final last = prefs.getInt(_rapidLastKey) ?? 0;
+    if (last == 0) return null;
+    final elapsed = now - last;
+    final remaining = rapidMinIntervalMs - elapsed;
+    if (remaining > 0) {
+      return Duration(milliseconds: remaining);
+    }
+    return null;
+  }
+
+  static Future<bool> waitForRapidSlot({
+    Duration maxWait = const Duration(seconds: 5),
+  }) async {
+    final start = DateTime.now();
+    while (true) {
+      if (await allowRapidCall()) return true;
+
+      final wait = await _timeUntilRapidAllowed();
+      if (wait == null || wait <= Duration.zero) {
+        return false;
+      }
+
+      final elapsed = DateTime.now().difference(start);
+      final remainingBudget = maxWait - elapsed;
+      if (remainingBudget <= Duration.zero) {
+        return false;
+      }
+
+      final delay = wait < remainingBudget ? wait : remainingBudget;
+      debugPrint('⏳ RapidAPI throttled/cooldown → waiting ${delay.inMilliseconds}ms');
+      await Future.delayed(delay);
+    }
+  }
+
   static Future<bool> canUseRapid() async {
     await initDaily();
     final used = await _get(_rapidKey);

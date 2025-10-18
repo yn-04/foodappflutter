@@ -9,11 +9,20 @@ class ApiKeyChecker {
 
   ApiKeyChecker(this._apiKeys);
 
+  String _mask(String key) {
+    if (key.isEmpty) return '(empty)';
+    final previewLength = key.length >= 6 ? 6 : key.length;
+    final preview = key.substring(0, previewLength);
+    final suffix = key.length > previewLength ? '...' : '';
+    return '$preview$suffix';
+  }
+
   Future<List<String>> checkKeys() async {
     _validKeys.clear();
 
     for (var key in _apiKeys) {
-      final model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: key);
+      final modelName = (dotenv.env['GEMINI_PRIMARY_MODEL'] ?? 'gemini-1.5-flash-8b').trim();
+      final model = GenerativeModel(model: modelName.isEmpty ? 'gemini-1.5-flash-8b' : modelName, apiKey: key);
 
       try {
         // ยิงคำสั้น ๆ ทดสอบ
@@ -22,11 +31,11 @@ class ApiKeyChecker {
             .timeout(const Duration(seconds: 60));
 
         if (response.text != null && response.text!.isNotEmpty) {
-          print("✅ Key ใช้ได้: ${key.substring(0, 6)}...");
+          print("✅ Key ใช้ได้: ${_mask(key)}");
           _validKeys.add(key);
         }
       } catch (e) {
-        print("❌ Key ใช้ไม่ได้/Quota หมด: ${key.substring(0, 6)}... → $e");
+        print("❌ Key ใช้ไม่ได้/Quota หมด: ${_mask(key)} → $e");
       }
     }
 
