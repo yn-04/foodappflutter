@@ -1,11 +1,8 @@
-import 'package:translator/translator.dart';
 import '../models/recipe/recipe.dart';
 import 'thai_localizer.dart';
 
 /// 🥘 Adapter สำหรับแปล RecipeModel → ภาษาไทย
 class ThaiRecipeAdapter {
-  static final GoogleTranslator _translator = GoogleTranslator();
-
   /// แปล Recipe เดียว
   static Future<RecipeModel> translateRecipe(RecipeModel recipe) async {
     try {
@@ -74,16 +71,5 @@ class ThaiRecipeAdapter {
     List<RecipeModel> recipes,
   ) async {
     return Future.wait(recipes.map(translateRecipe));
-  }
-
-  /// ฟังก์ชันแปลข้อความเดี่ยว
-  static Future<String> _translateSafe(String? text) async {
-    if (text == null || text.trim().isEmpty) return '';
-    try {
-      final result = await _translator.translate(text, from: 'en', to: 'th');
-      return result.text;
-    } catch (_) {
-      return text;
-    }
   }
 }

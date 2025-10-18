@@ -6,11 +6,14 @@ DateTime parseDate(dynamic value) {
   if (value == null) return DateTime.now();
 
   if (value is Timestamp) {
-    return value.toDate();
+    return value.toDate().toLocal();
   }
 
   if (value is String) {
-    return DateTime.tryParse(value) ?? DateTime.now();
+    final parsed = DateTime.tryParse(value);
+    if (parsed != null) {
+      return parsed.isUtc ? parsed.toLocal() : parsed;
+    }
   }
 
   return DateTime.now();

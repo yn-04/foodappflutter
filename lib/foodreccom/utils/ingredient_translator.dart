@@ -58,6 +58,9 @@ class IngredientTranslator {
     'แตงกวา': 'cucumber',
     'ถั่วฝักยาว': 'yardlong beans',
     'ถั่วงอก': 'bean sprouts',
+    'ถั่วลิสง': 'peanut',
+    'ถั่วลิสงคั่ว': 'roasted peanut',
+    'ถั่วคั่ว': 'roasted peanut',
     'เห็ดฟาง': 'straw mushroom',
     'เห็ดหอม': 'shiitake mushroom',
     'เห็ดเข็มทอง': 'enoki mushroom',
@@ -127,7 +130,8 @@ class IngredientTranslator {
 
   /// แปลชื่อวัตถุดิบ → อังกฤษ
   static String translate(String name) {
-    final normalized = _stripThaiMarks(name.trim().toLowerCase());
+    final trimmed = name.trim();
+    final normalized = _stripThaiMarks(trimmed.toLowerCase());
 
     if (_learnedCache.containsKey(normalized)) {
       return _learnedCache[normalized]!;
@@ -144,6 +148,13 @@ class IngredientTranslator {
 
     for (final entry in _strippedKeyMap.entries) {
       if (normalized.contains(entry.key)) return entry.value;
+    }
+
+    if (_containsThai(trimmed)) {
+      final romanized = _romanizeThai(trimmed);
+      if (romanized.isNotEmpty) {
+        return romanized;
+      }
     }
 
     return name;
@@ -196,4 +207,97 @@ class IngredientTranslator {
     // Remove: 31 (mai han-akat), 34-3A (vowels), 47-4E (combining marks)
     return input.replaceAll(RegExp(r"[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]"), "");
   }
+
+  static bool _containsThai(String input) {
+    return RegExp(r"[\u0E00-\u0E7F]").hasMatch(input);
+  }
+
+  static String _romanizeThai(String input) {
+    final buffer = StringBuffer();
+    for (var i = 0; i < input.length; i++) {
+      final char = input[i];
+      final mapped = _thaiToLatin[char];
+      if (mapped != null) {
+        buffer.write(mapped);
+      } else if (char.codeUnitAt(0) <= 127) {
+        buffer.write(char);
+      }
+    }
+    return buffer.toString().replaceAll(RegExp(r"\s+"), ' ').trim();
+  }
+
+  static const Map<String, String> _thaiToLatin = {
+    'ก': 'k',
+    'ข': 'kh',
+    'ฃ': 'kh',
+    'ค': 'kh',
+    'ฅ': 'kh',
+    'ฆ': 'kh',
+    'ง': 'ng',
+    'จ': 'ch',
+    'ฉ': 'ch',
+    'ช': 'ch',
+    'ซ': 's',
+    'ฌ': 'ch',
+    'ญ': 'y',
+    'ฎ': 'd',
+    'ฏ': 't',
+    'ฐ': 'th',
+    'ฑ': 'th',
+    'ฒ': 'th',
+    'ณ': 'n',
+    'ด': 'd',
+    'ต': 't',
+    'ถ': 'th',
+    'ท': 'th',
+    'ธ': 'th',
+    'น': 'n',
+    'บ': 'b',
+    'ป': 'p',
+    'ผ': 'ph',
+    'ฝ': 'f',
+    'พ': 'ph',
+    'ฟ': 'f',
+    'ภ': 'ph',
+    'ม': 'm',
+    'ย': 'y',
+    'ร': 'r',
+    'ฤ': 'rue',
+    'ล': 'l',
+    'ฦ': 'lue',
+    'ว': 'w',
+    'ศ': 's',
+    'ษ': 's',
+    'ส': 's',
+    'ห': 'h',
+    'ฬ': 'l',
+    'อ': 'o',
+    'ฮ': 'h',
+    'ะ': 'a',
+    'า': 'a',
+    'ำ': 'am',
+    'ิ': 'i',
+    'ี': 'i',
+    'ึ': 'ue',
+    'ื': 'ue',
+    'ุ': 'u',
+    'ู': 'u',
+    'เ': 'e',
+    'แ': 'ae',
+    'โ': 'o',
+    'ใ': 'ai',
+    'ไ': 'ai',
+    'ๅ': 'a',
+    'ๆ': '',
+    '็': '',
+    '่': '',
+    '้': '',
+    '๊': '',
+    '๋': '',
+    '์': '',
+    'ฺ': '',
+    'ฯ': '',
+    '฿': 'baht',
+    ' ': ' ',
+  };
 }

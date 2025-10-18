@@ -1,7 +1,6 @@
 //lib/foodreccom/utils/ingredient_utils.dart
 import '../models/ingredient_model.dart';
 import '../models/cooking_history_model.dart';
-import 'package:flutter/foundation.dart';
 
 /// ---- Ingredient Matching ----
 bool ingredientsMatch(String available, String required) {
