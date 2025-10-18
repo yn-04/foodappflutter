@@ -86,6 +86,45 @@ class RecipeModel {
 
   /// ✅ Parse จาก RapidAPI (spoonacular)
   factory RecipeModel.fromAPI(Map<String, dynamic> json) {
+    final cuisines =
+        (json['cuisines'] as List? ?? []).whereType<String>().toList();
+    final diets = (json['diets'] as List? ?? []).whereType<String>().toList();
+    final dishTypes =
+        (json['dishTypes'] as List? ?? []).whereType<String>().toList();
+    double _nutrientAmount(String key) {
+      final nutrients = (json['nutrition']?['nutrients'] as List?) ?? [];
+      for (final item in nutrients) {
+        if (item is Map<String, dynamic>) {
+          final name = (item['name'] ?? '').toString().toLowerCase();
+          if (name == key.toLowerCase()) {
+            return (item['amount'] ?? 0).toDouble();
+          }
+        }
+      }
+      return 0;
+    }
+
+    final servings = (json['servings'] ?? 1);
+    final servingsCount =
+        (servings is num && servings > 0) ? servings.toDouble() : 1.0;
+
+    final nutrition = json['nutrition'] != null
+        ? NutritionInfo(
+            calories: _nutrientAmount('calories') * servingsCount,
+            protein: _nutrientAmount('protein') * servingsCount,
+            carbs: _nutrientAmount('carbohydrates') * servingsCount,
+            fat: _nutrientAmount('fat') * servingsCount,
+            fiber: _nutrientAmount('fiber') * servingsCount,
+            sodium: _nutrientAmount('sodium') * servingsCount,
+          )
+        : NutritionInfo.empty();
+
+    final tagSet = <String>{
+      ...cuisines.map((e) => e.toLowerCase()),
+      ...diets.map((e) => e.toLowerCase()),
+      ...dishTypes.map((e) => e.toLowerCase()),
+    }..removeWhere((e) => e.trim().isEmpty);
+
     return RecipeModel(
       id: json['id'].toString(),
       name: json['title'] ?? json['name'] ?? 'ไม่ระบุชื่อ',
@@ -114,22 +153,11 @@ class RecipeModel {
       cookingTime: json['readyInMinutes'] ?? 0,
       prepTime: 0,
       difficulty: 'ไม่ระบุ',
-      servings: json['servings'] ?? 1,
+      servings: servingsCount.round(),
       category: 'ไม่ระบุ',
-      nutrition:
-          (json['nutrition'] != null && json['nutrition']['nutrients'] != null)
-          ? NutritionInfo.fromJson({
-              'calories':
-                  (json['nutrition']['nutrients'].firstWhere(
-                            (n) => n['name'] == 'Calories',
-                            orElse: () => {'amount': 0},
-                          )['amount'] ??
-                          0)
-                      .toDouble(),
-            })
-          : NutritionInfo.empty(),
+      nutrition: nutrition,
       imageUrl: json['image'],
-      tags: [],
+      tags: tagSet.toList(),
       source: 'RapidAPI',
       sourceUrl: json['sourceUrl'],
     );
@@ -198,6 +226,77 @@ class RecipeModel {
     if (matchScore >= 80) return Colors.green;
     if (matchScore >= 60) return Colors.orange;
     return Colors.red;
+  }
+
+  String get shortDescription {
+    final normalized = description.replaceAll(RegExp(r'\s+'), ' ').trim();
+    String base = '';
+    if (normalized.isNotEmpty) {
+      final sentences =
+          normalized.split(RegExp(r'(?<=[.!?。！？])\s+')).where((s) => s.trim().isNotEmpty);
+      if (sentences.isNotEmpty) {
+        base = sentences.first.trim();
+      } else {
+        base = normalized;
+      }
+      if (!RegExp(r'[.!?。！？]$').hasMatch(base)) {
+        base = '$base.';
+      }
+    }
+
+    final highlightParts = <String>[];
+    if (servings > 0) {
+      highlightParts.add('เสิร์ฟ $servings ที่');
+    }
+    if (totalTime > 0) {
+      highlightParts.add('~${totalTime} นาที');
+    }
+    final cals = caloriesPerServing.round();
+    if (cals > 0) {
+      highlightParts.add('$cals kcal/ที่');
+    }
+    if (difficulty.trim().isNotEmpty) {
+      highlightParts.add('ระดับ $difficulty');
+    }
+
+    final highlight = highlightParts.join(' • ');
+    final segments = <String>[];
+    if (base.isNotEmpty) segments.add(base);
+    if (highlight.isNotEmpty) segments.add(highlight);
+
+    if (segments.isEmpty) {
+      return name.trim().isNotEmpty ? name : 'เมนูอาหาร';
+    }
+
+    String summary = segments.join(' | ');
+    const limit = 160;
+    if (summary.length <= limit) return summary;
+
+    if (segments.length == 2) {
+      final allowedForBase = limit - highlight.length - 3; // " | "
+      if (allowedForBase <= 0) {
+        if (highlight.length <= limit) {
+          return highlight;
+        }
+        return highlight.substring(0, limit - 1).trimRight() + '…';
+      }
+      var trimmedBase = base;
+      if (trimmedBase.length > allowedForBase) {
+        trimmedBase = trimmedBase.substring(0, allowedForBase).trimRight();
+        if (!trimmedBase.endsWith('…')) {
+          trimmedBase = trimmedBase.endsWith('.')
+              ? '${trimmedBase.substring(0, trimmedBase.length - 1)}…'
+              : '$trimmedBase…';
+        }
+      }
+      summary = '$trimmedBase | $highlight';
+      if (summary.length <= limit) return summary;
+    }
+
+    final trimmed = summary.substring(0, limit).trimRight();
+    if (trimmed.endsWith('…')) return trimmed;
+    if (trimmed.endsWith('.')) return trimmed;
+    return '$trimmed…';
   }
 
   double get caloriesPerServing =>
