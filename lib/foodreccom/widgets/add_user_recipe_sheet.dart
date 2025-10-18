@@ -18,6 +18,8 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   final _ingredients = TextEditingController();
   final _steps = TextEditingController();
   final _imageUrl = TextEditingController();
+  final _servingsCtrl = TextEditingController(text: '2');
+  final _cookMinCtrl = TextEditingController(text: '20');
   int _servings = 2;
   int _cookMin = 20;
 
@@ -28,103 +30,139 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
     _ingredients.dispose();
     _steps.dispose();
     _imageUrl.dispose();
+    _servingsCtrl.dispose();
+    _cookMinCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-        left: 16,
-        right: 16,
-        top: 12,
-      ),
-      child: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[400],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text('เพิ่มเมนูของฉัน',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _name,
-                decoration: const InputDecoration(labelText: 'ชื่อเมนู (จำเป็น)'),
-                validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'กรุณากรอกชื่อเมนู'
-                    : null,
-              ),
-              TextFormField(
-                controller: _desc,
-                decoration: const InputDecoration(labelText: 'คำอธิบาย (สั้นๆ)')
-              ),
-              TextFormField(
-                controller: _imageUrl,
-                decoration: const InputDecoration(labelText: 'ลิงก์รูปภาพ (ไม่บังคับ)')
-              ),
-              const SizedBox(height: 8),
-              Row(
+    final media = MediaQuery.of(context);
+    final bottomInset = media.viewInsets.bottom;
+    return SafeArea(
+      top: false,
+      child: SizedBox(
+        height: media.size.height,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 12,
+            bottom: bottomInset,
+          ),
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: TextFormField(
-                      initialValue: '2',
-                      decoration: const InputDecoration(labelText: 'เสิร์ฟ (ที่)'),
-                      keyboardType: TextInputType.number,
-                      onChanged: (v) => _servings = int.tryParse(v) ?? 2,
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[400],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      initialValue: '20',
-                      decoration: const InputDecoration(labelText: 'เวลาทำ (นาที)'),
-                      keyboardType: TextInputType.number,
-                      onChanged: (v) => _cookMin = int.tryParse(v) ?? 20,
+                  const SizedBox(height: 12),
+                  const Text('เพิ่มเมนูของฉัน',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _name,
+                    decoration:
+                        const InputDecoration(labelText: 'ชื่อเมนู (จำเป็น)'),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'กรุณากรอกชื่อเมนู'
+                        : null,
+                  ),
+                  TextFormField(
+                    controller: _desc,
+                    decoration:
+                        const InputDecoration(labelText: 'คำอธิบาย (สั้นๆ)'),
+                  ),
+                  TextFormField(
+                    controller: _imageUrl,
+                    decoration: const InputDecoration(
+                        labelText: 'ลิงก์รูปภาพ (ไม่บังคับ)'),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _servingsCtrl,
+                          decoration:
+                              const InputDecoration(labelText: 'เสิร์ฟ (ที่)'),
+                          keyboardType: TextInputType.number,
+                          validator: (v) {
+                            final value = int.tryParse(v ?? '');
+                            if (value == null || value <= 0) {
+                              return 'กรุณาระบุจำนวนเสิร์ฟ';
+                            }
+                            return null;
+                          },
+                          onChanged: (v) => _servings = int.tryParse(v) ?? 2,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _cookMinCtrl,
+                          decoration: const InputDecoration(
+                              labelText: 'เวลาทำ (นาที)'),
+                          keyboardType: TextInputType.number,
+                          validator: (v) {
+                            final value = int.tryParse(v ?? '');
+                            if (value == null || value <= 0) {
+                              return 'กรุณาระบุเวลาทำ';
+                            }
+                            return null;
+                          },
+                          onChanged: (v) => _cookMin = int.tryParse(v) ?? 20,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _ingredients,
+                    maxLines: 5,
+                    decoration: const InputDecoration(
+                      labelText: 'วัตถุดิบ (บรรทัดละ 1 รายการ)',
+                      hintText: 'เช่น\nข้าว 1 ถ้วย\nไข่ 2 ฟอง\nหมูสับ 100 กรัม',
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'กรุณาระบุวัตถุดิบ'
+                        : null,
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _steps,
+                    maxLines: 6,
+                    decoration: const InputDecoration(
+                      labelText: 'วิธีทำ (บรรทัดละ 1 ขั้นตอน)',
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'กรุณาระบุขั้นตอนการทำ'
+                        : null,
+                  ),
+                  const SizedBox(height: 16),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: ElevatedButton.icon(
+                      onPressed: _save,
+                      icon: const Icon(Icons.save),
+                      label: const Text('บันทึก'),
                     ),
                   ),
+                  const SizedBox(height: 8),
                 ],
               ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _ingredients,
-                maxLines: 5,
-                decoration: const InputDecoration(
-                  labelText: 'วัตถุดิบ (บรรทัดละ 1 รายการ)',
-                  hintText: 'เช่น\nข้าว 1 ถ้วย\nไข่ 2 ฟอง\nหมูสับ 100 กรัม',
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _steps,
-                maxLines: 6,
-                decoration: const InputDecoration(
-                  labelText: 'วิธีทำ (บรรทัดละ 1 ขั้นตอน)',
-                ),
-              ),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerRight,
-                child: ElevatedButton.icon(
-                  onPressed: _save,
-                  icon: const Icon(Icons.save),
-                  label: const Text('บันทึก'),
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
+            ),
           ),
         ),
       ),
@@ -132,7 +170,19 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   }
 
   Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
+    final missing = _missingFields();
+    if (!_formKey.currentState!.validate()) {
+      if (missing.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('กรุณากรอก: ${missing.join(', ')}'),
+          ),
+        );
+      }
+      return;
+    }
+    _servings = int.tryParse(_servingsCtrl.text.trim()) ?? _servings;
+    _cookMin = int.tryParse(_cookMinCtrl.text.trim()) ?? _cookMin;
     final ingredients = _parseIngredients(_ingredients.text);
     final steps = _parseSteps(_steps.text);
     final baseRecipe = RecipeModel(
@@ -171,6 +221,18 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
         SnackBar(content: Text('บันทึกล้มเหลว: $e')),
       );
     }
+  }
+
+  List<String> _missingFields() {
+    final missing = <String>[];
+    if (_name.text.trim().isEmpty) missing.add('ชื่อเมนู');
+    final servings = int.tryParse(_servingsCtrl.text.trim());
+    if (servings == null || servings <= 0) missing.add('จำนวนเสิร์ฟ');
+    final cook = int.tryParse(_cookMinCtrl.text.trim());
+    if (cook == null || cook <= 0) missing.add('เวลาทำ');
+    if (_ingredients.text.trim().isEmpty) missing.add('วัตถุดิบ');
+    if (_steps.text.trim().isEmpty) missing.add('ขั้นตอนการทำ');
+    return missing;
   }
 
   List<RecipeIngredient> _parseIngredients(String text) {
