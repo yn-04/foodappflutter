@@ -127,6 +127,7 @@ class ShoppingItem {
   // ---------- helpers ----------
   static int _toInt(dynamic v) {
     if (v is int) return v;
+    if (v is num) return v.round();
     return int.tryParse(v?.toString() ?? '') ?? 0;
   }
 
