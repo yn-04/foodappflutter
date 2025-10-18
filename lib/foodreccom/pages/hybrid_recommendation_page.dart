@@ -95,12 +95,6 @@ class _HybridRecommendationPageState extends State<HybridRecommendationPage>
               );
             },
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.black),
-            onPressed: () {
-              context.read<HybridRecommendationProvider>().refresh();
-            },
-          ),
         ],
         bottom: TabBar(
           controller: _tabController,
@@ -123,6 +117,7 @@ class _HybridRecommendationPageState extends State<HybridRecommendationPage>
             child: Column(
               children: [
                 _buildStatusAndAnalysis(provider),
+                _buildCookingHistorySection(provider),
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
@@ -216,6 +211,121 @@ class _HybridRecommendationPageState extends State<HybridRecommendationPage>
     );
   }
 
+  Widget _buildCookingHistorySection(HybridRecommendationProvider provider) {
+    final history = provider.cookingHistory;
+    if (history.isEmpty) return const SizedBox.shrink();
+
+    final recent = [...history]
+      ..sort((a, b) => b.cookedAt.compareTo(a.cookedAt));
+    final display = recent.take(10).toList();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.history, color: Colors.orange[600]),
+              const SizedBox(width: 8),
+              const Text(
+                'เมนูที่เคยทำล่าสุด',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 130,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: display.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final item = display[index];
+                return Container(
+                  width: 170,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.orange[200]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.recipeName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Colors.orange[900],
+                        ),
+                      ),
+                      const Spacer(),
+                      Row(
+                        children: [
+                          const Icon(Icons.people_alt, size: 14, color: Colors.grey),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${item.servingsMade} เสิร์ฟ',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(Icons.calendar_today_outlined,
+                              size: 14, color: Colors.grey),
+                          const SizedBox(width: 4),
+                          Text(
+                            _formatThaiDate(item.cookedAt),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatThaiDate(DateTime date) {
+    const months = [
+      'ม.ค.',
+      'ก.พ.',
+      'มี.ค.',
+      'เม.ย.',
+      'พ.ค.',
+      'มิ.ย.',
+      'ก.ค.',
+      'ส.ค.',
+      'ก.ย.',
+      'ต.ค.',
+      'พ.ย.',
+      'ธ.ค.',
+    ];
+    final month = months[date.month - 1];
+    final buddhistYear = date.year + 543;
+    return '${date.day} $month ${buddhistYear.toString().substring(2)}';
+  }
+
   Widget _buildScoreItem(String label, String value, Color color) {
     return Column(
       children: [
@@ -271,6 +381,7 @@ class _HybridRecommendationPageState extends State<HybridRecommendationPage>
         return RecipeCard(
           recipe: recipe,
           showSourceBadge: true,
+          compact: true,
           onTap: () => _showRecipeDetail(recipe),
         );
       },
@@ -311,8 +422,8 @@ class _HybridRecommendationPageState extends State<HybridRecommendationPage>
               subtitle: Slider(
                 value: provider.maxExternalRecipes.toDouble(),
                 min: 1,
-                max: 10,
-                divisions: 9,
+                max: 15,
+                divisions: 14,
                 label: '${provider.maxExternalRecipes}',
                 onChanged: (value) {
                   provider.setExternalRecipeSettings(
