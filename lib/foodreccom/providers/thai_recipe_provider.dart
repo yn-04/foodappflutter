@@ -1,12 +1,14 @@
+//lib/foodreccom/providers/thai_recipe_provider.dart
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../models/ingredient_model.dart';
 import '../models/recipe/recipe.dart';
-import '../services/enhanced_ai_recommendation_service.dart';
 import '../services/hybrid_recipe_service.dart';
 import '../services/ai_translation_service.dart';
+import '../utils/ingredient_utils.dart';
+import '../utils/ingredient_translator.dart';
 
 class ThaiRecipeProvider extends ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -74,10 +76,14 @@ class ThaiRecipeProvider extends ChangeNotifier {
         _error = result.error ?? 'ไม่สามารถดึงเมนูแนะนำได้';
         _recommendations = [];
       } else {
+        // ✅ คำนวณวัตถุดิบที่ขาดเทียบกับสต็อกก่อน แล้วค่อยแปลไทย
+        final withMissing = result.combinedRecommendations.map((r) {
+          final missing = _computeMissingIngredients(r);
+          return r.copyWith(missingIngredients: missing);
+        }).toList();
+
         // ✅ แปลไทยทุกเมนู
-        _recommendations = await _translateRecipes(
-          result.combinedRecommendations,
-        );
+        _recommendations = await _translateRecipes(withMissing);
       }
     } catch (e) {
       _error = 'เกิดข้อผิดพลาด: $e';
@@ -87,6 +93,44 @@ class ThaiRecipeProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  List<String> _computeMissingIngredients(RecipeModel recipe) {
+    final thaiInv = _ingredients.map((i) => _norm(i.name)).toList();
+    final engInv = IngredientTranslator.translateList(
+      _ingredients.map((i) => i.name).toList(),
+    ).map(_norm).toList();
+
+    bool matchAny(String need) {
+      final nThai = _norm(need);
+      if (thaiInv.any((have) => ingredientsMatch(have, nThai))) return true;
+      final nEng = _norm(IngredientTranslator.translate(need));
+      if (engInv.any((have) => have.contains(nEng) || nEng.contains(have))) {
+        return true;
+      }
+      return false;
+    }
+
+    final missing = <String>[];
+    for (final ing in recipe.ingredients) {
+      final need = ing.name.trim();
+      if (need.isEmpty) continue;
+      if (!matchAny(need)) missing.add(need);
+    }
+    final seen = <String>{};
+    final unique = <String>[];
+    for (final m in missing) {
+      final key = _norm(m);
+      if (seen.add(key)) unique.add(m);
+    }
+    return unique;
+  }
+
+  String _norm(String s) {
+    var out = s.trim().toLowerCase();
+    out = out.replaceAll(RegExp(r"\(.*?\)"), "");
+    out = out.replaceAll(RegExp(r"\s+"), " ").trim();
+    return out;
   }
 
   /// ฟังก์ชันแปลภาษาไทยทุก field สำคัญ

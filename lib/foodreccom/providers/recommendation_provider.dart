@@ -1,6 +1,5 @@
 //lib/foodreccom/providers/recommendation_provider.dart
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import '../models/ingredient_model.dart';
 import '../models/recipe/recipe.dart';
 import '../services/ai_recommendation_service.dart';
