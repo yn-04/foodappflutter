@@ -3,6 +3,66 @@ import '../utils/date_utils.dart';
 import 'recipe/recipe.dart';
 import 'recipe/used_ingredient.dart';
 
+class HistoryIngredientPortion {
+  final String name;
+  final double amount;
+  final String unit;
+  final double canonicalAmount;
+  final String canonicalUnit;
+  final bool isOptional;
+
+  const HistoryIngredientPortion({
+    required this.name,
+    required this.amount,
+    required this.unit,
+    required this.canonicalAmount,
+    required this.canonicalUnit,
+    required this.isOptional,
+  });
+
+  factory HistoryIngredientPortion.fromMap(Map<String, dynamic>? map) {
+    if (map == null) {
+      return const HistoryIngredientPortion(
+        name: '',
+        amount: 0,
+        unit: '',
+        canonicalAmount: 0,
+        canonicalUnit: 'gram',
+        isOptional: false,
+      );
+    }
+    double _toDouble(dynamic value) {
+      if (value is num) return value.toDouble();
+      return double.tryParse(value?.toString() ?? '') ?? 0;
+    }
+
+    final canonicalRaw = map.containsKey('canonical_amount')
+        ? map['canonical_amount']
+        : map['canonical_required_amount'];
+    return HistoryIngredientPortion(
+      name: map['name'] ?? '',
+      amount: _toDouble(map['amount'] ?? map['required_amount']),
+      unit: map['unit'] ?? '',
+      canonicalAmount: _toDouble(
+        canonicalRaw ?? map['amount'] ?? map['required_amount'],
+      ),
+      canonicalUnit: map['canonical_unit'] ?? 'gram',
+      isOptional: map['is_optional'] ?? false,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'name': name,
+      'amount': amount,
+      'unit': unit,
+      'canonical_amount': canonicalAmount,
+      'canonical_unit': canonicalUnit,
+      'is_optional': isOptional,
+    };
+  }
+}
+
 class CookingHistory {
   final String id;
   final String recipeId;
@@ -15,6 +75,9 @@ class CookingHistory {
   final int rating;
   final String? notes;
   final String userId;
+  final List<HistoryIngredientPortion> recipeIngredientPortions;
+  final NutritionInfo? recipeNutritionPerServing;
+  final List<CookingStep> recipeSteps;
 
   CookingHistory({
     required this.id,
@@ -28,6 +91,9 @@ class CookingHistory {
     required this.rating,
     this.notes,
     required this.userId,
+    this.recipeIngredientPortions = const [],
+    this.recipeNutritionPerServing,
+    this.recipeSteps = const [],
   });
 
   factory CookingHistory.fromFirestore(Map<String, dynamic> data) {
@@ -45,6 +111,27 @@ class CookingHistory {
       rating: data['rating'] ?? 0,
       notes: data['notes'],
       userId: data['user_id'] ?? '',
+      recipeIngredientPortions:
+          (data['recipe_ingredient_portions'] as List? ?? []).map((item) {
+        final map = (item is Map)
+            ? Map<String, dynamic>.from(item as Map)
+            : null;
+        return HistoryIngredientPortion.fromMap(map);
+      }).toList(),
+      recipeNutritionPerServing:
+          data['recipe_nutrition_per_serving'] != null
+              ? NutritionInfo.fromMap(
+                  Map<String, dynamic>.from(
+                    data['recipe_nutrition_per_serving'] as Map,
+                  ),
+                )
+              : null,
+      recipeSteps: (data['recipe_steps'] as List? ?? []).map((step) {
+        final map = (step is Map)
+            ? Map<String, dynamic>.from(step as Map)
+            : <String, dynamic>{};
+        return CookingStep.fromJson(map);
+      }).toList(),
     );
   }
 
@@ -61,6 +148,11 @@ class CookingHistory {
       'rating': rating,
       'notes': notes,
       'user_id': userId,
+      'recipe_ingredient_portions':
+          recipeIngredientPortions.map((e) => e.toMap()).toList(),
+      if (recipeNutritionPerServing != null)
+        'recipe_nutrition_per_serving': recipeNutritionPerServing!.toMap(),
+      'recipe_steps': recipeSteps.map((e) => e.toJson()).toList(),
     };
   }
 }

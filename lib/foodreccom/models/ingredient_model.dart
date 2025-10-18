@@ -1,4 +1,6 @@
 // lib/foodreccom/models/ingredient_model.dart
+import 'package:my_app/foodreccom/constants/nutrition_thresholds.dart';
+
 import '../utils/date_utils.dart';
 
 class IngredientModel {
@@ -13,6 +15,10 @@ class IngredientModel {
   final int usageCount;
   final DateTime? lastUsedDate;
   final double utilizationRate;
+  final double? fatPer100g;
+  final double? saturatedFatPer100g;
+  final double? sugarPer100g;
+  final double? saltPer100g;
 
   IngredientModel({
     required this.name,
@@ -26,6 +32,10 @@ class IngredientModel {
     this.usageCount = 0,
     this.lastUsedDate,
     this.utilizationRate = 0.0,
+    this.fatPer100g,
+    this.saturatedFatPer100g,
+    this.sugarPer100g,
+    this.saltPer100g,
   }) : addedDate = addedDate ?? DateTime.now();
 
   factory IngredientModel.fromFirestore(Map<String, dynamic> data) {
@@ -41,6 +51,10 @@ class IngredientModel {
       usageCount: data['usage_count'] ?? 0,
       lastUsedDate: parseDate(data['last_used_date']),
       utilizationRate: (data['utilization_rate'] ?? 0.0).toDouble(),
+      fatPer100g: _toDouble(data['fat_per_100g']),
+      saturatedFatPer100g: _toDouble(data['saturated_fat_per_100g']),
+      sugarPer100g: _toDouble(data['sugar_per_100g']),
+      saltPer100g: _toDouble(data['salt_per_100g']),
     );
   }
 
@@ -57,23 +71,40 @@ class IngredientModel {
       'usage_count': usageCount,
       'last_used_date': lastUsedDate?.toIso8601String(),
       'utilization_rate': utilizationRate,
+      if (fatPer100g != null) 'fat_per_100g': fatPer100g,
+      if (saturatedFatPer100g != null) 'saturated_fat_per_100g': saturatedFatPer100g,
+      if (sugarPer100g != null) 'sugar_per_100g': sugarPer100g,
+      if (saltPer100g != null) 'salt_per_100g': saltPer100g,
     };
   }
 
   int get daysToExpiry {
     if (expiryDate == null) return 999;
-    final now = DateTime.now();
-    final difference = expiryDate!.difference(now).inDays;
+    final today = _dateOnly(DateTime.now());
+    final expiry = _dateOnly(expiryDate!);
+    final difference = expiry.difference(today).inDays;
     return difference < 0 ? 0 : difference;
   }
 
   bool get isNearExpiry => daysToExpiry <= 3;
   bool get isUrgentExpiry => daysToExpiry <= 1;
-  bool get isExpired =>
-      expiryDate != null && expiryDate!.isBefore(DateTime.now());
-  int get daysToExpiryRaw =>
-      expiryDate == null ? 999 : expiryDate!.difference(DateTime.now()).inDays;
+  bool get isExpired {
+    if (expiryDate == null) return false;
+    final today = _dateOnly(DateTime.now());
+    final expiry = _dateOnly(expiryDate!);
+    return expiry.isBefore(today);
+  }
+
+  int get daysToExpiryRaw {
+    if (expiryDate == null) return 999;
+    final today = _dateOnly(DateTime.now());
+    final expiry = _dateOnly(expiryDate!);
+    return expiry.difference(today).inDays;
+  }
+
   bool get isFrequentlyUsed => usageCount >= 5 || utilizationRate >= 0.7;
+
+  DateTime _dateOnly(DateTime value) => DateTime(value.year, value.month, value.day);
 
   bool get isUnderutilized {
     if (usageCount == 0) return true;
@@ -112,6 +143,7 @@ class IngredientModel {
   }
 
   Map<String, dynamic> toAIFormat() {
+    final freq = consumptionFrequency;
     return {
       'name': name,
       'quantity': quantity,
@@ -128,6 +160,12 @@ class IngredientModel {
       'utilization_rate': utilizationRate,
       'price': price ?? 0,
       'days_since_added': DateTime.now().difference(addedDate).inDays,
+      if (fatPer100g != null) 'fat_per_100g': fatPer100g,
+      if (saturatedFatPer100g != null) 'saturated_fat_per_100g': saturatedFatPer100g,
+      if (sugarPer100g != null) 'sugar_per_100g': sugarPer100g,
+      if (saltPer100g != null) 'salt_per_100g': saltPer100g,
+      if (freq != null) 'consumption_frequency': _frequencyToken(freq),
+      if (consumptionReason != null) 'consumption_reason': consumptionReason,
     };
   }
 
@@ -149,6 +187,44 @@ class IngredientModel {
       usageCount: usageCount + (additionalUsage ?? 0),
       lastUsedDate: lastUsed ?? DateTime.now(),
       utilizationRate: newUtilizationRate ?? utilizationRate,
+      fatPer100g: fatPer100g,
+      saturatedFatPer100g: saturatedFatPer100g,
+      sugarPer100g: sugarPer100g,
+      saltPer100g: saltPer100g,
     );
+  }
+
+  ConsumptionFrequency? get consumptionFrequency =>
+      NutritionThresholds.frequencyFromValues(
+        fat: fatPer100g,
+        saturates: saturatedFatPer100g,
+        sugar: sugarPer100g,
+        salt: saltPer100g,
+      );
+
+  String? get consumptionReason => NutritionThresholds.reasonFromValues(
+        fat: fatPer100g,
+        saturates: saturatedFatPer100g,
+        sugar: sugarPer100g,
+        salt: saltPer100g,
+      );
+
+  static double? _toDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString());
+  }
+
+  String _frequencyToken(ConsumptionFrequency frequency) {
+    switch (frequency) {
+      case ConsumptionFrequency.daily:
+        return 'daily';
+      case ConsumptionFrequency.oncePerDay:
+        return 'once_per_day';
+      case ConsumptionFrequency.weekly:
+        return 'weekly';
+      case ConsumptionFrequency.occasional:
+        return 'occasional';
+    }
   }
 }

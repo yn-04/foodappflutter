@@ -1,8 +1,12 @@
 class RecipeFilterOptions {
   final List<String> cuisineEn; // e.g., ['chinese','japanese','korean'] lowercased
-  final Set<String> dietGoals; // 'vegan','high-fiber','high-protein','low-carb'
+  final Set<String> dietGoals; // e.g., 'vegan','vegetarian','ketogenic','low-fat','gluten-free','dairy-free','high-protein','low-carb'
   final int? minCalories;
   final int? maxCalories;
+  // Macro thresholds (per serving)
+  final int? minProtein; // grams
+  final int? maxCarbs;   // grams
+  final int? maxFat;     // grams
 
   // If provided, these ingredients override AI selection for RapidAPI
   final List<String>? manualIngredientNames;
@@ -12,6 +16,9 @@ class RecipeFilterOptions {
     this.dietGoals = const {},
     this.minCalories,
     this.maxCalories,
+    this.minProtein,
+    this.maxCarbs,
+    this.maxFat,
     this.manualIngredientNames,
   });
 
@@ -20,6 +27,9 @@ class RecipeFilterOptions {
     Set<String>? dietGoals,
     int? minCalories,
     int? maxCalories,
+    int? minProtein,
+    int? maxCarbs,
+    int? maxFat,
     List<String>? manualIngredientNames,
   }) {
     return RecipeFilterOptions(
@@ -27,6 +37,9 @@ class RecipeFilterOptions {
       dietGoals: dietGoals ?? this.dietGoals,
       minCalories: minCalories ?? this.minCalories,
       maxCalories: maxCalories ?? this.maxCalories,
+      minProtein: minProtein ?? this.minProtein,
+      maxCarbs: maxCarbs ?? this.maxCarbs,
+      maxFat: maxFat ?? this.maxFat,
       manualIngredientNames:
           manualIngredientNames ?? this.manualIngredientNames,
     );
@@ -53,9 +66,26 @@ String normalizeDietGoal(String input) {
   switch (input.trim().toLowerCase()) {
     case 'vegan':
       return 'vegan';
-    case 'high-fiber':
-    case 'ใยอาหารสูง':
-      return 'high-fiber';
+    case 'vegetarian':
+    case 'มังสวิรัติ':
+      return 'vegetarian';
+    case 'lacto-vegetarian':
+      return 'lacto-vegetarian';
+    case 'ovo-vegetarian':
+      return 'ovo-vegetarian';
+    case 'ketogenic':
+      return 'ketogenic';
+    case 'paleo':
+      return 'paleo';
+    case 'low-fat':
+    case 'ไขมันต่ำ':
+      return 'low-fat';
+    case 'gluten-free':
+    case 'ปลอดกลูเตน':
+      return 'gluten-free';
+    case 'dairy-free':
+    case 'ปลอดนม':
+      return 'dairy-free';
     case 'high-protein':
     case 'โปรตีนสูง':
       return 'high-protein';
@@ -66,4 +96,3 @@ String normalizeDietGoal(String input) {
       return input.trim().toLowerCase();
   }
 }
-
