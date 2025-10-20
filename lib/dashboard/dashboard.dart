@@ -43,6 +43,7 @@ class _DashboardTabState extends State<DashboardTab>
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _cookSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userSub;
   Timer? _refreshDebounce;
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _notificationsStream;
 
   // ===== ข้อความภาษาไทย =====
   static const _tHello = 'สวัสดี';
@@ -79,6 +80,7 @@ class _DashboardTabState extends State<DashboardTab>
     });
 
     _setupRealtimeListeners();
+    _initNotificationStream();
   }
 
   void _setupRealtimeListeners() {
@@ -1333,6 +1335,55 @@ class _DashboardTabState extends State<DashboardTab>
       _usernameFuture = f2;
     });
     await Future.wait([f1, f2]);
+    await _initNotificationStream();
+  }
+
+  Future<void> _initNotificationStream() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      if (mounted) {
+        setState(() => _notificationsStream = null);
+      }
+      return;
+    }
+
+    try {
+      final userDoc =
+          await _firestore.collection('users').doc(user.uid).get();
+      final data = userDoc.data();
+      final rawFamilyId =
+          (data?['familyId'] ?? data?['family_id']) as String?;
+      final fid = rawFamilyId != null && rawFamilyId.trim().isNotEmpty
+          ? rawFamilyId.trim()
+          : null;
+
+      CollectionReference<Map<String, dynamic>> baseCollection;
+      if (fid != null) {
+        baseCollection = _firestore
+            .collection('notifications')
+            .doc(fid)
+            .collection('items');
+      } else {
+        baseCollection = _firestore
+            .collection('user_notifications')
+            .doc(user.uid)
+            .collection('items');
+      }
+
+      final stream =
+          baseCollection.where('type', isEqualTo: 'expiry').snapshots();
+      if (!mounted) return;
+      setState(() => _notificationsStream = stream);
+    } catch (_) {
+      final fallback = _firestore
+          .collection('user_notifications')
+          .doc(user.uid)
+          .collection('items')
+          .where('type', isEqualTo: 'expiry')
+          .snapshots();
+      if (!mounted) return;
+      setState(() => _notificationsStream = fallback);
+    }
   }
 
   @override
@@ -1419,13 +1470,82 @@ class _DashboardTabState extends State<DashboardTab>
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {
-              Navigator.of(context, rootNavigator: true).push(
-                MaterialPageRoute(
-                  builder: (_) => const NotificationsCenterScreen(),
-                ),
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _notificationsStream,
+            builder: (context, snapshot) {
+              final docs = snapshot.data?.docs ??
+                  <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+              final now = DateTime.now();
+              final todayOnly = DateTime(now.year, now.month, now.day);
+
+              int? resolveDaysLeft(Map<String, dynamic> data) {
+                final raw = (data['daysLeft'] as num?)?.toInt();
+                if (raw != null) return raw;
+                final expiryRaw = data['expiresOn'];
+                DateTime? expiry;
+                if (expiryRaw is Timestamp) {
+                  expiry = expiryRaw.toDate();
+                } else if (expiryRaw is DateTime) {
+                  expiry = expiryRaw;
+                }
+                if (expiry == null) return null;
+                final onlyExpiry =
+                    DateTime(expiry.year, expiry.month, expiry.day);
+                return onlyExpiry.difference(todayOnly).inDays;
+              }
+
+              var count = 0;
+              for (final doc in docs) {
+                final data = doc.data();
+                if ((data['type'] ?? '') != 'expiry') continue;
+                final dl = resolveDaysLeft(data);
+                if (dl != null && dl >= 0 && dl <= 3) {
+                  count++;
+                }
+              }
+
+              final badgeText = count > 99 ? '99+' : '$count';
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications_outlined),
+                    onPressed: () {
+                      Navigator.of(context, rootNavigator: true).push(
+                        MaterialPageRoute(
+                          builder: (_) => const NotificationsCenterScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  if (count > 0)
+                    Positioned(
+                      right: 6,
+                      top: 6,
+                      child: IgnorePointer(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          constraints: const BoxConstraints(minWidth: 18),
+                          child: Text(
+                            badgeText,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               );
             },
           ),

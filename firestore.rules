@@ -1,0 +1,333 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* ============== Helpers ============== */
+    function isSignedIn() { return request.auth != null; }
+    function isSelf(userId) { return isSignedIn() && request.auth.uid == userId; }
+
+    // users/{currentUser} (อาจไม่มีถ้ายังไม่สร้าง)
+    function me() {
+      return isSignedIn()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : {};
+    }
+
+    function resolveFamilyId(data) {
+      return (data != null && (data.familyId is string) && (data.familyId != ''))
+        ? data.familyId
+        : (
+            (data != null && (data.family_id is string) && (data.family_id != ''))
+              ? data.family_id
+              : null
+          );
+    }
+    function resolveFamilyRole(data) {
+      return (data != null && (data.familyRole is string) && (data.familyRole != ''))
+        ? data.familyRole
+        : (
+            (data != null && (data.family_role is string) && (data.family_role != ''))
+              ? data.family_role
+              : null
+          );
+    }
+    function isNullOrEmptyString(v) { return (v == null) || (v == ''); }
+
+    function myFamilyId()   { return resolveFamilyId(me()); }
+    function myFamilyRole() { return resolveFamilyRole(me()); } // 'admin' | 'member' | null
+
+    function resourceFamilyId(res) { return res == null ? null : resolveFamilyId(res.data); }
+    function requestFamilyId() {
+      return request.resource == null ? null : resolveFamilyId(request.resource.data);
+    }
+
+    // เป็นสมาชิกบ้าน fid (เช็คจาก user.familyId หรือ mirror/member doc)
+    function hasMemberDoc(fid, uid) {
+      return
+        exists(/databases/$(database)/documents/family_roles/$(fid)/members/$(uid)) ||
+        exists(/databases/$(database)/documents/family_members/$(fid + '_' + uid));
+    }
+    function isMember(fid) {
+      return isSignedIn()
+        && (fid is string) && (fid != '')
+        && (myFamilyId() == fid || hasMemberDoc(fid, request.auth.uid));
+    }
+
+    function roleFromMirror(fid, uid) {
+      return exists(/databases/$(database)/documents/family_roles/$(fid)/members/$(uid))
+        ? get(/databases/$(database)/documents/family_roles/$(fid)/members/$(uid)).data.role
+        : null;
+    }
+    function isAdmin(fid) {
+      return isSignedIn() && (fid is string) && (fid != '') && (
+        roleFromMirror(fid, request.auth.uid) == 'admin' ||
+        (
+          exists(/databases/$(database)/documents/family_members/$(fid + '_' + request.auth.uid)) &&
+          get(/databases/$(database)/documents/family_members/$(fid + '_' + request.auth.uid)).data.role == 'admin'
+        ) ||
+        (myFamilyId() == fid && myFamilyRole() == 'admin')
+      );
+    }
+
+    function inFamily(fid) { return isSignedIn() && myFamilyId() == fid; }
+
+    // กันเปลี่ยนค่า keys สำคัญตอน update
+    function keepUnchanged(keys) {
+      return resource == null || !request.resource.data.diff(resource.data).changedKeys().hasAny(keys);
+    }
+    // familyId ใน request ต้องตรงกับ resource (หรือเดิมไม่มีแล้วตั้งให้ตรง path/fid)
+    function keepFamilyIdOnUpdate() {
+      return resource == null || (resourceFamilyId(resource) == requestFamilyId());
+    }
+    function keepFamilyIdStable(fid) {
+      return resource == null
+        || (
+          (resourceFamilyId(resource) == requestFamilyId()) ||
+          (isNullOrEmptyString(resourceFamilyId(resource)) && requestFamilyId() == fid)
+        );
+    }
+
+    function isValidFamilyId(fid) { return (fid is string) && (fid != ''); }
+    function resourceBelongsToMyFamily(res) {
+      return res != null && isValidFamilyId(resourceFamilyId(res)) && isMember(resourceFamilyId(res));
+    }
+
+    /* ============== Collection-group READ for raw_materials ============== */
+    // อนุญาตให้อ่านทุกที่ที่ชื่อคอลเลกชัน raw_materials (เช่น collectionGroup)
+    match /{path=**}/raw_materials/{itemId} {
+      allow read: if isSignedIn() && (
+        (resource.data.ownerId is string && resource.data.ownerId == request.auth.uid) ||
+        (resource.data.owner_id is string && resource.data.owner_id == request.auth.uid) ||
+        (resource.data.familyId is string && resource.data.familyId == myFamilyId()) ||
+        (resource.data.family_id is string && resource.data.family_id == myFamilyId())
+      );
+    }
+
+    /* ============== USERS ============== */
+    match /users/{uid} {
+      // โปรไฟล์
+      allow get: if isSelf(uid) || resourceBelongsToMyFamily(resource);
+      allow list: if false;
+      allow create, delete: if isSelf(uid);
+
+      // คลังวัตถุดิบของผู้ใช้
+      match /raw_materials/{itemId} {
+
+        // READ: เจ้าของ หรือสมาชิกบ้านเดียวกับ familyId ในเอกสาร
+        allow read: if isSignedIn() && (
+          uid == request.auth.uid ||
+          (resource.data.familyId is string && isMember(resource.data.familyId)) ||
+          (resource.data.family_id is string && isMember(resource.data.family_id))
+        );
+
+        // CREATE: เจ้าของเท่านั้น + บังคับ familyId-sync
+        allow create: if isSignedIn() && uid == request.auth.uid
+          && (
+            // ผู้ใช้ยังไม่มีบ้าน → ห้ามส่ง familyId
+            (myFamilyId() == null &&
+              isNullOrEmptyString(request.resource.data.familyId) &&
+              isNullOrEmptyString(request.resource.data.family_id)
+            )
+            ||
+            // ผู้ใช้มีบ้าน → ต้องส่ง familyId ให้ตรงบ้านตัวเอง
+            (myFamilyId() != null &&
+              (
+                request.resource.data.familyId == myFamilyId() ||
+                request.resource.data.family_id == myFamilyId()
+              )
+            )
+          )
+          && (
+            request.resource.data.ownerId == request.auth.uid ||
+            request.resource.data.owner_id == request.auth.uid
+          );
+
+        // UPDATE:
+        // - เจ้าของ: ห้ามเปลี่ยน ownerId (อนุญาต sync familyId ได้ผ่านแอปฝั่ง client โดยควบคุมเอง)
+        // - สมาชิกบ้านเดียวกัน: แก้ได้แต่ห้ามแตะ ownerId และ familyId
+        allow update: if isSignedIn() && (
+          (uid == request.auth.uid && keepUnchanged(['ownerId','owner_id'])) ||
+          ((resource.data.familyId is string && isMember(resource.data.familyId)) &&
+            keepUnchanged(['ownerId','owner_id','familyId','family_id'])) ||
+          ((resource.data.family_id is string && isMember(resource.data.family_id)) &&
+            keepUnchanged(['ownerId','owner_id','familyId','family_id']))
+        );
+
+        // DELETE: เจ้าของ หรือสมาชิกบ้านของ item
+        allow delete: if isSignedIn() && (
+          uid == request.auth.uid ||
+          (resource.data.familyId is string && isMember(resource.data.familyId)) ||
+          (resource.data.family_id is string && isMember(resource.data.family_id))
+        );
+
+        // usage logs ใต้ item
+        match /usage_logs/{logId} {
+          allow read, create, update, delete: if isSelf(uid)
+            || ( isSignedIn() && resourceBelongsToMyFamily(
+                   get(/databases/$(database)/documents/users/$(uid)/raw_materials/$(itemId))
+                 )
+               );
+        }
+      }
+
+      // แอดมินบ้านเดิมของผู้ใช้ ล้างสมาชิกได้ (set familyId, familyRole เป็นว่าง)
+      allow update: if isSignedIn()
+        && resourceBelongsToMyFamily(resource)
+        && (myFamilyRole() == 'admin')
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly(['familyId','familyRole','family_id','family_role','updatedAt'])
+        && isNullOrEmptyString(requestFamilyId())
+        && (
+          (!('familyRole' in request.resource.data) || isNullOrEmptyString(request.resource.data.familyRole)) &&
+          (!('family_role' in request.resource.data) || isNullOrEmptyString(request.resource.data.family_role))
+        );
+
+      // catch-all ใต้ users/*
+      match /{sub=**} { allow read, write: if isSelf(uid); }
+    }
+
+    /* ============== FAMILIES ============== */
+    match /families/{fid} {
+      allow read: if inFamily(fid);
+      allow create: if isSignedIn() && (request.resource.data.createdBy == request.auth.uid);
+      allow update, delete: if isAdmin(fid);
+    }
+
+    /* ============== FAMILY ROLES (mirror) ============== */
+    match /family_roles/{fid} {
+      allow read: if isMember(fid);
+      allow write: if isAdmin(fid);
+
+      match /members/{memberUid} {
+        allow read: if isMember(fid) || (isSignedIn() && request.auth.uid == memberUid);
+        allow create, update, delete: if isAdmin(fid);
+      }
+    }
+
+    /* ============== FAMILY INVITES ============== */
+    match /family_invites/{code} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && (requestFamilyId() is string)
+        && (request.resource.data.createdBy == request.auth.uid)
+        && isMember(requestFamilyId());
+      allow update, delete: if isAdmin(resourceFamilyId(resource));
+    }
+
+    /* ============== FAMILY MEMBERS ============== */
+    match /family_members/{memberId} {
+      // อ่าน: สมาชิกบ้านตาม familyId ในเอกสาร หรือถ้า resource ระบุ userId และเป็นเจ้าของเอง
+      allow read: if isSignedIn() &&
+        ( (resource != null && resource.data.userId == request.auth.uid) ||
+          isMember(resourceFamilyId(resource)) );
+
+      // เพิ่มสมาชิก
+      allow create: if
+        ( isAdmin(requestFamilyId()) && (requestFamilyId() == myFamilyId()) )
+        || ( isSignedIn() && (request.resource.data.userId == request.auth.uid)
+            && (request.resource.data.role == 'admin') && (requestFamilyId() is string) )
+        || ( isSignedIn()
+             && (request.resource.data.userId == request.auth.uid)
+             && exists(/databases/$(database)/documents/families/$(requestFamilyId()))
+             && (myFamilyId() == null || myFamilyId() == requestFamilyId())
+           );
+
+      // แก้ไข: แอดมิน + ห้ามเปลี่ยน familyId + role ต้อง valid ถ้ามีการแก้
+      allow update: if isAdmin(resourceFamilyId(resource))
+        && keepFamilyIdOnUpdate()
+        && (
+          !(request.resource.data.diff(resource.data).changedKeys().hasAny(['role'])) ||
+          (request.resource.data.role is string && (request.resource.data.role == 'member' || request.resource.data.role == 'admin'))
+        );
+
+      // ลบ: แอดมินลบคนอื่นได้ หรือสมาชิกลบตัวเอง (ตามเงื่อนไขเดิม)
+      allow delete: if
+        ( isAdmin(resourceFamilyId(resource)) && (resource.data.userId != request.auth.uid) )
+        ||
+        ( isSignedIn() && (resource.data.userId == request.auth.uid) && isMember(resourceFamilyId(resource)) );
+    }
+
+    /* ============== FAMILY STATS/SETTINGS ============== */
+    match /family_stats/{fid}    { allow read: if isMember(fid); allow write: if isAdmin(fid); }
+    match /family_settings/{fid} { allow read: if isMember(fid); allow write: if isAdmin(fid); }
+
+    /* ============== EMERGENCY CONTACTS ============== */
+    match /emergency_contacts/{fid} {
+      allow read: if isMember(fid); allow write: if isAdmin(fid);
+      match /contacts/{contactId} {
+        allow read: if isMember(fid); allow write: if isAdmin(fid);
+      }
+    }
+
+    /* ============== FAMILY BACKUPS ============== */
+    match /family_backups/{fid} {
+      allow read: if isMember(fid); allow write: if isAdmin(fid);
+      match /backups/{backupId} {
+        allow read: if isMember(fid); allow write: if isAdmin(fid);
+      }
+    }
+
+    /* ============== IN-APP NOTIFICATIONS ============== */
+    match /notifications/{familyId} {
+      match /items/{notifId} {
+        allow read: if isMember(familyId);
+
+        // สร้าง: ต้องเป็นสมาชิกบ้านนี้ และถ้าส่ง familyId มาต้องตรง path
+        allow create: if isMember(familyId) &&
+          ( isNullOrEmptyString(requestFamilyId()) || requestFamilyId() == familyId );
+
+        // แก้ไข: ต้องเป็นสมาชิกบ้านนี้ + ห้ามแก้ familyId
+        allow update: if isMember(familyId) &&
+          keepUnchanged(['familyId','family_id']) &&
+          keepFamilyIdStable(familyId);
+
+        allow delete: if isMember(familyId);
+      }
+    }
+
+    /* ============== HEALTH HISTORY ============== */
+    match /health_history/{hid} {
+      allow create: if isSignedIn() && isAdmin(requestFamilyId());
+      allow read, update, delete: if isSignedIn()
+        && isMember(resourceFamilyId(resource))
+        && keepFamilyIdOnUpdate();
+    }
+
+    /* ============== PUBLIC ============== */
+    match /food_database/{doc} { allow read: if true;  allow write: if isSignedIn(); }
+    match /allergen_info/{doc} { allow read: if true;  allow write: if isSignedIn(); }
+
+    /* ============== DEV/TEST (คงไว้เท่าที่ใช้) ============== */
+    match /registrations/{document=**} { allow read, write: if isSignedIn(); }
+
+    /* ============== ADMIN (global) ============== */
+    match /admin/{document=**} {
+      allow read, write: if isSignedIn()
+        && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+    /* ───────── USER NOTIFICATIONS (personal) ───────── */
+    match /user_notifications/{uid} {
+      // อนุญาตเจ้าของเท่านั้น
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      match /items/{notifId} {
+        allow read, create, update, delete:
+          if request.auth != null && request.auth.uid == uid;
+      }
+    }
+
+    /* ============== Deny rest ============== */
+    match /{document=**} { allow read, write: if false; }
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,476 @@
+﻿diff --git a/lib/rawmaterial/pages/item_detail_page.dart b/lib/rawmaterial/pages/item_detail_page.dart
+index 4b717b3..b6e840c 100644
+--- a/lib/rawmaterial/pages/item_detail_page.dart
++++ b/lib/rawmaterial/pages/item_detail_page.dart
+@@
+-import 'package:cloud_firestore/cloud_firestore.dart';
++import 'dart:async';
++
++import 'package:cloud_firestore/cloud_firestore.dart';
+@@
+   late String _category;
+   late String _unit;
+   DateTime? _expiry;
+ 
+   bool _saving = false;
++  Timer? _autosaveTimer;
++
++  late String _lastSavedName;
++  late int _lastSavedQty;
++  late String _lastSavedCategory;
++  late String _lastSavedUnit;
++  DateTime? _lastSavedExpiry;
+@@
+-    _category = Categories.normalize(i.category);
+-    _unit = Units.safe(i.unit);
+-    _expiry = i.expiryDate;
++    _category = Categories.normalize(i.category);
++    _unit = Units.safe(i.unit);
++    _expiry = i.expiryDate;
++
++    _lastSavedName = i.name.trim();
++    _lastSavedQty = i.quantity;
++    _lastSavedCategory = _category;
++    _lastSavedUnit = _unit;
++    _lastSavedExpiry = _expiry;
+   }
+ 
+   @override
+   void dispose() {
++    _autosaveTimer?.cancel();
+     _nameCtrl.dispose();
+@@
+-    if (picked != null) setState(() => _expiry = picked);
++    if (picked != null) {
++      setState(() => _expiry = picked);
++      _queueAutosave();
++    }
+   }
+ 
+-  Future<void> _save() async {
+-    final user = _auth.currentUser;
+-    if (user == null) return;
+-    final newName = _nameCtrl.text.trim();
+-    final newQty = int.tryParse(_qtyCtrl.text) ?? widget.item.quantity;
+-    if (newName.isEmpty || newQty <= 0) {
+-      ScaffoldMessenger.of(context).showSnackBar(
+-        const SnackBar(content: Text('กรุณากรอกชื่อและจำนวนให้ถูกต้อง')),
+-      );
+-      return;
+-    }
+-    setState(() => _saving = true);
+-    try {
+-      await _firestore
+-          .collection('users')
+-          .doc(user.uid)
+-          .collection('raw_materials')
+-          .doc(widget.item.id)
+-          .update({
+-            'name': newName,
+-            'category': _category,
+-            'quantity': newQty,
+-            'unit': _unit,
+-            'expiry_date': _expiry != null
+-                ? Timestamp.fromDate(_expiry!)
+-                : null,
+-            'updated_at': FieldValue.serverTimestamp(),
+-          });
+-      if (!mounted) return;
+-      Navigator.pop(context, true);
+-    } catch (e) {
+-      if (!mounted) return;
+-      ScaffoldMessenger.of(
+-        context,
+-      ).showSnackBar(SnackBar(content: Text('บันทึกไม่สำเร็จ: ')));
+-    } finally {
+-      if (mounted) setState(() => _saving = false);
+-    }
+-  }
++  Future<void> _save(_FormValues values) async {
++    final user = _auth.currentUser;
++    if (user == null) return;
++    setState(() => _saving = true);
++    try {
++      await _firestore
++          .collection('users')
++          .doc(user.uid)
++          .collection('raw_materials')
++          .doc(widget.item.id)
++          .update({
++            'name': values.name,
++            'category': values.category,
++            'quantity': values.quantity,
++            'unit': values.unit,
++            'expiry_date': values.expiry != null
++                ? Timestamp.fromDate(values.expiry!)
++                : null,
++            'updated_at': FieldValue.serverTimestamp(),
++          });
++      _updateLastSaved(values);
++    } catch (e) {
++      if (!mounted) return;
++      ScaffoldMessenger.of(context).showSnackBar(
++        SnackBar(content: Text('บันทึกไม่สำเร็จ: ')),
++      );
++    } finally {
++      if (mounted) setState(() => _saving = false);
++    }
++  }
++
++  void _queueAutosave() {
++    _autosaveTimer?.cancel();
++    _autosaveTimer = Timer(const Duration(milliseconds: 800), _maybeAutosave);
++  }
++
++  Future<void> _maybeAutosave() async {
++    _autosaveTimer?.cancel();
++    _autosaveTimer = null;
++    if (!mounted) return;
++    if (_saving) {
++      _queueAutosave();
++      return;
++    }
++    final values = _currentFormValues();
++    if (!_shouldSave(values)) return;
++    await _save(values);
++  }
++
++  _FormValues _currentFormValues() {
++    final trimmedName = _nameCtrl.text.trim();
++    final parsedQty = int.tryParse(_qtyCtrl.text);
++    return _FormValues(
++      name: trimmedName,
++      quantity: parsedQty,
++      category: _category,
++      unit: _unit,
++      expiry: _expiry,
++    );
++  }
++
++  bool _shouldSave(_FormValues values) =>
++      values.isValid && _hasFormChanged(values);
++
++  bool _hasFormChanged(_FormValues values) {
++    if (values.name != _lastSavedName) return true;
++    if (values.quantity != _lastSavedQty) return true;
++    if (Categories.normalize(values.category) != _lastSavedCategory) {
++      return true;
++    }
++    if (values.unit != _lastSavedUnit) return true;
++    if (!_isSameMoment(values.expiry, _lastSavedExpiry)) return true;
++    return false;
++  }
++
++  bool _isSameMoment(DateTime? a, DateTime? b) {
++    if (a == null || b == null) return a == b;
++    return a.isAtSameMomentAs(b);
++  }
++
++  void _updateLastSaved(_FormValues values) {
++    _lastSavedName = values.name;
++    _lastSavedQty = values.quantity ?? _lastSavedQty;
++    _lastSavedCategory = Categories.normalize(values.category);
++    _lastSavedUnit = values.unit;
++    _lastSavedExpiry = values.expiry;
++  }
+@@
+-        child: Align(
+-          alignment: Alignment.bottomCenter,
+-          child: Material(
+-            color: Colors.white,
+-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+-            clipBehavior: Clip.antiAlias,
+-            child: ConstrainedBox(
+-              constraints: BoxConstraints(maxHeight: media.size.height * 0.92),
+-              child: Column(
+-                mainAxisSize: MainAxisSize.min,
+-                children: [
++        child: FractionallySizedBox(
++          heightFactor: 0.92,
++          alignment: Alignment.bottomCenter,
++          child: Material(
++            color: Colors.white,
++            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
++            clipBehavior: Clip.antiAlias,
++            child: Column(
++              mainAxisSize: MainAxisSize.max,
++              children: [
+                 const SizedBox(height: 10),
+                 Container(
+@@
+-                  const Divider(height: 1),
+-                  Expanded(
++                  const Divider(height: 1),
++                  AnimatedSwitcher(
++                    duration: const Duration(milliseconds: 200),
++                    child: _saving
++                        ? const LinearProgressIndicator(
++                            key: ValueKey('saving'),
++                            minHeight: 2,
++                          )
++                        : const SizedBox(key: ValueKey('idle'), height: 2),
++                  ),
++                  Expanded(
+                     child: AbsorbPointer(
+                       absorbing: _saving,
+                       child: SingleChildScrollView(
+-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
++                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                         child: Column(
+@@
+-                            TextField(
+-                              controller: _nameCtrl,
+-                              decoration: _inputDecoration(),
+-                            ),
++                            TextField(
++                              controller: _nameCtrl,
++                              decoration: _inputDecoration(),
++                              onChanged: (_) => _queueAutosave(),
++                            ),
+@@
+-                                IconButton(
+-                                  onPressed: () {
+-                                    final n = int.tryParse(_qtyCtrl.text) ?? 1;
+-                                    if (n > 1) {
+-                                      _qtyCtrl.text = (n - 1).toString();
+-                                    }
+-                                  },
++                                IconButton(
++                                  onPressed: () {
++                                    final n = int.tryParse(_qtyCtrl.text) ?? 1;
++                                    if (n > 1) {
++                                      _qtyCtrl.text = (n - 1).toString();
++                                      _queueAutosave();
++                                    }
++                                  },
+@@
+                                 SizedBox(
+                                   width: 80,
+                                   child: TextField(
+                                     controller: _qtyCtrl,
+                                     textAlign: TextAlign.center,
+                                     keyboardType: TextInputType.number,
+-                                    decoration: _inputDecoration(isDense: true),
++                                    decoration: _inputDecoration(isDense: true),
++                                    onChanged: (_) => _queueAutosave(),
+                                   ),
+                                 ),
+                                 IconButton(
+                                   onPressed: () {
+                                     final n = int.tryParse(_qtyCtrl.text) ?? 0;
+-                                    _qtyCtrl.text = (n + 1).toString();
++                                    _qtyCtrl.text = (n + 1).toString();
++                                    _queueAutosave();
+                                   },
+@@
+-                                Expanded(
+-                                  child: DropdownButtonFormField<String>(
+-                                    value: _unit,
+-                                    items: Units.all
+-                                        .map(
+-                                          (u) => DropdownMenuItem(
+-                                            value: u,
+-                                            child: Text(u),
+-                                          ),
+-                                        )
+-                                        .toList(),
+-                                    onChanged: (v) =>
+-                                        setState(() => _unit = Units.safe(v)),
+-                                    decoration: _inputDecoration().copyWith(
+-                                      prefixIcon: Icon(
+-                                        Icons.straighten,
+-                                        color: Colors.grey[600],
+-                                      ),
+-                                    ),
+-                                  ),
+-                                ),
++                                Expanded(
++                                  child: DropdownButtonFormField<String>(
++                                    value: _unit,
++                                    items: Units.all
++                                        .map(
++                                          (u) => DropdownMenuItem(
++                                            value: u,
++                                            child: Text(u),
++                                          ),
++                                        )
++                                        .toList(),
++                                    onChanged: (v) {
++                                      setState(() => _unit = Units.safe(v));
++                                      _queueAutosave();
++                                    },
++                                    decoration: _inputDecoration().copyWith(
++                                      prefixIcon: Icon(
++                                        Icons.straighten,
++                                        color: Colors.grey[600],
++                                      ),
++                                    ),
++                                  ),
++                                ),
+@@
+-                            InkWell(
+-                              onTap: _pickDate,
++                            InkWell(
++                              onTap: _pickDate,
+@@
+-                                    if (_expiry != null)
+-                                      InkWell(
+-                                        onTap: () =>
+-                                            setState(() => _expiry = null),
++                                    if (_expiry != null)
++                                      InkWell(
++                                        onTap: () {
++                                          setState(() => _expiry = null);
++                                          _queueAutosave();
++                                        },
+                                         child: const Padding(
+@@
+-                          ],
+-                        ),
+-                      ),
+-                    ),
+-                  ),
+-                  Padding(
+-                    padding: EdgeInsets.fromLTRB(
+-                      16,
+-                      12,
+-                      16,
+-                      contentBottomPadding,
+-                    ),
+-                    child: SizedBox(
+-                      width: double.infinity,
+-                      child: ElevatedButton(
+-                        onPressed: _saving ? null : _save,
+-                        style: ElevatedButton.styleFrom(
+-                          backgroundColor: Colors.yellow[300],
+-                          foregroundColor: Colors.black,
+-                          padding: const EdgeInsets.symmetric(vertical: 14),
+-                          shape: RoundedRectangleBorder(
+-                            borderRadius: BorderRadius.circular(12),
+-                          ),
+-                          elevation: 0,
+-                        ),
+-                        child: _saving
+-                            ? const SizedBox(
+-                                width: 22,
+-                                height: 22,
+-                                child: CircularProgressIndicator(
+-                                  strokeWidth: 2,
+-                                  valueColor: AlwaysStoppedAnimation(
+-                                    Colors.black,
+-                                  ),
+-                                ),
+-                              )
+-                            : const Text(
+-                                'บันทึกการเปลี่ยนแปลง',
+-                                style: TextStyle(fontWeight: FontWeight.bold),
+-                              ),
+-                      ),
+-                    ),
+-                  ),
+-                ],
+-              ),
+-            ),
+-          ),
+-        ),
++                            const SizedBox(height: 24),
++
++                            // ใช้วัตถุดิบ (ตัดสต็อก + ลง log)
++                          ],
++                        ),
++                      ),
++                    ),
++                  ),
++                  SizedBox(height: contentBottomPadding),
++                ],
++              ),
++            ),
++          ),
++        ),
+       ),
+     );
+   }
+ 
+   Widget _buildCategorySelector() {
+@@
+-    if (options.isEmpty) {
+-      return const SizedBox.shrink();
+-    }
+-
+-    return SingleChildScrollView(
+-      scrollDirection: Axis.horizontal,
+-      child: Row(
+-        children: [
+-          for (final c in options)
+-            Padding(
+-              padding: const EdgeInsets.only(right: 8),
+-              child: ChoiceChip(
+-                label: Text(c),
+-                selected: current == c,
+-                selectedColor: Colors.yellow[600],
+-                labelStyle: TextStyle(
+-                  color: current == c ? Colors.white : Colors.grey[700],
+-                  fontWeight: FontWeight.w600,
+-                ),
+-                backgroundColor: Colors.grey[200],
+-                onSelected: (selected) {
+-                  if (selected) {
+-                    setState(() => _category = Categories.normalize(c));
+-                  }
+-                },
+-              ),
+-            ),
+-        ],
+-      ),
+-    );
++    if (options.isEmpty) {
++      return const SizedBox.shrink();
++    }
++
++    return Wrap(
++      spacing: 8,
++      runSpacing: 8,
++      children: [
++        for (final c in options)
++          ChoiceChip(
++            label: Text(c),
++            selected: current == c,
++            selectedColor: Colors.yellow[600],
++            labelStyle: TextStyle(
++              color: current == c ? Colors.white : Colors.grey[700],
++              fontWeight: FontWeight.w600,
++            ),
++            backgroundColor: Colors.grey[200],
++            onSelected: (selected) {
++              if (selected) {
++                setState(() => _category = Categories.normalize(c));
++                _queueAutosave();
++              }
++            },
++          ),
++      ],
++    );
+   }
+ 
+   InputDecoration _inputDecoration({bool isDense = false}) => InputDecoration(
+@@
+   );
+ }
++
++class _FormValues {
++  _FormValues({
++    required this.name,
++    required this.quantity,
++    required this.category,
++    required this.unit,
++    required this.expiry,
++  });
++
++  final String name;
++  final int? quantity;
++  final String category;
++  final String unit;
++  final DateTime? expiry;
++
++  bool get isValid => name.isNotEmpty && quantity != null && quantity > 0;
++}

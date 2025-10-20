@@ -101,7 +101,6 @@ class InventorySummarySection extends StatelessWidget {
             ),
 
           const SizedBox(height: 8),
-
         ],
       ),
     );
