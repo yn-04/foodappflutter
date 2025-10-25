@@ -1,4 +1,6 @@
 // lib/foodreccom/providers/enhanced_recommendation_provider.dart
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:my_app/common/measurement_constants.dart';
 import '../models/ingredient_model.dart';
@@ -8,7 +10,6 @@ import '../models/hybrid_models.dart';
 import '../models/purchase_item.dart';
 import '../services/hybrid_recipe_service.dart';
 import '../services/ingredient_analytics_service.dart';
-import '../services/cooking_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/recipe/used_ingredient.dart';
@@ -17,6 +18,7 @@ import '../services/user_recipe_service.dart';
 import '../models/filter_options.dart';
 import '../utils/ingredient_utils.dart';
 import '../utils/ingredient_translator.dart';
+import '../utils/allergy_utils.dart';
 import 'package:my_app/foodreccom/services/enhanced_ai_recommendation_service.dart';
 import 'package:my_app/rawmaterial/models/shopping_item.dart';
 
@@ -63,7 +65,6 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
   final HybridRecipeService _hybridService = HybridRecipeService();
   final IngredientAnalyticsService _analyticsService =
       IngredientAnalyticsService();
-  final CookingService _cookingService = CookingService();
   final UserRecipeService _userRecipeService = UserRecipeService();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -87,6 +88,20 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
   int? _hpMinProtein;
   int? _hpMaxCarbs;
   int? _hpMaxFat;
+  bool _userDietOverride = false;
+  Set<String> _explicitDietGoals = {};
+  final Map<String, int> _servingsOverrides = {};
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _ingredientSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _cookingHistorySub;
+  Completer<void>? _ingredientInitialLoad;
+  Completer<void>? _historyInitialLoad;
+  Timer? _autoRefreshDebounce;
+  bool _autoRefreshScheduledWhileLoading = false;
+  bool _isDisposed = false;
+  bool _hasReceivedIngredientSnapshot = false;
+  bool _hasReceivedHistorySnapshot = false;
+  bool _hasFetchedRecommendations = false;
+  Timer? _ingredientExpiryTimer;
 
   // ---------- Getters ----------
   List<RecipeModel> get recommendations => _recommendations;
@@ -96,6 +111,22 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
       _recommendations.where(_isUserRecipe).toList();
   List<RecipeModel> get hybridRecommendations =>
       _recommendations.where((r) => !_isUserRecipe(r)).toList();
+  List<String> get availableIngredientNames {
+    final seen = <String>{};
+    final names = <String>[];
+    for (final item in _ingredients) {
+      if (item.isExpired) continue;
+      final raw = item.name.trim();
+      if (raw.isEmpty) continue;
+      final key = _norm(raw);
+      if (key.isEmpty) continue;
+      if (seen.add(key)) {
+        names.add(raw);
+      }
+    }
+    names.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return names;
+  }
 
   Set<String> _normalizeDietGoals(Iterable<String> goals) {
     final normalized = <String>{};
@@ -139,6 +170,20 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
   HybridRecommendationResult? get lastHybridResult => _lastHybridResult;
   RecipeFilterOptions get filters => _filters;
   Set<String> get allergies => _allergies;
+  int? getServingsOverride(String recipeId) => _servingsOverrides[recipeId];
+
+  void setServingsOverride(String recipeId, int servings) {
+    if (servings <= 0) {
+      if (_servingsOverrides.remove(recipeId) != null) {
+        notifyListeners();
+      }
+      return;
+    }
+    final previous = _servingsOverrides[recipeId];
+    if (previous == servings) return;
+    _servingsOverrides[recipeId] = servings;
+    notifyListeners();
+  }
 
   // ---------- Ingredient Categorization ----------
   List<IngredientModel> get urgentExpiryIngredients =>
@@ -164,29 +209,54 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
 
   // ---------- Load Ingredients ----------
   Future<void> loadIngredients() async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return;
+    final user = _auth.currentUser;
+    if (user == null) return;
 
-      final snapshot = await _firestore
-          .collection('users')
-          .doc(user.uid)
-          .collection('raw_materials')
-          .get();
-
-      final items = snapshot.docs
-          .map((doc) => IngredientModel.fromFirestore(doc.data()))
-          .toList();
-
-      // 1) รวมวัตถุดิบชื่อซ้ำที่ระดับข้อมูล (แปลงหน่วยพื้นฐานได้)
-      final deduped = _dedupeIngredients(items);
-      // 2) เรียงตามความสำคัญ
-      _ingredients = await compute(_sortIngredientsByPriority, deduped);
-    } catch (e) {
-      debugPrint('❌ Error loading ingredients: $e');
-    } finally {
-      notifyListeners();
+    if (_ingredientSub != null) {
+      return _ingredientInitialLoad?.future ?? Future.value();
     }
+
+    final completer = Completer<void>();
+    _ingredientInitialLoad = completer;
+
+    final collection = _firestore
+        .collection('users')
+        .doc(user.uid)
+        .collection('raw_materials');
+
+    _ingredientSub = collection.snapshots().listen(
+      (snapshot) async {
+        final items = snapshot.docs
+            .map((doc) => IngredientModel.fromFirestore(doc.data()))
+            .where((item) => !item.isExpired)
+            .toList();
+
+        final deduped = _dedupeIngredients(items);
+        final sorted = await compute(_sortIngredientsByPriority, deduped);
+        final hadInitialSnapshot = _hasReceivedIngredientSnapshot;
+        _hasReceivedIngredientSnapshot = true;
+        if (_isDisposed) {
+          if (!completer.isCompleted) completer.complete();
+          return;
+        }
+        if (_ingredientsChanged(sorted)) {
+          _ingredients = sorted;
+          _scheduleExpiryWatcher(sorted);
+          final pruned = _pruneManualIngredientSelections();
+          notifyListeners();
+          if (pruned || hadInitialSnapshot || _hasFetchedRecommendations) {
+            _scheduleAutoRefresh();
+          }
+        }
+        if (!completer.isCompleted) completer.complete();
+      },
+      onError: (error, stack) {
+        debugPrint('❌ Error streaming ingredients: $error');
+        if (!completer.isCompleted) completer.complete();
+      },
+    );
+
+    return completer.future;
   }
 
   static List<IngredientModel> _sortIngredientsByPriority(
@@ -366,13 +436,59 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
 
   // ---------- Load Cooking History ----------
   Future<void> loadCookingHistory() async {
-    try {
-      _cookingHistory = await _cookingService.getCookingHistory(limitDays: 30);
-    } catch (e) {
-      debugPrint('❌ Error loading cooking history: $e');
-    } finally {
-      notifyListeners();
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    if (_cookingHistorySub != null) {
+      return _historyInitialLoad?.future ?? Future.value();
     }
+
+    final completer = Completer<void>();
+    _historyInitialLoad = completer;
+
+    final query = _firestore
+        .collection('users')
+        .doc(user.uid)
+        .collection('cooking_history')
+        .orderBy('cooked_at', descending: true);
+
+    _cookingHistorySub = query.snapshots().listen(
+      (snapshot) {
+        final cutoff = DateTime.now().subtract(const Duration(days: 30));
+        final histories = snapshot.docs
+            .map((doc) {
+              final data = Map<String, dynamic>.from(doc.data());
+              data.putIfAbsent('id', () => doc.id);
+              return CookingHistory.fromFirestore(data);
+            })
+            .where((history) {
+              return !history.cookedAt.isBefore(cutoff);
+            })
+            .toList();
+
+        final hadInitialSnapshot = _hasReceivedHistorySnapshot;
+        _hasReceivedHistorySnapshot = true;
+        if (_isDisposed) {
+          if (!completer.isCompleted) completer.complete();
+          return;
+        }
+        if (_cookingHistoryChanged(histories)) {
+          _cookingHistory = histories;
+          notifyListeners();
+          if (hadInitialSnapshot || _hasFetchedRecommendations) {
+            _scheduleAutoRefresh();
+          }
+        }
+
+        if (!completer.isCompleted) completer.complete();
+      },
+      onError: (error, stack) {
+        debugPrint('❌ Error streaming cooking history: $error');
+        if (!completer.isCompleted) completer.complete();
+      },
+    );
+
+    return completer.future;
   }
 
   // ---------- Hybrid Recommendations ----------
@@ -405,8 +521,10 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
         _userRecipes = await _userRecipeService.getUserRecipes();
       } catch (_) {}
 
-      final combinedDietGoals = {..._filters.dietGoals, ..._dietPreferences};
-      final normalizedDietGoals = _normalizeDietGoals(combinedDietGoals);
+      final activeDietGoals = _userDietOverride
+          ? _explicitDietGoals
+          : {..._dietPreferences, ..._filters.dietGoals};
+      final normalizedDietGoals = _normalizeDietGoals(activeDietGoals);
 
       String _formatCalories() {
         final min = _filters.minCalories;
@@ -430,21 +548,34 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
       }
 
       final manualIngredientNames = _filters.manualIngredientNames;
+      int? _macroValue(int? manual, int? fallback) => manual ?? fallback;
+      final hasHighProtein = normalizedDietGoals.contains('high-protein');
+      final hasLowCarb =
+          normalizedDietGoals.contains('low-carb') ||
+          normalizedDietGoals.contains('ketogenic');
+      final hasLowFat = normalizedDietGoals.contains('low-fat');
+
+      final effectiveMinProtein = hasHighProtein
+          ? _macroValue(_filters.minProtein, _hpMinProtein)
+          : null;
+      final effectiveMaxCarbs = hasLowCarb
+          ? _macroValue(_filters.maxCarbs, _hpMaxCarbs)
+          : null;
+      final effectiveMaxFat = hasLowFat
+          ? _macroValue(_filters.maxFat, _hpMaxFat)
+          : null;
+
       final filterLog = StringBuffer()
         ..write('👤 ฟิลเตอร์ผู้ใช้ → ')
         ..write(
           'ประเภทอาหาร: ${_filters.cuisineEn.isEmpty ? 'ทั้งหมด' : _filters.cuisineEn.join(', ')} | ',
         )
         ..write(
-          'โภชนาการ: ${normalizedDietGoals.isEmpty ? 'ไม่เลือก' : normalizedDietGoals.join(', ')} | ',
+          'ข้อจำกัดด้านอาหาร: ${normalizedDietGoals.isEmpty ? 'ไม่เลือก' : normalizedDietGoals.join(', ')} | ',
         )
         ..write('แคลอรี่: ${_formatCalories()} | ')
         ..write(
-          'แมโคร: ${_formatMacros(
-            minProtein: _filters.minProtein,
-            maxCarbs: _filters.maxCarbs,
-            maxFat: _filters.maxFat,
-          )} | ',
+          'แมโคร: ${_formatMacros(minProtein: effectiveMinProtein, maxCarbs: effectiveMaxCarbs, maxFat: effectiveMaxFat)} | ',
         )
         ..write(
           'วัตถุดิบที่เลือกเอง: ${manualIngredientNames == null || manualIngredientNames.isEmpty ? 'ให้ระบบเลือก' : manualIngredientNames.join(', ')} | ',
@@ -462,9 +593,9 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
         dietGoals: normalizedDietGoals,
         minCalories: _filters.minCalories,
         maxCalories: _filters.maxCalories,
-        minProtein: _filters.minProtein,
-        maxCarbs: _filters.maxCarbs,
-        maxFat: _filters.maxFat,
+        minProtein: effectiveMinProtein,
+        maxCarbs: effectiveMaxCarbs,
+        maxFat: effectiveMaxFat,
         excludeIngredients: _allergies.toList(),
       );
 
@@ -529,7 +660,12 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     } finally {
       _resetUserFiltersAfterUse();
       _isLoading = false;
+      _hasFetchedRecommendations = true;
       notifyListeners();
+      if (_autoRefreshScheduledWhileLoading) {
+        _autoRefreshScheduledWhileLoading = false;
+        _scheduleAutoRefresh(delay: const Duration(milliseconds: 200));
+      }
     }
   }
 
@@ -537,13 +673,13 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     final manualNames = _filters.manualIngredientNames;
     final hasManual = manualNames != null && manualNames.isNotEmpty;
     final hasCuisine = _filters.cuisineEn.isNotEmpty;
-    final hasDietOverride =
-        !setEquals(_filters.dietGoals, _dietPreferences);
+    final hasDietOverride = !setEquals(_filters.dietGoals, _dietPreferences);
     final hasProteinOverride = _filters.minProtein != _hpMinProtein;
     final hasCarbOverride = _filters.maxCarbs != _hpMaxCarbs;
     final hasFatOverride = _filters.maxFat != _hpMaxFat;
 
-    final shouldReset = hasManual ||
+    final shouldReset =
+        hasManual ||
         hasCuisine ||
         hasDietOverride ||
         hasProteinOverride ||
@@ -606,7 +742,11 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
         ingredients: [
           RecipeIngredient(name: 'สะโพกไก่หั่นชิ้น', amount: 250, unit: 'g'),
           RecipeIngredient(name: 'กะทิกล่อง', amount: 250, unit: 'ml'),
-          RecipeIngredient(name: 'น้ำพริกแกงเขียวหวาน', amount: 2, unit: 'ช้อนโต๊ะ'),
+          RecipeIngredient(
+            name: 'น้ำพริกแกงเขียวหวาน',
+            amount: 2,
+            unit: 'ช้อนโต๊ะ',
+          ),
           RecipeIngredient(name: 'มะเขือพวง', amount: 50, unit: 'g'),
           RecipeIngredient(name: 'ใบโหระพา', amount: 1, unit: 'กำ'),
         ],
@@ -744,9 +884,13 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
               .where((e) => e.isNotEmpty);
           final normalizedPrefs = _normalizeDietGoals(raw);
           _dietPreferences = normalizedPrefs;
-          if (normalizedPrefs.isNotEmpty) {
-            final merged = {..._filters.dietGoals, ...normalizedPrefs};
-            _filters = _filters.copyWith(dietGoals: merged);
+          if (normalizedPrefs.isNotEmpty && !_userDietOverride) {
+            if (_filters.dietGoals.isEmpty) {
+              _filters = _filters.copyWith(dietGoals: normalizedPrefs);
+            } else {
+              final merged = {..._filters.dietGoals, ...normalizedPrefs};
+              _filters = _filters.copyWith(dietGoals: merged);
+            }
           }
         }
         // nutritionTargetsPerMeal
@@ -757,18 +901,48 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
           return int.tryParse(v.toString());
         }
 
-        final nt = hp['nutritionTargetsPerMeal'];
-        if (nt is Map<String, dynamic>) {
-          final p = nt['โปรตีน'] ?? nt['protein'];
-          if (p is Map<String, dynamic>) _hpMinProtein = _readInt(p['min']);
-          final c = nt['คาร์บ'] ?? nt['carbs'];
-          if (c is Map<String, dynamic>) _hpMaxCarbs = _readInt(c['max']);
-          final f = nt['ไขมัน'] ?? nt['fat'];
-          if (f is Map<String, dynamic>) _hpMaxFat = _readInt(f['max']);
+        double? _readDouble(dynamic v) {
+          if (v == null) return null;
+          if (v is num) return v.toDouble();
+          return double.tryParse(v.toString());
+        }
+
+        int? _perMeal(dynamic total) {
+          final value = _readDouble(total);
+          if (value == null) return null;
+          return (value / 3).round();
+        }
+
+        final dri = hp['dri'];
+        if (dri is Map<String, dynamic>) {
+          final proteinPerMeal = _perMeal(dri['protein_g']);
+          final carbMaxPerMeal = _perMeal(dri['carb_max_g']);
+          final fatMinPerMeal = _perMeal(dri['fat_min_g']);
+          final fatMaxPerMeal = _perMeal(dri['fat_max_g']);
+          if (proteinPerMeal != null) _hpMinProtein = proteinPerMeal;
+          if (carbMaxPerMeal != null) _hpMaxCarbs = carbMaxPerMeal;
+          if (fatMinPerMeal != null) _hpMaxFat = fatMinPerMeal;
+        } else {
+          final nt = hp['nutritionTargetsPerMeal'];
+          if (nt is Map<String, dynamic>) {
+            final p = nt['โปรตีน'] ?? nt['protein'];
+            if (p is Map<String, dynamic>) _hpMinProtein = _readInt(p['min']);
+            final c = nt['คาร์บ'] ?? nt['carbs'];
+            if (c is Map<String, dynamic>) _hpMaxCarbs = _readInt(c['max']);
+            final f = nt['ไขมัน'] ?? nt['fat'];
+            if (f is Map<String, dynamic>) _hpMaxFat = _readInt(f['max']);
+          }
+        }
+
+        final hasManualProtein = _filters.minProtein != null;
+        final hasManualCarb = _filters.maxCarbs != null;
+        final hasManualFat = _filters.maxFat != null;
+
+        if (!hasManualProtein || !hasManualCarb || !hasManualFat) {
           setMacroThresholds(
-            minProtein: _hpMinProtein,
-            maxCarbs: _hpMaxCarbs,
-            maxFat: _hpMaxFat,
+            minProtein: hasManualProtein ? _filters.minProtein : _hpMinProtein,
+            maxCarbs: hasManualCarb ? _filters.maxCarbs : _hpMaxCarbs,
+            maxFat: hasManualFat ? _filters.maxFat : _hpMaxFat,
           );
         }
       }
@@ -787,14 +961,28 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
       map['diet_preferences'] = _dietPreferences.toList();
     }
     final macroTargets = <String, Map<String, int>>{};
-    if (_hpMinProtein != null) {
-      macroTargets['protein'] = {'min': _hpMinProtein!};
+    final effectiveGoals = _userDietOverride
+        ? _explicitDietGoals
+        : {..._dietPreferences, ..._filters.dietGoals};
+    int? _macroValue(int? manual, int? fallback) => manual ?? fallback;
+    if (effectiveGoals.contains('high-protein')) {
+      final proteinSource = _macroValue(_filters.minProtein, _hpMinProtein);
+      if (proteinSource != null) {
+        macroTargets['protein'] = {'min': proteinSource};
+      }
     }
-    if (_hpMaxCarbs != null) {
-      macroTargets['carbs'] = {'max': _hpMaxCarbs!};
+    if (effectiveGoals.contains('low-carb') ||
+        effectiveGoals.contains('ketogenic')) {
+      final carbSource = _macroValue(_filters.maxCarbs, _hpMaxCarbs);
+      if (carbSource != null) {
+        macroTargets['carbs'] = {'max': carbSource};
+      }
     }
-    if (_hpMaxFat != null) {
-      macroTargets['fat'] = {'max': _hpMaxFat!};
+    if (effectiveGoals.contains('low-fat')) {
+      final fatSource = _macroValue(_filters.maxFat, _hpMaxFat);
+      if (fatSource != null) {
+        macroTargets['fat'] = {'max': fatSource};
+      }
     }
     if (macroTargets.isNotEmpty) {
       map['macro_targets_per_meal'] = macroTargets;
@@ -810,11 +998,14 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
 
   String? _buildDietaryNotesForAI() {
     final parts = <String>[];
-    if (_filters.dietGoals.isNotEmpty) {
-      parts.add('ข้อจำกัดอาหาร: ${_filters.dietGoals.join(', ')}');
+    final activeDietGoals = _userDietOverride
+        ? _explicitDietGoals
+        : {..._dietPreferences, ..._filters.dietGoals};
+    if (activeDietGoals.isNotEmpty) {
+      parts.add('ข้อจำกัดอาหาร: ${activeDietGoals.join(', ')}');
     }
     if (_dietPreferences.isNotEmpty) {
-      parts.add('ความชอบด้านโภชนาการ: ${_dietPreferences.join(', ')}');
+      parts.add('ความชอบด้านอาหาร: ${_dietPreferences.join(', ')}');
     }
     if (_filters.minCalories != null || _filters.maxCalories != null) {
       final min = _filters.minCalories;
@@ -848,45 +1039,14 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
 
   bool _containsAllergen(RecipeModel r) {
     if (_allergies.isEmpty) return false;
-    final ingNames = r.ingredients
-        .map((i) => i.name.trim().toLowerCase())
-        .toList();
-    final alls = <String>{
-      ..._allergies,
-      ..._allergies.map((e) => _mapAllergenToEnglish(e) ?? ''),
-    }.where((e) => e.trim().isNotEmpty).map((e) => e.toLowerCase());
-    for (final a in alls) {
-      if (ingNames.any((n) => n.contains(a) || a.contains(n))) return true;
+    final expansion = AllergyUtils.expandAllergens(_allergies);
+    if (expansion.all.isEmpty) return false;
+    for (final ingredient in r.ingredients) {
+      if (AllergyUtils.matchesAllergen(ingredient.name, expansion.all)) {
+        return true;
+      }
     }
     return false;
-  }
-
-  String? _mapAllergenToEnglish(String t) {
-    final s = t.trim().toLowerCase();
-    if (s.isEmpty) return null;
-    const map = {
-      'กุ้ง': 'shrimp',
-      'ปู': 'crab',
-      'หอยนางรม': 'oyster',
-      'หอย': 'shellfish',
-      'ปลาหมึก': 'squid',
-      'หมึก': 'squid',
-      'ปลา': 'fish',
-      'นม': 'milk',
-      'แลคโตส': 'lactose',
-      'ไข่': 'egg',
-      'ถั่วลิสง': 'peanut',
-      'ถั่ว': 'nut',
-      'อัลมอนด์': 'almond',
-      'วอลนัท': 'walnut',
-      'เฮเซลนัท': 'hazelnut',
-      'แป้งสาลี': 'wheat',
-      'กลูเตน': 'gluten',
-      'ถั่วเหลือง': 'soy',
-      'งา': 'sesame',
-      'น้ำผึ้ง': 'honey',
-    };
-    return map[s] ?? s;
   }
 
   // -------- Helper: คำนวณวัตถุดิบที่ขาด --------
@@ -927,6 +1087,103 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     return unique;
   }
 
+  bool _ingredientsChanged(List<IngredientModel> next) {
+    if (_ingredients.length != next.length) return true;
+    for (var i = 0; i < next.length; i++) {
+      final a = _ingredients[i];
+      final b = next[i];
+      if (a.name != b.name) return true;
+      if (a.unit != b.unit) return true;
+      if ((a.quantity - b.quantity).abs() > 0.0001) return true;
+      final aExpiry = a.expiryDate?.millisecondsSinceEpoch ?? 0;
+      final bExpiry = b.expiryDate?.millisecondsSinceEpoch ?? 0;
+      if (aExpiry != bExpiry) return true;
+    }
+    return false;
+  }
+
+  bool _pruneManualIngredientSelections() {
+    final manualNames = _filters.manualIngredientNames;
+    if (manualNames == null || manualNames.isEmpty) return false;
+    final available = availableIngredientNames.map(_norm).toSet();
+    final retained = manualNames
+        .where((name) => available.contains(_norm(name)))
+        .toList();
+    if (retained.length == manualNames.length) return false;
+    _filters = _filters.copyWith(
+      manualIngredientNames: retained.isEmpty ? null : retained,
+    );
+    return true;
+  }
+
+  void _scheduleExpiryWatcher(List<IngredientModel> current) {
+    _ingredientExpiryTimer?.cancel();
+    if (current.isEmpty) return;
+    final now = DateTime.now();
+    final upcoming = current
+        .map((i) => i.expiryDate)
+        .whereType<DateTime>()
+        .where((d) => d.isAfter(now))
+        .toList();
+    if (upcoming.isEmpty) return;
+    final nextExpiry = upcoming.reduce((a, b) => a.isBefore(b) ? a : b);
+    var delay = nextExpiry.difference(now);
+    if (delay.isNegative) {
+      delay = const Duration(seconds: 1);
+    } else {
+      delay += const Duration(minutes: 1);
+    }
+    _ingredientExpiryTimer = Timer(delay, _handleExpiryTick);
+  }
+
+  void _handleExpiryTick() {
+    if (_isDisposed) return;
+    final filtered = _ingredients.where((i) => !i.isExpired).toList();
+    if (_ingredientsChanged(filtered)) {
+      _ingredients = filtered;
+      _scheduleExpiryWatcher(filtered);
+      final pruned = _pruneManualIngredientSelections();
+      notifyListeners();
+      _scheduleAutoRefresh();
+      return;
+    }
+    _scheduleExpiryWatcher(_ingredients);
+  }
+
+  bool _cookingHistoryChanged(List<CookingHistory> next) {
+    if (_cookingHistory.length != next.length) return true;
+    for (var i = 0; i < next.length; i++) {
+      final a = _cookingHistory[i];
+      final b = next[i];
+      if (a.id != b.id) return true;
+      if (a.cookedAt.millisecondsSinceEpoch !=
+          b.cookedAt.millisecondsSinceEpoch) {
+        return true;
+      }
+      if (a.servingsMade != b.servingsMade) return true;
+    }
+    return false;
+  }
+
+  void _scheduleAutoRefresh({
+    Duration delay = const Duration(milliseconds: 600),
+  }) {
+    if (_isDisposed) return;
+    _autoRefreshDebounce?.cancel();
+    if (_isLoading) {
+      _autoRefreshScheduledWhileLoading = true;
+      return;
+    }
+    _autoRefreshDebounce = Timer(delay, () {
+      _autoRefreshDebounce = null;
+      if (_isLoading) {
+        _autoRefreshScheduledWhileLoading = true;
+        return;
+      }
+      getHybridRecommendations();
+    });
+  }
+
   String _norm(String s) {
     var out = s.trim().toLowerCase();
     out = out.replaceAll(RegExp(r"\(.*?\)"), ""); // remove (...) notes
@@ -959,7 +1216,19 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
   }
 
   void setDietGoals(Set<String> goals) {
-    _filters = _filters.copyWith(dietGoals: _normalizeDietGoals(goals));
+    final normalized = _normalizeDietGoals(goals);
+    if (normalized.isEmpty) {
+      _userDietOverride = false;
+      _explicitDietGoals = {};
+      final fallback = _dietPreferences;
+      _filters = _filters.copyWith(dietGoals: fallback);
+    } else {
+      final cleaned = normalized.difference(_dietPreferences);
+      final effective = cleaned.isNotEmpty ? cleaned : normalized;
+      _userDietOverride = true;
+      _explicitDietGoals = effective;
+      _filters = _filters.copyWith(dietGoals: effective);
+    }
     notifyListeners();
   }
 
@@ -992,21 +1261,12 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     if (names == null || names.isEmpty) return null;
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final allergens = <String>{
-      ..._allergies,
-      ..._allergies.map((e) => _mapAllergenToEnglish(e) ?? ''),
-    }
-        .where((value) => value.trim().isNotEmpty)
-        .map((value) => value.trim().toLowerCase())
-        .toSet();
+    final expansion = AllergyUtils.expandAllergens(_allergies);
+    final allergens = expansion.all;
     bool isAllergic(String name) {
-      if (allergens.isEmpty) return false;
-      final key = name.trim().toLowerCase();
-      for (final allergen in allergens) {
-        if (key.contains(allergen) || allergen.contains(key)) return true;
-      }
-      return false;
+      return AllergyUtils.matchesAllergen(name, allergens);
     }
+
     final lookup = <String, IngredientModel>{};
     for (final i in _ingredients) {
       final expiry = i.expiryDate;
@@ -1051,6 +1311,16 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     } finally {
       _isAnalyzing = false;
       notifyListeners();
+    }
+
+    @override
+    void dispose() {
+      _isDisposed = true;
+      _ingredientSub?.cancel();
+      _cookingHistorySub?.cancel();
+      _autoRefreshDebounce?.cancel();
+      _ingredientExpiryTimer?.cancel();
+      super.dispose();
     }
   }
 

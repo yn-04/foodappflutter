@@ -35,7 +35,7 @@ class HybridRecommendationProvider extends ChangeNotifier {
   String? _error;
 
   // การตั้งค่า (ไม่มี includeExternalRecipes แล้ว)
-  int _maxExternalRecipes = 12;
+  int _maxExternalRecipes = 10;
   String _preferredCuisine = '';
 
   // -------- Getters --------
