@@ -1,4 +1,4 @@
-﻿// lib/rawmaterial/addraw.dart
+// lib/rawmaterial/addraw.dart
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -914,9 +914,10 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
         selectedItemBuilder: (context) {
           return items.map((cat) {
             final icon = Categories.iconFor(cat);
+            final color = Categories.colorFor(cat);
             return Row(
               children: [
-                Icon(icon, size: 18, color: Colors.black87),
+                Icon(icon, size: 18, color: color),
                 const SizedBox(width: 8),
                 Flexible(child: Text(cat, overflow: TextOverflow.ellipsis)),
               ],
@@ -927,11 +928,12 @@ class _AddRawMaterialPageState extends State<AddRawMaterialPage> {
         // รายการในเมนู
         items: items.map((cat) {
           final icon = Categories.iconFor(cat);
+          final color = Categories.colorFor(cat);
           return DropdownMenuItem<String>(
             value: cat,
             child: Row(
               children: [
-                Icon(icon, size: 18, color: Colors.black87),
+                Icon(icon, size: 18, color: color),
                 const SizedBox(width: 8),
                 Expanded(child: Text(cat, overflow: TextOverflow.ellipsis)),
               ],
