@@ -26,7 +26,7 @@ class RapidAPIRecipeService {
   /// 🔎 ค้นหาสูตรอาหารจากวัตถุดิบ
   Future<List<RecipeModel>> searchRecipesByIngredients(
     List<IngredientModel> ingredients, {
-    int maxResults = 12, // ✅ ดึงอย่างน้อย 12 เมนู (ถ้ามีในระบบ)
+    int maxResults = 10, // ✅ ดึงอย่างน้อย 10 เมนู (ถ้ามีในระบบ)
     int ranking = 1,
     List<String> cuisineFilters = const [], // english lowercase
     Set<String> dietGoals =
@@ -91,7 +91,7 @@ class RapidAPIRecipeService {
         if (maxCarbs != null && maxCarbs > 0) strictness++;
         if (maxFat != null && maxFat > 0) strictness++;
         final expandedNumber = (strictness >= 2)
-            ? (maxResults * 3).clamp(5, 15)
+            ? (maxResults * 3).clamp(5, 30)
             : maxResults;
         final complexRes = await _fetchComplexSearchRelaxed(
           translatedNames,
@@ -140,7 +140,7 @@ class RapidAPIRecipeService {
       // First attempt: translated list
       final firstRanking = translatedNames.length <= 2 ? 2 : ranking;
       final firstNumber = translatedNames.length <= 2
-          ? (maxResults.clamp(1, 3))
+          ? (maxResults.clamp(1, 10))
           : maxResults;
       final url = _buildFindByIngredientsUrl(
         translatedNames,
@@ -178,7 +178,7 @@ class RapidAPIRecipeService {
           }
         }
 
-        // ✅ เก็บ ID พร้อมคะแนน แล้วถ้ายังได้ไม่ครบ ลองขยายเงื่อนไขเพื่อให้ครบตามที่ร้องขอ (อย่างน้อย 12)
+        // ✅ เก็บ ID พร้อมคะแนน แล้วถ้ายังได้ไม่ครบ ลองขยายเงื่อนไขเพื่อให้ครบตามที่ร้องขอ (อย่างน้อย 10)
         final targetSet = translatedNames.toSet();
         final scoreMap = _scoreRecipes(data, targetSet);
 
@@ -261,7 +261,7 @@ class RapidAPIRecipeService {
       if (asciiOnly.isNotEmpty && asciiOnly.length != translatedNames.length) {
         final url2 = _buildFindByIngredientsUrl(
           asciiOnly,
-          number: maxResults.clamp(1, 4),
+          number: maxResults.clamp(1, 10),
           ranking: 2,
         );
         if (await ApiUsageService.waitForRapidSlot()) {
@@ -294,7 +294,7 @@ class RapidAPIRecipeService {
             }
           }
 
-          // เติมผลลัพธ์ให้ครบ 5 ด้วยวิธีเดียวกัน
+          // เติมผลลัพธ์ให้ครบ 10 ด้วยวิธีเดียวกัน
           final targetSet = asciiOnly.toSet();
           final scoreMap = _scoreRecipes(data, targetSet);
           if (scoreMap.length < maxResults) {
@@ -352,7 +352,7 @@ class RapidAPIRecipeService {
       if (reduced.isNotEmpty) {
         final url3 = _buildFindByIngredientsUrl(
           reduced,
-          number: maxResults.clamp(1, 3),
+          number: maxResults.clamp(1, 10),
           ranking: 2,
         );
         if (await ApiUsageService.waitForRapidSlot()) {
@@ -376,7 +376,7 @@ class RapidAPIRecipeService {
           final scoreMap = _scoreRecipes(data, targetSet);
           final orderedIds = scoreMap.keys.toList()
             ..sort((a, b) => scoreMap[b]!.compareTo(scoreMap[a]!));
-          final limitedIds = orderedIds.take(maxResults.clamp(1, 3)).toList();
+          final limitedIds = orderedIds.take(maxResults.clamp(1, 10)).toList();
           final detailed = <RecipeModel>[];
           for (final id in limitedIds) {
             final r = await _getRecipeDetails(id);
@@ -393,7 +393,7 @@ class RapidAPIRecipeService {
             maxCarbs: maxCarbs,
             maxFat: maxFat,
             excludeIngredients: excludeIngredients,
-          ).take(maxResults.clamp(1, 3)).toList();
+          ).take(maxResults.clamp(1, 10)).toList();
 
           await _saveRecipesToCache(prefs, cacheKey, recipes, tag: 'reduced');
 

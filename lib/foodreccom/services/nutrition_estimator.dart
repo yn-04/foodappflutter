@@ -38,7 +38,7 @@ class NutritionEstimator {
     double kcal = 0, protein = 0, carbs = 0, fat = 0, fiber = 0, sodium = 0;
 
     for (final ing in recipe.ingredients) {
-      final grams = _toGrams(ing.name, ing.amount, ing.unit);
+      final grams = _toGrams(ing.name, ing.numericAmount, ing.unit);
       if (grams <= 0) continue;
 
       final key = _matchKey(ing.name);

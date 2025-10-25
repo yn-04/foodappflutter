@@ -1,9 +1,10 @@
 // lib/foodreccom/services/hybrid_recipe_service.dart
 import 'dart:convert';
-import '../models/ingredient_model.dart';
 import '../models/cooking_history_model.dart';
 import '../models/hybrid_models.dart';
+import '../models/ingredient_model.dart';
 import '../models/recipe/recipe_model.dart';
+import '../utils/allergy_utils.dart';
 import 'enhanced_ai_recommendation_service.dart';
 import 'rapidapi_recipe_service.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
@@ -30,7 +31,7 @@ class HybridRecipeService {
   Future<HybridRecommendationResult> getHybridRecommendations(
     List<IngredientModel> ingredients, {
     List<CookingHistory>? cookingHistory,
-    int maxExternalRecipes = 12,
+    int maxExternalRecipes = 10,
     // Optional user overrides/filters
     List<IngredientModel>? manualSelectedIngredients,
     List<String> cuisineFilters = const [], // english lowercase
@@ -53,18 +54,18 @@ class HybridRecipeService {
           debugLogsEnabled == '1' ||
           debugLogsEnabled == 'on';
 
-      final allergySet = excludeIngredients
-          .map(_normalizeName)
-          .where((e) => e.isNotEmpty)
-          .toSet();
+      final allergyExpansion = AllergyUtils.expandAllergens(excludeIngredients);
+      final allergySet = allergyExpansion.all;
 
       final eligibleIngredients = <IngredientModel>[];
       var allergyFiltered = 0;
       var expiredFiltered = 0;
       var dessertFiltered = 0;
       for (final ingredient in ingredients) {
-        final key = _normalizeName(ingredient.name);
-        final isAllergy = allergySet.contains(key);
+        final isAllergy = AllergyUtils.matchesAllergen(
+          ingredient.name,
+          allergySet,
+        );
         final isExpired = ingredient.isExpired;
         final isDessert = _isDessertIngredient(ingredient);
         if (isAllergy) {
@@ -103,8 +104,12 @@ class HybridRecipeService {
       if (isDebug) {
         print('🐞 [InventoryDump] total=${ingredients.length}');
         for (final ing in ingredients) {
+          final skipAllergy = AllergyUtils.matchesAllergen(
+            ing.name,
+            allergySet,
+          );
           print(
-            '🐞 [Stock] ${ing.name} → days=${ing.daysToExpiry}, urgent=${ing.isUrgentExpiry}, near=${ing.isNearExpiry}, expired=${ing.isExpired}, allergySkip=${allergySet.contains(_normalizeName(ing.name))}',
+            '🐞 [Stock] ${ing.name} → days=${ing.daysToExpiry}, urgent=${ing.isUrgentExpiry}, near=${ing.isNearExpiry}, expired=${ing.isExpired}, allergySkip=$skipAllergy',
           );
         }
       }
@@ -154,7 +159,9 @@ class HybridRecipeService {
         return data;
       }).toList();
 
-      final userAllergies = allergySet.isNotEmpty ? allergySet.join(', ') : '';
+      final allergyList = allergySet.toList()..sort();
+      final allergyJson = jsonEncode(allergyList);
+      final allergyCoverage = describeAllergyCoverage(excludeIngredients);
 
       final dietLines = <String>[];
       if (dietGoals.isNotEmpty) {
@@ -193,8 +200,15 @@ class HybridRecipeService {
 ข้อมูลสุขภาพ:
 - $dietaryGuidance
 
+ข้อมูลภูมิแพ้ (ตีความครอบคลุมทุกคำพ้อง/ผลิตภัณฑ์เกี่ยวเนื่อง):
+$allergyCoverage
+
 แนวทางการตัดสินใจ:
-0) ห้ามเลือกวัตถุดิบที่อยู่ในรายการภูมิแพ้ของผู้ใช้ (ถ้ามี) และห้ามเลือกวัตถุดิบที่ `is_expired` = true
+0) ห้ามเลือกวัตถุดิบที่อยู่ในรายการภูมิแพ้ของผู้ใช้ และห้ามเลือกวัตถุดิบที่ `is_expired` = true
+   - แต่ละรายการภูมิแพ้ให้ตีความครอบคลุมทั้งวัตถุดิบโดยตรงและผลิตภัณฑ์/ส่วนประกอบที่มีต้นกำเนิดจากสารนั้น (เช่น แพ้นมวัว → งดนม เนย ชีส โยเกิร์ต เวย์ เคซีน, แพ้ถั่วลิสง → งดถั่วลิสง เนยถั่ว ซอส/เครื่องจิ้มที่ทำจากถั่วลิสง, ฯลฯ)
+   - ตรวจสอบซอส เครื่องปรุง ผงปรุงรส เส้น และอาหารหมักหรือบ่ม เช่น ซีอิ๊วขาว/ซีอิ๊วดำ/ซอสถั่วเหลือง (soy sauce, shoyu, ponzu), ซอสเทอริยากิ, ซอสฮอยซิน, วูสเตอร์เชอร์, น้ำซุปก้อน, ซอสพริก/น้ำพริก/น้ำมันพริก (sriracha, hot sauce, gochujang, sambal), เกล็ดขนมปัง, เส้นพาสต้า/ราเมน/อุด้ง/โซบะ, บะหมี่กึ่งสำเร็จรูป (มาม่า/ไวไว/ยำยำ/แบรนด์อื่น), ขนมปัง/พิซซ่า/เบเกอรี่หมัก, โยเกิร์ต, ชีส, ไวน์, เบียร์, คอมบูชะ — หากมีสารก่อภูมิแพ้ต้องตัดออกทั้งหมด
+   - ใช้รายการ `allergy_keywords` ที่ให้มา (และคำอธิบายด้านบน) เป็น canonical list เพื่อตรวจสอบคำพ้อง ศัพท์แสลง และชื่อการค้าของสารก่อภูมิแพ้ทุกชนิด
+   - ถ้าชื่อวัตถุดิบหรือภูมิแพ้เป็นภาษาไทย ให้พิจารณาคำแปลหรือชื่อภาษาอังกฤษ รวมถึงคำย่อ ชื่อการค้า และคำที่สื่อถึงวัตถุดิบเดียวกัน
 1) จัดลำดับความสำคัญตาม `days_to_expiry` จากน้อยไปมาก โดยเฉพาะลำดับ 0 (วันนี้) → 1 → 2 → 3 → ...
 2) หากยังไม่ครบ ${minCap} ให้เติมจากวัตถุดิบที่เหลือ โดยพิจารณา `priority_score` สูงกว่า และยังไม่หมดอายุ
 3) ห้ามสร้างชื่อใหม่ ต้องเลือกเฉพาะ `name` ที่ให้ไว้เท่านั้น
@@ -202,8 +216,8 @@ class HybridRecipeService {
 ข้อมูลวัตถุดิบ (JSON):
 ${jsonEncode(ingredientPayload)}
 
-รายการภูมิแพ้ของผู้ใช้ (เว้นว่างได้ถ้าไม่ทราบ):
-${userAllergies}
+รายการภูมิแพ้ของผู้ใช้ (JSON array; รวมคำพ้องและคำแปล, [] หมายถึงไม่มีข้อมูล):
+${allergyJson}
 
 ตอบกลับเป็น JSON รูปแบบเดียวเท่านั้น:
 {
@@ -313,14 +327,15 @@ ${userAllergies}
             }
           }
           if (selected.length < minCap) {
-            final remainder = usable
-                .where((i) => !seen.contains(norm(i.name)))
-                .toList()
-              ..sort((a, b) {
-                final expiryCompare = a.daysToExpiry.compareTo(b.daysToExpiry);
-                if (expiryCompare != 0) return expiryCompare;
-                return b.priorityScore.compareTo(a.priorityScore);
-              });
+            final remainder =
+                usable.where((i) => !seen.contains(norm(i.name))).toList()
+                  ..sort((a, b) {
+                    final expiryCompare = a.daysToExpiry.compareTo(
+                      b.daysToExpiry,
+                    );
+                    if (expiryCompare != 0) return expiryCompare;
+                    return b.priorityScore.compareTo(a.priorityScore);
+                  });
             for (final item in remainder) {
               if (selected.length >= minCap && selected.length >= maxCap) break;
               final key = norm(item.name);
@@ -347,14 +362,15 @@ ${userAllergies}
         }
       }
       if (selectedIngredients.length < minCap) {
-        final filler = eligibleIngredients
-            .where((i) => !selectedIngredients.contains(i))
-            .toList()
-          ..sort((a, b) {
-            final expiryCompare = a.daysToExpiry.compareTo(b.daysToExpiry);
-            if (expiryCompare != 0) return expiryCompare;
-            return b.priorityScore.compareTo(a.priorityScore);
-          });
+        final filler =
+            eligibleIngredients
+                .where((i) => !selectedIngredients.contains(i))
+                .toList()
+              ..sort((a, b) {
+                final expiryCompare = a.daysToExpiry.compareTo(b.daysToExpiry);
+                if (expiryCompare != 0) return expiryCompare;
+                return b.priorityScore.compareTo(a.priorityScore);
+              });
         for (final item in filler) {
           if (selectedIngredients.length >= minCap &&
               selectedIngredients.length >= maxCap) {
@@ -371,7 +387,7 @@ ${userAllergies}
         "📦 ใช้วัตถุดิบ ${selectedIngredients.length} รายการสำหรับ RapidAPI: ${selectedIngredients.map((i) => i.name).join(', ')}",
       );
 
-      // ✅ 2) ดึงเมนูจาก RapidAPI (ตั้งเป้าอย่างน้อย 12 เมนู) โดยใช้วัตถุดิบที่คัดกรองแล้ว
+      // ✅ 2) ดึงเมนูจาก RapidAPI (ตั้งเป้าอย่างน้อย 5 เมนู) โดยใช้วัตถุดิบที่คัดกรองแล้ว
       if (selectedIngredients.isEmpty) {
         print('⚠️ ไม่มีวัตถุดิบที่ผ่านเกณฑ์สำหรับ RapidAPI');
         result.externalRecipes = [];
@@ -389,7 +405,7 @@ ${userAllergies}
               minProtein: minProtein,
               maxCarbs: maxCarbs,
               maxFat: maxFat,
-              excludeIngredients: excludeIngredients,
+              excludeIngredients: allergyExpansion.englishOnly.toList(),
             );
       }
       result.externalFetchTime = DateTime.now();
@@ -473,6 +489,10 @@ ${userAllergies}
       print('ℹ️ Gemini disabled via env — skip AI filtering');
       return [];
     }
+    if (!_aiService.canUseSdk) {
+      return [];
+    }
+
     Future<List<String>> runModel(GenerativeModel model, String label) async {
       try {
         final response = await model.generateContent([Content.text(prompt)]);
@@ -720,4 +740,19 @@ ${userAllergies}
   };
 
   String _normalizeName(String name) => name.trim().toLowerCase();
+
+  /// Return a readable description of allergy coverage (expanded synonyms/translations).
+  /// Falls back to a simple join of provided excludes if expansion fails or is empty.
+  String describeAllergyCoverage(List<String> excludeIngredients) {
+    try {
+      final expansion = AllergyUtils.expandAllergens(excludeIngredients);
+      final list = expansion.all.toList()..sort();
+      if (list.isEmpty) return 'ไม่มีข้อมูลภูมิแพ้เพิ่มเติม';
+      return list.join(', ');
+    } catch (e) {
+      // If anything goes wrong, return a reasonable fallback string
+      if (excludeIngredients.isEmpty) return 'ไม่มีข้อมูลภูมิแพ้เพิ่มเติม';
+      return excludeIngredients.join(', ');
+    }
+  }
 }

@@ -4,6 +4,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:http/http.dart' as http;
 import 'package:my_app/foodreccom/constants/nutrition_thresholds.dart';
+import 'package:my_app/foodreccom/utils/allergy_utils.dart';
 import 'package:my_app/foodreccom/utils/shopping_item_extensions.dart';
 import 'package:my_app/rawmaterial/models/shopping_item.dart';
 
@@ -18,10 +19,12 @@ class EnhancedAIRecommendationService {
   // Defaults tuned for google_generative_ai ^0.4.x (v1beta): use gemini-pro
   String _primaryModelName = 'gemini-pro';
   String _fallbackModelName = 'gemini-pro';
+  bool _useSdk = false;
 
   /// ✅ expose ให้ HybridRecipeService ใช้
   GenerativeModel get primaryModel => _primaryModel;
   GenerativeModel get fallbackModel => _fallbackModel;
+  bool get canUseSdk => _useSdk;
 
   EnhancedAIRecommendationService() {
     final apiKeysStr = dotenv.env['GEMINI_API_KEYS'];
@@ -41,6 +44,11 @@ class EnhancedAIRecommendationService {
     final envFallback = (dotenv.env['GEMINI_FALLBACK_MODEL'] ?? '').trim();
     if (envPrimary.isNotEmpty) _primaryModelName = envPrimary;
     if (envFallback.isNotEmpty) _fallbackModelName = envFallback;
+
+    final sdkPref = (dotenv.env['GEMINI_USE_SDK'] ?? 'false')
+        .trim()
+        .toLowerCase();
+    _useSdk = sdkPref == 'true' || sdkPref == '1' || sdkPref == 'on';
 
     // init with first key if any to avoid nulls
     _initModels();
@@ -117,18 +125,22 @@ class EnhancedAIRecommendationService {
   // Smart generator: try SDK primary/fallback, then REST v1/v1beta fallbacks with multiple models
   Future<String?> generateTextSmart(String prompt) async {
     // 1) Try SDK primary
-    try {
-      final res = await _primaryModel.generateContent([Content.text(prompt)]);
-      final t = res.text?.trim();
-      if (t != null && t.isNotEmpty) return t;
-    } catch (_) {}
+    if (_useSdk) {
+      try {
+        final res = await _primaryModel.generateContent([Content.text(prompt)]);
+        final t = res.text?.trim();
+        if (t != null && t.isNotEmpty) return t;
+      } catch (_) {}
+    }
 
     // 2) Try SDK fallback
-    try {
-      final res = await _fallbackModel.generateContent([Content.text(prompt)]);
-      final t = res.text?.trim();
-      if (t != null && t.isNotEmpty) return t;
-    } catch (_) {}
+    if (_useSdk) {
+      try {
+        final res = await _fallbackModel.generateContent([Content.text(prompt)]);
+        final t = res.text?.trim();
+        if (t != null && t.isNotEmpty) return t;
+      } catch (_) {}
+    }
 
     // 3) Try REST on v1 and v1beta with best-effort model list
     if (_apiKeys.isEmpty) return null;
@@ -322,11 +334,46 @@ class EnhancedAIRecommendationService {
       };
     }).toList();
 
-    final profile = userProfile ?? {};
+    final baseProfile = userProfile ?? {};
+    final profile = Map<String, dynamic>.from(baseProfile);
     final dietary = (dietaryNotes ?? '').trim();
     final guidelines = dietary.isEmpty
         ? 'No additional dietary restrictions provided.'
         : dietary;
+
+    final allergyInputs = <String>[];
+    final allergiesField = baseProfile['allergies'];
+    if (allergiesField is String && allergiesField.trim().isNotEmpty) {
+      allergyInputs.add(allergiesField);
+    } else if (allergiesField is Iterable) {
+      for (final entry in allergiesField) {
+        if (entry is String && entry.trim().isNotEmpty) {
+          allergyInputs.add(entry);
+        }
+      }
+    }
+
+    final allergyExpansion = AllergyUtils.expandAllergens(allergyInputs);
+    final allergyCoverage = describeAllergyCoverage(allergyInputs);
+    final allergyKeywords = allergyExpansion.all.toList()..sort();
+    final allergyKeywordsJson = jsonEncode(allergyKeywords);
+    final allergyKeywordsEn = allergyExpansion.englishOnly.toList()..sort();
+    final allergyKeywordsEnJson = allergyKeywordsEn.isEmpty
+        ? null
+        : jsonEncode(allergyKeywordsEn);
+
+    if (allergyKeywords.isNotEmpty) {
+      profile['allergy_keywords'] = allergyKeywords;
+    }
+    if (allergyKeywordsEn.isNotEmpty) {
+      profile['allergy_keywords_en'] = allergyKeywordsEn;
+    }
+
+    final allergenKeywordBlock = [
+      'Allergen keywords (JSON, รวมคำพ้องทั้งหมด): $allergyKeywordsJson',
+      if (allergyKeywordsEnJson != null)
+        'English-only allergen keywords (JSON): $allergyKeywordsEnJson',
+    ].join('\n');
 
     return '''
 คุณเป็นผู้ช่วยวางแผนอาหารที่ต้องยึดเกณฑ์โภชนาการของ DRI (ไขมัน, ไขมันอิ่มตัว, น้ำตาล, โซเดียม ต่อ 100 กรัม) และกติกา fuzzy frequency ดังนี้:
@@ -337,9 +384,17 @@ class EnhancedAIRecommendationService {
 
 สร้างแผนอาหาร 7 วัน โดยให้แต่ละวันมี 3 มื้อ (เช้า กลางวัน เย็น) และทำตามกติกาเหล่านี้:
 - ใช้วัตถุดิบจาก pantry snapshot ก่อนเมื่อเป็นไปได้ แล้วค่อยเติมวัตถุดิบเสริมตามความจำเป็น
+- เคารพข้อมูลภูมิแพ้ใน user profile อย่างเข้มงวด: ห้ามใช้วัตถุดิบที่ตรงกับรายการภูมิแพ้ รวมถึงผลิตภัณฑ์/ส่วนประกอบที่มีต้นกำเนิดจากสารก่อภูมินั้น (เช่น แพ้นมวัว → งดนม เนย ชีส โยเกิร์ต เวย์ เคซีน; แพ้ถั่วลิสง → งดถั่วลิสง เนยถั่ว น้ำจิ้ม/ซอสที่มีถั่วลิสง) และให้ใช้หลักการเดียวกันกับภูมิแพ้ทุกชนิด
+ - ให้ตรวจสอบซอส เครื่องปรุงรส อาหารหมัก/บ่ม เส้น และของแปรรูปที่อาจซ่อนสารก่อภูมิแพ้ เช่น ซีอิ๊ว/ซีอิ๊วดำ/ซอสถั่วเหลือง (soy sauce, shoyu, ponzu), ซอสเทอริยากิ, ซอสฮอยซิน, วูสเตอร์เชอร์, น้ำซุปก้อน, ซอสพริก/น้ำพริก/น้ำมันพริก (sriracha, hot sauce, gochujang, sambal), เส้นพาสต้า/ราเมน/อุด้ง/โซบะ, บะหมี่กึ่งสำเร็จรูป (มาม่า/ไวไว/ยำยำ/แบรนด์อื่น), ขนมปัง/พิซซ่า/เบเกอรี่หมัก, โยเกิร์ต, ชีส, ไวน์, เบียร์, คอมบูชะ — หากมีสารก่อภูมิแพ้ให้ตัดออกทุกกรณี
+- ใช้ `allergy_keywords` และ `allergy_keywords_en` ที่ส่งมาเป็นชุดคำอ้างอิงหลัก เพื่อตรวจสอบคำพ้อง ศัพท์แสลง และชื่อการค้าของสารก่อภูมิแพ้ทุกชนิด อย่าใช้คำที่ไม่ได้อยู่ในรายการนี้
 - ตรวจให้แน่ใจว่าสารอาหารรวมของทั้งวัน (เช้า+กลางวัน+เย็น) ไม่เกิน: ไขมันรวม < 70 กรัม, ไขมันอิ่มตัวรวม < 20 กรัม, น้ำตาลรวม < 90 กรัม, โซเดียมรวม < 6 กรัม หากวันใดเกินให้สลับหรือปรับเมนูจนผ่านเกณฑ์
 - วางเมนูให้หลากหลาย สลับโปรตีน ผัก และรูปแบบการปรุง เพื่อไม่ให้สองวันติดกันคล้ายกันเกินไป
 - ระบุเหตุผลด้านสุขภาพหรือโภชนาการของแต่ละมื้อไว้ในฟิลด์ `reason`
+
+ข้อมูลภูมิแพ้ (ตีความครอบคลุมคำพ้อง/ผลิตภัณฑ์เกี่ยวเนื่อง):
+$allergyCoverage
+
+$allergenKeywordBlock
 
 สำหรับแต่ละมื้อให้ระบุข้อมูลต่อไปนี้:
 - `name`
