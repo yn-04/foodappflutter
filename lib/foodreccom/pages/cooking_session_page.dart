@@ -35,9 +35,7 @@ class CookingSessionPage extends StatefulWidget {
 class _CookingSessionPageState extends State<CookingSessionPage> {
   late final List<IngredientNeedStatus> _ingredientStatus;
   late final List<_EquipmentItem> _equipment;
-  final Set<int> _preparedIngredients = {};
   final Set<int> _equipmentReady = {};
-  final Set<int> _completedSteps = {};
   final TextEditingController _notesController = TextEditingController();
   final List<Timer> _activeTimers = [];
   bool _completing = false;
@@ -65,21 +63,13 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
 
   @override
   Widget build(BuildContext context) {
-    final shortages = widget.shortages
-        .where((s) => s.missingAmount > 0)
-        .toList();
     final theme = Theme.of(context);
+    final tipsSection = _buildTipsSection(theme);
 
     return Scaffold(
       appBar: AppBar(
         title: Text('เริ่มทำ: ${widget.recipe.name}'),
-        actions: [
-          IconButton(
-            onPressed: _showTipsDialog,
-            icon: const Icon(Icons.lightbulb_outline),
-            tooltip: 'ทิปส์',
-          ),
-        ],
+        actions: const [],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _completing ? null : _completeCooking,
@@ -101,137 +91,22 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildSummaryCard(theme),
-              if (widget.partial || shortages.isNotEmpty)
-                _buildShortageNotice(shortages, theme),
-              const SizedBox(height: 16),
-              _buildIngredientChecklist(theme),
-              if (_equipment.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _buildEquipmentSection(theme),
-              ],
-              const SizedBox(height: 16),
-              _buildStepsSection(theme),
-              const SizedBox(height: 16),
-              _buildTipsSection(theme),
               const SizedBox(height: 16),
               RecipeYoutubeSection(recipe: widget.recipe),
+              const SizedBox(height: 16),
+              tipsSection,
+              if (tipsSection is! SizedBox) const SizedBox(height: 16),
+              if (_equipment.isNotEmpty) ...[
+                _buildEquipmentSection(theme),
+                const SizedBox(height: 16),
+              ],
+              _buildIngredientChecklist(theme),
+              const SizedBox(height: 16),
+              _buildStepsSection(theme),
               const SizedBox(height: 16),
               _buildNotesSection(theme),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSummaryCard(ThemeData theme) {
-    final recipe = widget.recipe;
-    return Card(
-      elevation: 1,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              recipe.name,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _infoChip(
-                  Icons.people_alt_outlined,
-                  '${widget.servings} เสิร์ฟ',
-                ),
-                if (recipe.prepTime > 0)
-                  _infoChip(
-                    Icons.kitchen_outlined,
-                    'เตรียม ${recipe.prepTime} นาที',
-                  ),
-                if (recipe.cookingTime > 0)
-                  _infoChip(
-                    Icons.timer_outlined,
-                    'ปรุง ${recipe.cookingTime} นาที',
-                  ),
-                if (recipe.difficulty.isNotEmpty)
-                  _infoChip(Icons.bar_chart, 'ระดับ ${recipe.difficulty}'),
-              ],
-            ),
-            if (recipe.shortDescription.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                recipe.shortDescription,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurface.withOpacity(.75),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShortageNotice(
-    List<IngredientShortage> shortages,
-    ThemeData theme,
-  ) {
-    return Card(
-      color: Colors.orange[50],
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.info_outline, color: Colors.orange[700]),
-                const SizedBox(width: 8),
-                Text(
-                  widget.partial
-                      ? 'ทำได้ทันที (วัตถุดิบบางส่วนขาด)'
-                      : 'เช็ควัตถุดิบก่อนเริ่ม',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.orange[900],
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            if (shortages.isEmpty)
-              Text(
-                'ไม่มีรายการที่ขาดแล้ว เยี่ยมไปเลย!',
-                style: theme.textTheme.bodyMedium,
-              )
-            else
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: shortages.map((s) {
-                  final unit = s.unit.trim();
-                  final missing = _formatAmount(
-                    s.missingAmount,
-                    unit: s.unit,
-                    ingredientName: s.name,
-                  );
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      '• ${s.name}: ขาด $missing${unit.isEmpty ? '' : ' $unit'}',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  );
-                }).toList(),
-              ),
-          ],
         ),
       ),
     );
@@ -245,52 +120,43 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Icon(Icons.list_alt_outlined, color: theme.colorScheme.primary),
-                const SizedBox(width: 8),
-                Text(
-                  'เตรียมวัตถุดิบให้พร้อม',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
+            Text(
+              'เตรียมวัตถุดิบให้พร้อม',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 12),
-            ...List.generate(_ingredientStatus.length, (index) {
-              final status = _ingredientStatus[index];
-              final checked = _preparedIngredients.contains(index);
-              final missingText = status.missingAmount > 0.01
-                  ? ' • ขาด ${_formatAmount(status.missingAmount, unit: status.unit, ingredientName: status.name)}'
-                  : '';
-              final subtitle =
-                  'ต้องการ ${_formatAmount(status.requiredAmount, unit: status.unit, ingredientName: status.name)}'
-                  '${status.unit.isEmpty ? '' : ' ${status.unit}'}'
-                  ' • มีอยู่ ${_formatAmount(status.availableAmount, unit: status.unit, ingredientName: status.name)}'
-                  '${status.unit.isEmpty ? '' : ' ${status.unit}'}$missingText';
-
-              return CheckboxListTile(
-                value: checked,
-                onChanged: (_) {
-                  setState(() {
-                    if (checked) {
-                      _preparedIngredients.remove(index);
-                    } else {
-                      _preparedIngredients.add(index);
-                    }
-                  });
-                },
-                activeColor: theme.colorScheme.primary,
-                title: Text(
-                  status.name,
-                  style: status.isOptional
-                      ? theme.textTheme.bodyLarge?.copyWith(
-                          fontStyle: FontStyle.italic,
-                        )
-                      : theme.textTheme.bodyLarge,
+            ..._ingredientStatus.map((status) {
+              final amountText = _formatAmount(
+                status.requiredAmount,
+                unit: status.unit,
+                ingredientName: status.name,
+              );
+              final unit = status.unit.trim();
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        status.name,
+                        style: status.isOptional
+                            ? theme.textTheme.bodyLarge?.copyWith(
+                                fontStyle: FontStyle.italic,
+                              )
+                            : theme.textTheme.bodyLarge,
+                      ),
+                    ),
+                    Text(
+                      '$amountText${unit.isEmpty ? '' : ' $unit'}',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
-                subtitle: Text(subtitle),
               );
             }),
           ],
@@ -388,7 +254,6 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
             const SizedBox(height: 12),
             ...List.generate(steps.length, (index) {
               final step = steps[index];
-              final done = _completedSteps.contains(index);
               final minutes = _extractMinuteFromStep(step.instruction);
 
               return Padding(
@@ -396,34 +261,16 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    CheckboxListTile(
-                      value: done,
-                      onChanged: (_) {
-                        setState(() {
-                          if (done) {
-                            _completedSteps.remove(index);
-                          } else {
-                            _completedSteps.add(index);
-                          }
-                        });
-                      },
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: Text(
-                        'ขั้นตอนที่ ${index + 1}',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                    Text(
+                      'ขั้นตอนที่ ${index + 1}',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
                       ),
-                      subtitle: Text(
-                        step.instruction.trim(),
-                        style: done
-                            ? theme.textTheme.bodyMedium?.copyWith(
-                                decoration: TextDecoration.lineThrough,
-                                color: theme.textTheme.bodyMedium?.color
-                                    ?.withOpacity(.6),
-                              )
-                            : theme.textTheme.bodyMedium,
-                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      step.instruction.trim(),
+                      style: theme.textTheme.bodyMedium,
                     ),
                     if (minutes != null)
                       Align(
@@ -570,38 +417,6 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
     return int.tryParse(match.group(1) ?? '');
   }
 
-  void _showTipsDialog() {
-    final tips = _generateTips();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('ทิปส์สำหรับเมนูนี้'),
-        content: tips.isEmpty
-            ? const Text(
-                'ยังไม่มีทิปส์พิเศษ ลองจดไอเดียของคุณไว้ได้เลยในช่องบันทึก',
-              )
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: tips
-                    .map(
-                      (tip) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text('• $tip'),
-                      ),
-                    )
-                    .toList(),
-              ),
-        actions: [
-          TextButton(
-            onPressed: Navigator.of(context).pop,
-            child: const Text('ปิด'),
-          ),
-        ],
-      ),
-    );
-  }
-
   List<String> _generateTips() {
     final tips = <String>[];
     final recipe = widget.recipe;
@@ -692,14 +507,6 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
       }
     }
     return result;
-  }
-
-  Widget _infoChip(IconData icon, String label) {
-    return Chip(
-      avatar: Icon(icon, size: 18),
-      label: Text(label),
-      visualDensity: VisualDensity.compact,
-    );
   }
 
   String _formatAmount(

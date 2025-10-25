@@ -133,22 +133,12 @@ class CookingHistoryPage extends StatelessWidget {
 
   Widget _nutritionRow({
     required String label,
-    double? perServing,
     required double total,
   }) {
     const threshold = 0.01;
-    final hasPerServing =
-        perServing != null && perServing.abs() > threshold;
-    final hasTotal = total.abs() > threshold;
-    if (!hasPerServing && !hasTotal) return const SizedBox.shrink();
+    if (total.abs() <= threshold) return const SizedBox.shrink();
 
-    final parts = <String>[];
-    if (hasPerServing) {
-      parts.add('ต่อเสิร์ฟ ${_formatNutritionValue(perServing!)}');
-    }
-    if (hasTotal) {
-      parts.add('รวม ${_formatNutritionValue(total)}');
-    }
+    final valueText = _formatNutritionValue(total);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -162,7 +152,7 @@ class CookingHistoryPage extends StatelessWidget {
             ),
           ),
           Text(
-            parts.join(' • '),
+            valueText,
             style: const TextStyle(
               fontSize: 13,
               color: Colors.black54,
@@ -191,12 +181,9 @@ class CookingHistoryPage extends StatelessWidget {
       builder: (context) {
         final ingredients = history.usedIngredients;
         final recipePortions = history.recipeIngredientPortions;
-        final perServingNutrition = history.recipeNutritionPerServing;
         final totalNutrition = history.totalNutrition;
         final steps = history.recipeSteps;
-        final hasNutritionSection =
-            _hasNutritionData(perServingNutrition) ||
-                _hasNutritionData(totalNutrition);
+        final hasNutritionSection = _hasNutritionData(totalNutrition);
         return Padding(
           padding: EdgeInsets.only(
             left: 20,
@@ -226,16 +213,6 @@ class CookingHistoryPage extends StatelessWidget {
                       _formatThaiDate(history.cookedAt),
                       style: const TextStyle(color: Colors.black54),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    const Icon(Icons.people_alt_outlined,
-                        size: 16, color: Colors.grey),
-                    const SizedBox(width: 6),
-                    Text('เสิร์ฟ ${history.servingsMade} คน',
-                        style: const TextStyle(fontSize: 14)),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -339,43 +316,27 @@ class CookingHistoryPage extends StatelessWidget {
                   const SizedBox(height: 8),
                   _nutritionRow(
                     label: 'แคลอรี',
-                    perServing: perServingNutrition?.calories,
                     total: totalNutrition.calories,
                   ),
                   _nutritionRow(
                     label: 'โปรตีน (g)',
-                    perServing: perServingNutrition?.protein,
                     total: totalNutrition.protein,
                   ),
                   _nutritionRow(
                     label: 'คาร์บ (g)',
-                    perServing: perServingNutrition?.carbs,
                     total: totalNutrition.carbs,
                   ),
                   _nutritionRow(
                     label: 'ไขมัน (g)',
-                    perServing: perServingNutrition?.fat,
                     total: totalNutrition.fat,
                   ),
                   _nutritionRow(
                     label: 'ไฟเบอร์ (g)',
-                    perServing: perServingNutrition?.fiber,
                     total: totalNutrition.fiber,
                   ),
                   _nutritionRow(
                     label: 'โซเดียม (mg)',
-                    perServing: perServingNutrition?.sodium,
                     total: totalNutrition.sodium,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    perServingNutrition != null
-                        ? 'แสดงต่อ 1 เสิร์ฟ และรวมทั้งหมด'
-                        : 'ค่าโภชนาการรวมทั้งหมด',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.black45,
-                    ),
                   ),
                 ],
                 if (steps.isNotEmpty) ...[
@@ -521,13 +482,13 @@ class _HistoryTile extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        subtitle: Text(
-          history.notes?.trim().isNotEmpty == true
-              ? history.notes!.trim()
-              : 'เสิร์ฟ ${history.servingsMade} คน',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
+        subtitle: history.notes?.trim().isNotEmpty == true
+            ? Text(
+                history.notes!.trim(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              )
+            : null,
         trailing: const Icon(Icons.chevron_right),
       ),
     );
