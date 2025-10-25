@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:my_app/profile/model/my_user.dart';
 import 'package:my_app/services/firebase_storage_service.dart';
 
@@ -59,6 +60,8 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
   // ---- Base controllers ----
   final TextEditingController _heightController = TextEditingController();
   final TextEditingController _weightController = TextEditingController();
+  static final TextInputFormatter _decimalFormatter =
+      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'));
 
   // allergies moved into diet section
   final TextEditingController _allergiesController = TextEditingController();
@@ -68,8 +71,6 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     _DietChoice(key: 'low_fat', label: 'Low-fat'),
     _DietChoice(key: 'low_carb', label: 'Low-carb'),
     _DietChoice(key: 'high_protein', label: 'High-protein'),
-    _DietChoice(key: 'gluten_free', label: 'Gluten-free'),
-    _DietChoice(key: 'dairy_free', label: 'Dairy-free'),
     _DietChoice(key: 'ketogenic', label: 'Ketogenic'),
     _DietChoice(key: 'paleo', label: 'Paleo'),
     _DietChoice(key: 'lacto_vegetarian', label: 'Lacto-vegetarian'),
@@ -77,7 +78,115 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     _DietChoice(key: 'vegan', label: 'Vegan'),
     _DietChoice(key: 'vegetarian', label: 'Vegetarian'),
   ];
-  // ตารางที่ 1: kcal/protein ต่อวัน (DRI ไทย 2563) สำหรับอายุเป็น "ปี" และเพศชาย/หญิง
+
+  static final Map<String, String> _dietKeyToLabel = {
+    for (final c in _dietChoices) c.key: c.label,
+  };
+  // ใช้ label ให้ตรงกับใน _dietChoices เสมอ
+  static const List<_DietConflict> _dietConflicts = [
+    _DietConflict(
+      'Vegan',
+      'Vegetarian',
+      'Vegan ขัดกับ Vegetarian เพราะ Vegan หลีกเลี่ยงผลิตภัณฑ์จากสัตว์ทุกชนิด',
+    ),
+    _DietConflict(
+      'Vegan',
+      'Lacto-vegetarian',
+      'Vegan ไม่รับประทานผลิตภัณฑ์จากนม จึงไม่ควรจับคู่กับ Lacto-vegetarian',
+    ),
+    _DietConflict(
+      'Vegan',
+      'Ovo-vegetarian',
+      'Vegan ไม่รับประทานไข่ จึงไม่ควรจับคู่กับ Ovo-vegetarian',
+    ),
+    _DietConflict(
+      'Vegan',
+      'Ketogenic',
+      'Vegan ต้องการคาร์บจากพืช แต่ Ketogenic ต้องจำกัดคาร์บอย่างมาก',
+    ),
+    _DietConflict(
+      'Vegan',
+      'Paleo',
+      'Paleo ยังรวมอาหารจากเนื้อสัตว์ จึงไม่สอดคล้องกับ Vegan',
+    ),
+    _DietConflict(
+      'Vegan',
+      'High-protein',
+      'High-protein มักพึ่งโปรตีนจากเนื้อสัตว์ ซึ่งไม่สอดคล้องกับ Vegan',
+    ),
+
+    _DietConflict(
+      'Vegetarian',
+      'Paleo',
+      'Paleo เน้นเนื้อสัตว์ ทำให้ขัดกับ Vegetarian',
+    ),
+
+    _DietConflict(
+      'Lacto-vegetarian',
+      'Ovo-vegetarian',
+      'Lacto และ Ovo มีแนวทางต่างกัน ไม่ควรเลือกพร้อมกัน',
+    ),
+
+    _DietConflict(
+      'Ketogenic',
+      'Low-fat',
+      'Ketogenic ต้องการไขมันสูง แต่ Low-fat ต้องจำกัดไขมัน',
+    ),
+
+    _DietConflict(
+      'Paleo',
+      'Low-fat',
+      'Paleo มักพึ่งไขมันจากสัตว์ ไม่เหมาะกับ Low-fat',
+    ),
+
+    _DietConflict(
+      'High-protein',
+      'Vegan',
+      'High-protein มักใช้โปรตีนจากสัตว์จำนวนมาก ซึ่ง Vegan หลีกเลี่ยง',
+    ),
+  ];
+
+  static const Map<String, Set<String>> _dietConflictMap = {
+    'Vegan': {
+      'Vegetarian',
+      'Lacto-Vegetarian',
+      'Ovo-Vegetarian',
+      'Ketogenic',
+      'Paleo',
+      'High-Protein',
+    },
+    'Vegetarian': {'Vegan', 'Paleo'},
+    'Lacto-Vegetarian': {'Vegan', 'Ovo-Vegetarian'},
+    'Ovo-Vegetarian': {'Vegan', 'Lacto-Vegetarian'},
+    'Ketogenic': {'Vegan', 'Low-Fat'},
+    'Paleo': {'Vegan', 'Vegetarian', 'Low-Fat'},
+    'High-Protein': {'Vegan'},
+    'Low-Fat': {'Ketogenic', 'Paleo'},
+  };
+
+  static const Map<String, String> _dietConflictReasons = {
+    'Vegan|Vegetarian':
+        'Vegan ขัดกับ Vegetarian เพราะ Vegan หลีกเลี่ยงผลิตภัณฑ์จากสัตว์ทุกชนิด',
+    'Vegan|Lacto-Vegetarian':
+        'Vegan ไม่รับประทานผลิตภัณฑ์จากนม จึงไม่ควรจับคู่กับ Lacto-Vegetarian',
+    'Vegan|Ovo-Vegetarian':
+        'Vegan ไม่รับประทานไข่ จึงไม่ควรจับคู่กับ Ovo-Vegetarian',
+    'Vegan|Ketogenic':
+        'Vegan ต้องการคาร์บจากพืช แต่ Ketogenic ต้องจำกัดคาร์บอย่างมาก',
+    'Vegan|Paleo': 'Paleo ยังรวมอาหารจากสัตว์ จึงไม่สอดคล้องกับ Vegan',
+    'Vegan|High-Protein':
+        'High-Protein มักพึ่งโปรตีนจากสัตว์ ซึ่งไม่สอดคล้องกับ Vegan',
+    'Vegetarian|Paleo': 'Paleo เน้นเนื้อสัตว์ ทำให้ขัดกับ Vegetarian',
+    'Lacto-Vegetarian|Ovo-Vegetarian':
+        'Lacto และ Ovo มีแนวทางต่างกัน ไม่ควรเลือกพร้อมกัน',
+    'Ketogenic|Vegan': 'Ketogenic ต้องการไขมันสูงจากสัตว์ ซึ่งสวนทางกับ Vegan',
+    'Ketogenic|Low-Fat': 'Ketogenic ต้องการไขมันสูง แต่ Low-Fat ต้องจำกัดไขมัน',
+    'Paleo|Low-Fat': 'Paleo มักพึ่งไขมันจากสัตว์ ไม่เหมาะกับ Low-Fat',
+    'High-Protein|Vegan':
+        'High-Protein มักใช้โปรตีนจากสัตว์จำนวนมาก ซึ่ง Vegan หลีกเลี่ยง',
+  };
+
+  //   //ตารางที่ 1: kcal/protein ต่อวัน (DRI ไทย 2563) สำหรับอายุเป็น "ปี" และเพศชาย/หญิง
   static const List<Map<String, dynamic>> _kDriTable1 = [
     // เด็ก
     {'min': 1, 'max': 3, 'sex': 'male', 'kcal': 1050, 'protein': 16},
@@ -155,6 +264,7 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
   _DriTargets? _driPreview;
 
   final Set<String> _selectedDietKeys = {};
+  List<String> _dietWarnings = [];
   final Map<String, TextEditingController> _minControllers = {};
   final Map<String, TextEditingController> _maxControllers = {};
 
@@ -241,6 +351,8 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
   void _commitField(_EditableField f) {
     if (!mounted) return;
     FocusScope.of(context).unfocus();
+    final shouldUpdateDri =
+        f == _EditableField.height || f == _EditableField.weight;
     setState(() {
       switch (f) {
         case _EditableField.height:
@@ -254,6 +366,12 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
           break;
       }
     });
+    if (shouldUpdateDri) {
+      _updateDriPreviewFromControllers();
+    }
+    if (!_isSaving) {
+      unawaited(_save());
+    }
   }
 
   Future<void> _loadHealthData() async {
@@ -339,11 +457,45 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     }
   }
 
+  void _refreshDietWarnings() {
+    // แปลง key → label และเก็บเป็นเซ็ตของ label ที่ถูกเลือก
+    final selectedLabels = _selectedDietKeys
+        .map((k) => _dietKeyToLabel[k])
+        .whereType<String>()
+        .toSet();
+
+    final warnings = <String>[];
+    for (final c in _dietConflicts) {
+      if (c.matches(selectedLabels)) {
+        warnings.add(c.reason);
+      }
+    }
+    setState(() {
+      _dietWarnings = warnings.toList();
+    });
+  }
+
+  _DietConflict? _findConflictForSelection(String dietKey) {
+    final label = _dietKeyToLabel[dietKey];
+    if (label == null) return null;
+    final selectedLabels = _selectedDietKeys
+        .map((k) => _dietKeyToLabel[k])
+        .whereType<String>()
+        .toSet();
+    for (final conflict in _dietConflicts) {
+      if (conflict.conflictsWith(label, selectedLabels)) {
+        return conflict;
+      }
+    }
+    return null;
+  }
+
   void _populateDiet() {
     final diets = _additionalHealthData?['dietPreferences'];
     _selectedDietKeys
       ..clear()
       ..addAll(diets is List ? diets.whereType<String>() : const []);
+    _refreshDietWarnings();
 
     // init min/max controllers
     for (final k in _dietToNutrient.keys) {
@@ -556,8 +708,6 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
   }
 
   // เรียกเมื่อพิมพ์ส่วนสูง/น้ำหนัก
-  void _onAnthroChanged() => _updateDriPreviewFromControllers();
-
   // ------- Save -------
   Future<void> _recomputeDriFromProfileAndSave() async {
     // gender / birthDate จาก currentUser หรือ healthProfile
@@ -793,7 +943,6 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
         }
         _driPreview = driTargets;
       });
-      _showSnackBar('บันทึกข้อมูลสำเร็จ');
     } catch (e) {
       if (!mounted) return;
       _showSnackBar('บันทึกล้มเหลว: $e', success: false);
@@ -867,10 +1016,12 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
                           label: 'ส่วนสูง (ซม.)',
                           hint: 'เช่น 165',
                           keyboardType: TextInputType.number,
+                          inputFormatters: <TextInputFormatter>[
+                            _decimalFormatter,
+                          ],
                           validator: _numberOrEmptyValidator,
                           readOnly: !_editHeight,
                           focusNode: _fnHeight,
-                          onChanged: (_) => _onAnthroChanged(),
                           suffix: _editLockSuffix(
                             editing: _editHeight,
                             isBusy: _isSaving,
@@ -886,10 +1037,12 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
                           label: 'น้ำหนัก (กก.)',
                           hint: 'เช่น 54.5',
                           keyboardType: TextInputType.number,
+                          inputFormatters: <TextInputFormatter>[
+                            _decimalFormatter,
+                          ],
                           validator: _numberOrEmptyValidator,
                           readOnly: !_editWeight,
                           focusNode: _fnWeight,
-                          onChanged: (_) => _onAnthroChanged(),
                           suffix: _editLockSuffix(
                             editing: _editWeight,
                             isBusy: _isSaving,
@@ -969,6 +1122,27 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
                               label: Text(c.label),
                               selected: selected,
                               onSelected: (v) {
+                                if (v) {
+                                  final conflict = _findConflictForSelection(
+                                    c.key,
+                                  );
+                                  if (conflict != null) {
+                                    final currentLabel =
+                                        _dietKeyToLabel[c.key] ?? c.label;
+                                    final other = conflict.otherLabel(
+                                      currentLabel,
+                                    );
+                                    final reason = conflict.reason;
+                                    setState(() {
+                                      _dietWarnings = [reason];
+                                    });
+                                    final message = other == null
+                                        ? reason
+                                        : '$currentLabel \u0e40\u0e25\u0e37\u0e2d\u0e01\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e01\u0e31\u0e1a $other \u0e44\u0e21\u0e48\u0e44\u0e14\u0e49: $reason';
+                                    _showSnackBar(message, success: false);
+                                    return;
+                                  }
+                                }
                                 setState(() {
                                   if (v) {
                                     _selectedDietKeys.add(c.key);
@@ -976,10 +1150,43 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
                                     _selectedDietKeys.remove(c.key);
                                   }
                                 });
+                                _refreshDietWarnings();
+                                if (!_isSaving) {
+                                  unawaited(_save());
+                                }
                               },
                             );
                           }).toList(),
                         ),
+                        if (_dietWarnings.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          ..._dietWarnings.map(
+                            (msg) => Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.warning_amber_rounded,
+                                    color: Colors.orangeAccent,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      msg,
+                                      style: TextStyle(
+                                        color: Colors.orange.shade800,
+                                        fontSize: 13,
+                                        height: 1.25,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 12),
                         ..._selectedDietKeys
                             .where(_dietToNutrient.containsKey)
@@ -987,45 +1194,7 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    height: 52,
-                    child: FilledButton.icon(
-                      onPressed: _isSaving ? null : _save,
-                      icon: _isSaving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.black,
-                                ),
-                              ),
-                            )
-                          : const Icon(Icons.save_rounded, color: Colors.black),
-                      label: const Text(
-                        'บันทึกข้อมูล',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: Color.fromARGB(255, 255, 255, 255), // ฟอนต์ดำ
-                        ),
-                      ),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color.fromARGB(
-                          255,
-                          0,
-                          0,
-                          0,
-                        ), // เหลือง
-                        foregroundColor: Colors.black, // ไอคอน + ข้อความเป็นดำ
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    ),
-                  ),
+                  const SizedBox(height: 40),
                 ],
               ),
             ),
@@ -1233,6 +1402,7 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
     FocusNode? focusNode,
     ValueChanged<String>? onChanged,
     Widget? suffix, // ใช้เป็น decoration.suffixIcon
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: controller,
@@ -1242,6 +1412,7 @@ class _HealthInfoScreenState extends State<HealthInfoScreen> {
       readOnly: readOnly,
       focusNode: focusNode,
       onChanged: onChanged,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
@@ -1483,4 +1654,28 @@ class _NutrientMeta {
 class _MacroPct {
   final double carbMin, carbMax, fatMin, fatMax;
   const _MacroPct(this.carbMin, this.carbMax, this.fatMin, this.fatMax);
+}
+
+// ช่วยเก็บคู่คอนฟลิกต์ (เช็คแบบไม่แคร์ลำดับ A-B หรือ B-A)
+class _DietConflict {
+  final String a;
+  final String b;
+  final String reason;
+  const _DietConflict(this.a, this.b, this.reason);
+
+  bool matches(Set<String> selectedLabels) {
+    return selectedLabels.contains(a) && selectedLabels.contains(b);
+  }
+
+  bool conflictsWith(String label, Set<String> selectedLabels) {
+    if (label == a && selectedLabels.contains(b)) return true;
+    if (label == b && selectedLabels.contains(a)) return true;
+    return false;
+  }
+
+  String? otherLabel(String label) {
+    if (label == a) return b;
+    if (label == b) return a;
+    return null;
+  }
 }
