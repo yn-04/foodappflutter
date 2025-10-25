@@ -1,9 +1,11 @@
 // lib/welcomeapp/profile_setup_screen.dart
-// หน้า Profile Setup (UI และการทำงานตามแบบเดิมของ Registerinfor)
+// โปรไฟล์ตั้งต้นหลังสมัครด้วยโทนสีใหม่และภาพหัวกระดาน
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
+import 'welcome_theme.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -17,20 +19,17 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final _firestore = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
 
-  // ข้อมูลจากหน้าก่อนหน้า
   String? _email;
   String? _password;
   String? _name;
   String? _phoneNumber;
 
-  // Controllers
   final _displayNameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _weightController = TextEditingController();
   final _heightController = TextEditingController();
   final _allergyController = TextEditingController();
 
-  // Variables
   String _selectedGender = 'ชาย';
   DateTime _selectedDate = DateTime.now();
   bool _isLoading = false;
@@ -40,8 +39,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
-    // รับข้อมูลจากหน้า RegisterScreen (arguments: name, email, password, (optional) phoneNumber)
     final args =
         ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     if (args != null) {
@@ -50,10 +47,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       _name = args['name'];
       _phoneNumber = args['phoneNumber'];
 
-      if (_name != null && _name!.isNotEmpty) {
+      if ((_name ?? '').isNotEmpty) {
         _displayNameController.text = _name!;
       }
-      if (_phoneNumber != null && _phoneNumber!.isNotEmpty) {
+      if ((_phoneNumber ?? '').isNotEmpty) {
         _phoneController.text = _phoneNumber!;
       }
     }
@@ -69,8 +66,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     super.dispose();
   }
 
-  // ปฏิทินวันเกิด (ค.ศ.)
   Future<void> _selectDate(BuildContext context) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
     try {
       final now = DateTime.now();
       final DateTime? picked = await showDatePicker(
@@ -87,10 +84,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           return Theme(
             data: Theme.of(context).copyWith(
               colorScheme: ColorScheme.light(
-                primary: Colors.blue[600]!,
+                primary: WelcomeTheme.primary,
                 onPrimary: Colors.white,
                 surface: Colors.white,
-                onSurface: Colors.black,
+                onSurface: WelcomeTheme.textPrimary,
               ),
             ),
             child: child!,
@@ -100,13 +97,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
       if (!mounted) return;
       if (picked != null && picked != _selectedDate) {
-        setState(() {
-          _selectedDate = picked;
-        });
+        setState(() => _selectedDate = picked);
       }
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger?.showSnackBar(
         const SnackBar(
           content: Text('ไม่สามารถเปิดปฏิทินได้ กรุณาลองใหม่'),
           backgroundColor: Colors.red,
@@ -140,21 +135,15 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     try {
       final displayName = _displayNameController.text.trim();
 
-      // ✅ สร้างผู้ใช้ใน Firebase Auth
       final userCredential = await _auth.createUserWithEmailAndPassword(
         email: _email!,
         password: _password!,
       );
       if (!mounted) return;
 
-      // อัปเดต displayName
       await userCredential.user!.updateDisplayName(displayName);
       if (!mounted) return;
 
-      // (ออปชัน) ส่งอีเมลยืนยันตัวตน
-      // await userCredential.user!.sendEmailVerification();
-
-      // ✅ เซฟข้อมูลลง Firestore
       await _firestore.collection('users').doc(userCredential.user!.uid).set({
         'email': _email,
         'displayName': displayName,
@@ -177,7 +166,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         ),
       );
 
-      // ➜ ไปหน้า Home (ถ้าอยากให้กลับไป Login แทน ให้เปลี่ยนเป็น '/login')
       Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
@@ -211,282 +199,241 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text(
-          'ข้อมูลลงทะเบียน',
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600),
+    final textTheme = Theme.of(context).textTheme;
+
+    InputDecoration decoration({
+      required String label,
+      String? hint,
+      IconData? prefixIcon,
+    }) {
+      return InputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixIcon: prefixIcon != null ? Icon(prefixIcon) : null,
+        filled: true,
+        fillColor: WelcomeTheme.fieldFill,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Colors.transparent),
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Colors.transparent),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: WelcomeTheme.primary, width: 1.4),
+        ),
+      );
+    }
+
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      backgroundColor: WelcomeTheme.background,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text(
+          'ข้อมูลลงทะเบียน',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Form(
-          key: _formKey,
+      body: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 20),
-
-              // Display Name
-              TextFormField(
-                controller: _displayNameController,
-                decoration: InputDecoration(
-                  labelText: 'ชื่อที่ต้องการแสดง',
-                  prefixIcon: const Icon(Icons.person, color: Colors.grey),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.blue[600]!),
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[50],
-                  hintText: 'เช่น นีน่า, คุณตะวัน',
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'กรุณากรอกชื่อที่ต้องการแสดง';
-                  }
-                  if (value.trim().length < 2) {
-                    return 'กรุณากรอกชื่ออย่างน้อย 2 ตัวอักษร';
-                  }
-                  return null;
-                },
+              const WelcomeHeader(
+                title: 'ครบขั้นตอนภายในไม่กี่นาที',
+                subtitle:
+                    'บอกข้อมูลสุขภาพเล็กน้อยเพื่อรับคำแนะนำที่เหมาะกับคุณ',
               ),
-              const SizedBox(height: 16),
-
-              // Gender
-              DropdownButtonFormField<String>(
-                initialValue: _selectedGender,
-                decoration: InputDecoration(
-                  labelText: 'เพศ',
-                  prefixIcon: const Icon(Icons.wc, color: Colors.grey),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.blue[600]!),
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[50],
-                ),
-                items: _genderOptions
-                    .map((v) => DropdownMenuItem(value: v, child: Text(v)))
-                    .toList(),
-                onChanged: (v) =>
-                    setState(() => _selectedGender = v ?? 'ไม่ระบุ'),
-              ),
-              const SizedBox(height: 16),
-
-              // Birth date (ค.ศ.)
-              InkWell(
-                onTap: () => _selectDate(context),
-                child: InputDecorator(
-                  decoration: InputDecoration(
-                    labelText: 'วันเกิด',
-                    prefixIcon: const Icon(
-                      Icons.calendar_today,
-                      color: Colors.grey,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.grey[300]!),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.grey[300]!),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.blue[600]!),
-                    ),
-                    filled: true,
-                    fillColor: Colors.grey[50],
-                    suffixIcon: const Icon(
-                      Icons.arrow_drop_down,
-                      color: Colors.grey,
-                    ),
-                  ),
-                  child: Text(
-                    _formatDate(_selectedDate),
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Weight
-              TextFormField(
-                controller: _weightController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: 'น้ำหนัก (กก.)',
-                  prefixIcon: const Icon(
-                    Icons.monitor_weight,
-                    color: Colors.grey,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.blue[600]!),
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[50],
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) return 'กรุณากรอกน้ำหนัก';
-                  final weight = double.tryParse(value);
-                  if (weight == null || weight <= 0 || weight > 300) {
-                    return 'กรุณากรอกน้ำหนักที่ถูกต้อง (1-300 กก.)';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // Height
-              TextFormField(
-                controller: _heightController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: 'ส่วนสูง (ซม.)',
-                  prefixIcon: const Icon(Icons.height, color: Colors.grey),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.blue[600]!),
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[50],
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) return 'กรุณากรอกส่วนสูง';
-                  final height = double.tryParse(value);
-                  if (height == null || height <= 0 || height > 250) {
-                    return 'กรุณากรอกส่วนสูงที่ถูกต้อง (1-250 ซม.)';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // Allergies
-              TextFormField(
-                controller: _allergyController,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  labelText: 'อาหารที่แพ้ (ถ้ามี)',
-                  prefixIcon: const Icon(Icons.warning, color: Colors.grey),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.grey[300]!),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.blue[600]!),
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[50],
-                  hintText:
-                      'ระบุอาหารที่แพ้ เช่น กุ้ง, ถั่ว, นม หรือใส่ "ไม่มี" หากไม่แพ้อะไร',
-                ),
-              ),
-              const SizedBox(height: 32),
-
-              // Buttons
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _isLoading ? null : _goBack,
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+                child: Form(
+                  key: _formKey,
+                  child: Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(28),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color.fromARGB(13, 0, 0, 0),
+                          blurRadius: 30,
+                          offset: Offset(0, 18),
                         ),
-                        side: BorderSide(color: Colors.grey[400]!),
-                      ),
-                      child: const Text(
-                        'ย้อนกลับ',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.grey,
-                        ),
-                      ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _submitRegistration,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue[600],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'ข้อมูลส่วนตัว',
+                          textAlign: TextAlign.center,
+                          style: textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: WelcomeTheme.textPrimary,
+                          ),
                         ),
-                        elevation: 2,
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.white,
-                                ),
-                              ),
-                            )
-                          : const Text(
-                              'ลงทะเบียน',
-                              style: TextStyle(
-                                fontSize: 16,
+                        const SizedBox(height: 24),
+                        TextFormField(
+                          controller: _displayNameController,
+                          decoration: decoration(
+                            label: 'ชื่อที่ต้องการแสดง',
+                            hint: 'เช่น นีน่า, คุณตะวัน',
+                            prefixIcon: Icons.person,
+                          ),
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'กรุณากรอกชื่อที่ต้องการแสดง';
+                            }
+                            if (value.trim().length < 2) {
+                              return 'กรุณากรอกชื่ออย่างน้อย 2 ตัวอักษร';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 18),
+                        DropdownButtonFormField<String>(
+                          initialValue: _selectedGender,
+                          decoration: decoration(
+                            label: 'เพศ',
+                            prefixIcon: Icons.wc,
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          icon: const Icon(Icons.keyboard_arrow_down),
+                          items: _genderOptions
+                              .map(
+                                (v) =>
+                                    DropdownMenuItem(value: v, child: Text(v)),
+                              )
+                              .toList(),
+                          onChanged: (v) =>
+                              setState(() => _selectedGender = v ?? 'ไม่ระบุ'),
+                        ),
+                        const SizedBox(height: 18),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => _selectDate(context),
+                          child: InputDecorator(
+                            decoration: decoration(
+                              label: 'วันเกิด',
+                              prefixIcon: Icons.calendar_today,
+                            ),
+                            child: Text(
+                              _formatDate(_selectedDate),
+                              style: textTheme.bodyMedium?.copyWith(
+                                color: WelcomeTheme.textPrimary,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        TextFormField(
+                          controller: _phoneController,
+                          keyboardType: TextInputType.phone,
+                          decoration: decoration(
+                            label: 'เบอร์โทรศัพท์ (ถ้ามี)',
+                            hint: '08x-xxx-xxxx',
+                            prefixIcon: Icons.phone_android_outlined,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        TextFormField(
+                          controller: _weightController,
+                          keyboardType: TextInputType.number,
+                          decoration: decoration(
+                            label: 'น้ำหนัก (กก.)',
+                            prefixIcon: Icons.monitor_weight,
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'กรุณากรอกน้ำหนัก';
+                            }
+                            final weight = double.tryParse(value);
+                            if (weight == null || weight <= 0 || weight > 300) {
+                              return 'กรุณากรอกน้ำหนักที่ถูกต้อง (1-300 กก.)';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 18),
+                        TextFormField(
+                          controller: _heightController,
+                          keyboardType: TextInputType.number,
+                          decoration: decoration(
+                            label: 'ส่วนสูง (ซม.)',
+                            prefixIcon: Icons.height,
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'กรุณากรอกส่วนสูง';
+                            }
+                            final height = double.tryParse(value);
+                            if (height == null || height <= 0 || height > 250) {
+                              return 'กรุณากรอกส่วนสูงที่ถูกต้อง (1-250 ซม.)';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 18),
+                        TextFormField(
+                          controller: _allergyController,
+                          maxLines: 3,
+                          decoration: decoration(
+                            label: 'อาหารที่แพ้ (ถ้ามี)',
+                            hint:
+                                'ระบุอาหารที่แพ้ เช่น กุ้ง, ถั่ว, นม หรือใส่ "ไม่มี"',
+                            prefixIcon: Icons.warning_amber_rounded,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: _isLoading ? null : _goBack,
+                                style: WelcomeTheme.secondaryButtonStyle,
+                                child: const Text('ย้อนกลับ'),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: _isLoading
+                                    ? null
+                                    : _submitRegistration,
+                                style: WelcomeTheme.primaryButtonStyle,
+                                child: _isLoading
+                                    ? const SizedBox(
+                                        height: 20,
+                                        width: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Text(
+                                        'ลงทะเบียน',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                ],
+                ),
               ),
-              const SizedBox(height: 32),
             ],
           ),
         ),
