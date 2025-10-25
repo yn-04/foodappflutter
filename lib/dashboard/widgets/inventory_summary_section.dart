@@ -14,6 +14,7 @@ class InventorySummarySection extends StatelessWidget {
     this.title = 'หมวดหมู่และวัตถุดิบทั้งหมด',
     this.hint = 'จำนวนรายการวัตถุดิบในแต่ละหมวดหมู่',
     this.viewAllText = 'ดูรายละเอียด',
+    this.inlineInsight,
   });
 
   final int totalItems;
@@ -24,6 +25,7 @@ class InventorySummarySection extends StatelessWidget {
   final String title;
   final String hint;
   final String viewAllText;
+  final Widget? inlineInsight;
 
   @override
   Widget build(BuildContext context) {
@@ -90,17 +92,20 @@ class InventorySummarySection extends StatelessWidget {
                 separatorBuilder: (_, __) => const SizedBox(width: 12),
                 itemBuilder: (context, index) {
                   final e = entries[index];
+                  final categoryColor = Categories.colorFor(e.key);
                   return _CategoryChip(
                     category: e.key,
                     count: e.value,
-                    color: _categoryColor(context, e.key),
+                    color: categoryColor,
                     onTap: () => _showCategoryDetail(context, e.key),
                   );
                 },
               ),
             ),
-
-          const SizedBox(height: 8),
+          if (inlineInsight != null) ...[
+            const SizedBox(height: 12),
+            inlineInsight!,
+          ],
         ],
       ),
     );
@@ -194,16 +199,16 @@ class InventorySummarySection extends StatelessWidget {
                         Divider(color: cs.outlineVariant.withAlpha(80)),
                     itemBuilder: (context, i) {
                       final e = sorted[i];
+                      final accent = Categories.colorFor(e.key);
                       return ListTile(
                         leading: CircleAvatar(
                           radius: 18,
-                          backgroundColor: _categoryColor(
-                            context,
-                            e.key,
-                          ).withAlpha((255 * 0.10).round()),
+                          backgroundColor: accent.withAlpha(
+                            (255 * 0.10).round(),
+                          ),
                           child: Icon(
                             Categories.iconFor(e.key),
-                            color: _categoryColor(context, e.key),
+                            color: accent,
                             size: 18,
                           ),
                         ),
@@ -211,7 +216,7 @@ class InventorySummarySection extends StatelessWidget {
                           e.key,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontWeight: FontWeight.w700),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                         trailing: Text(
                           '${e.value} รายการ',
@@ -247,26 +252,9 @@ class InventorySummarySection extends StatelessWidget {
     return a.key.compareTo(b.key);
   }
 
-  // ให้สีคงที่สำหรับแต่ละหมวดหมู่ เพื่อให้ UI แยกแยะได้ง่าย
-  Color _categoryColor(BuildContext context, String category) {
-    const palette = [
-      Colors.blue,
-      Colors.green,
-      Colors.orange,
-      Colors.purple,
-      Colors.pink,
-      Colors.teal,
-      Colors.indigo,
-      Colors.red,
-      Colors.brown,
-      Colors.cyan,
-    ];
-    final idx = category.hashCode.abs() % palette.length;
-    return palette[idx];
-  }
-
   void _showCategoryDetail(BuildContext context, String category) {
     final cs = Theme.of(context).colorScheme;
+    final accent = Categories.colorFor(category);
     showModalBottomSheet(
       context: context,
       backgroundColor: cs.surface,
@@ -302,7 +290,7 @@ class InventorySummarySection extends StatelessWidget {
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      Icon(Categories.iconFor(category), color: cs.primary),
+                      Icon(Categories.iconFor(category), color: accent),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
