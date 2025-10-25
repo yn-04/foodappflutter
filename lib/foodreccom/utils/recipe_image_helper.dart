@@ -23,6 +23,47 @@ class RecipeImageHelper {
         'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=900&q=80',
   };
 
+  static const Map<String, String> _keywordImages = {
+    'ไก่':
+        'https://images.unsplash.com/photo-1482049016688-2d3e1b311543?auto=format&fit=crop&w=900&q=80',
+    'chicken':
+        'https://images.unsplash.com/photo-1482049016688-2d3e1b311543?auto=format&fit=crop&w=900&q=80',
+    'หมู':
+        'https://images.unsplash.com/photo-1551183053-bf91a1d81141?auto=format&fit=crop&w=900&q=80',
+    'pork':
+        'https://images.unsplash.com/photo-1551183053-bf91a1d81141?auto=format&fit=crop&w=900&q=80',
+    'เนื้อ':
+        'https://images.unsplash.com/photo-1612872803154-0fef7c086931?auto=format&fit=crop&w=900&q=80',
+    'beef':
+        'https://images.unsplash.com/photo-1612872803154-0fef7c086931?auto=format&fit=crop&w=900&q=80',
+    'ปลา':
+        'https://images.unsplash.com/photo-1514516345957-556ca7c18bae?auto=format&fit=crop&w=900&q=80',
+    'seafood':
+        'https://images.unsplash.com/photo-1514516345957-556ca7c18bae?auto=format&fit=crop&w=900&q=80',
+    'ผัก':
+        'https://images.unsplash.com/photo-1466637574441-749b8f19452f?auto=format&fit=crop&w=900&q=80',
+    'vegetable':
+        'https://images.unsplash.com/photo-1466637574441-749b8f19452f?auto=format&fit=crop&w=900&q=80',
+    'สลัด':
+        'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=900&q=80',
+    'salad':
+        'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=900&q=80',
+    'ของหวาน':
+        'https://images.unsplash.com/photo-1505253217343-41af6ba0577b?auto=format&fit=crop&w=900&q=80',
+    'dessert':
+        'https://images.unsplash.com/photo-1505253217343-41af6ba0577b?auto=format&fit=crop&w=900&q=80',
+  };
+
+  static const List<String> _fallbackPool = [
+    'https://images.unsplash.com/photo-1466637574441-749b8f19452f?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1512058564366-18510be2db19?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1484723091739-30a097e8f929?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1551183053-bf91a1d81141?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1498837167922-ddd27525d352?auto=format&fit=crop&w=900&q=80',
+    'https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=900&q=80',
+  ];
+
   static const Map<String, String> _tagImages = {
     'thai':
         'https://images.unsplash.com/photo-1608032361953-166224245012?auto=format&fit=crop&w=900&q=80',
@@ -56,7 +97,7 @@ class RecipeImageHelper {
     final url = recipe.imageUrl;
     if (url != null && url.trim().isNotEmpty) return url;
 
-    final query = _buildQueryImage(recipe.name);
+    final query = _imageForName(recipe.name);
     if (query != null) return query;
 
     for (final tag in recipe.tags) {
@@ -72,11 +113,17 @@ class RecipeImageHelper {
     return _defaultImage;
   }
 
-  static String? _buildQueryImage(String name) {
+  static String? _imageForName(String name) {
     final cleaned = name.replaceAll(RegExp(r'[^a-zA-Z0-9ก-๙\\s]'), '').trim();
     if (cleaned.isEmpty) return null;
-    final encoded = Uri.encodeComponent(cleaned);
-    return 'https://source.unsplash.com/900x600/?food,$encoded';
+    final lower = cleaned.toLowerCase();
+    for (final entry in _keywordImages.entries) {
+      if (lower.contains(entry.key)) return entry.value;
+    }
+    if (_fallbackPool.isEmpty) return null;
+    final hash = lower.hashCode & 0x7fffffff;
+    final index = hash % _fallbackPool.length;
+    return _fallbackPool[index];
   }
 }
 

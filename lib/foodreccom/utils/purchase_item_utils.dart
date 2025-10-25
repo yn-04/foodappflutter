@@ -53,7 +53,7 @@ class _IngredientProfile {
   bool matches(String lowerName) => keywords.any(lowerName.contains);
 }
 
-const _defaultMinGramPerServing = 2.0;
+const _defaultMinGramPerServing = 1.0;
 const _defaultMinMlPerServing = 2.0;
 const _defaultMinPiecePerServing = 1.0;
 
