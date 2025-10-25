@@ -1,10 +1,12 @@
 // lib/welcomeapp/register_screen.dart
-// เช็คอีเมลซ้ำทั้งแบบเรียลไทม์ และตอนกด "ถัดไป"
-// ถ้าอีเมลถูกใช้งาน → โชว์ error ใต้ช่องและ "ไม่ไปหน้า profile-setup"
+// สมัครสมาชิกด้วยโทนสีใหม่พร้อม header ภาพโลโก้
 
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import 'welcome_theme.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -20,15 +22,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _pass = TextEditingController();
   final _confirm = TextEditingController();
 
-  // สำหรับ validate แบบเรียลไทม์เฉพาะ field
   final _passFieldKey = GlobalKey<FormFieldState<String>>();
   final _confirmFieldKey = GlobalKey<FormFieldState<String>>();
 
-  // สำหรับแสดง error ใต้ช่องอีเมล ถ้าอีเมลถูกใช้งานแล้ว
   final _emailFocus = FocusNode();
   String? _emailError;
 
-  // debounce สำหรับเช็คอีเมลตอนพิมพ์
   Timer? _emailDebounce;
 
   bool _showPass = false;
@@ -47,7 +46,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  // ===== Validators =====
   String? _validateDisplayName(String? v) {
     final value = v?.trim() ?? '';
     if (value.isEmpty) return 'กรุณากรอกชื่อที่ต้องการแสดง';
@@ -81,14 +79,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return null;
   }
 
-  // ===== Email check (validate format + feedback) =====
   Future<bool> _checkEmailInUse({bool showSnackOnError = false}) async {
     final email = _email.text.trim();
     final formatError = _validateEmailFormat(email);
     if (formatError != null) {
-      if (mounted) {
-        setState(() => _emailError = formatError);
-      }
+      if (mounted) setState(() => _emailError = formatError);
       return false;
     }
 
@@ -97,9 +92,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return true;
   }
 
-  // ===== Next =====
   Future<void> _next() async {
-    // validate ฟอร์ม (ชื่อ/อีเมลฟอร์แมต/รหัสผ่าน)
     if (!_formKey.currentState!.validate()) return;
 
     if (!_accept) {
@@ -115,27 +108,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!mounted) return;
     setState(() => _loading = true);
 
-    // ✅ บังคับเช็คอีเมลซ้ำก่อนจะไปหน้าโปรไฟล์
     final ok = await _checkEmailInUse(showSnackOnError: true);
     if (!mounted) return;
     if (!ok) {
       setState(() => _loading = false);
       return;
-    } // 👈 หยุด
+    }
     if (_emailError != null) {
       setState(() => _loading = false);
       _emailFocus.requestFocus();
       return;
     }
 
-    // ✅ guard อีกชั้น ถ้า state มี error อยู่ก็ไม่ไป
-    if (_emailError != null) {
-      if (mounted) setState(() => _loading = false);
-      _emailFocus.requestFocus();
-      return;
-    }
-
-    // ผ่านทั้งหมด → ไปหน้า Profile Setup
     await Navigator.pushNamed(
       context,
       '/profile-setup',
@@ -147,317 +131,305 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
 
     if (!mounted) return;
-    if (mounted) setState(() => _loading = false);
+    setState(() => _loading = false);
   }
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
+    InputDecoration decoration({
+      required String label,
+      String? hint,
+      IconData? prefixIcon,
+      Widget? suffixIcon,
+    }) {
+      return InputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixIcon: prefixIcon != null ? Icon(prefixIcon) : null,
+        suffixIcon: suffixIcon,
+        filled: true,
+        fillColor: WelcomeTheme.fieldFill,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Colors.transparent),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Colors.transparent),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: WelcomeTheme.primary, width: 1.4),
+        ),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      extendBodyBehindAppBar: true,
+      backgroundColor: WelcomeTheme.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
-        foregroundColor: Colors.black87,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: SafeArea(
+        top: false,
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 20),
-                Text(
-                  'สร้างบัญชีผู้ใช้',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'กรอกข้อมูลเพื่อเริ่มต้นใช้งาน',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
-                const SizedBox(height: 40),
-
-                // ชื่อที่ต้องการแสดง
-                TextFormField(
-                  controller: _displayName,
-                  validator: _validateDisplayName,
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
-                  textInputAction: TextInputAction.next,
-                  keyboardType: TextInputType.name,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.deny(RegExp(r'\s')),
-                  ],
-                  decoration: InputDecoration(
-                    labelText: 'ชื่อที่ต้องการแสดง',
-                    hintText: 'เช่น Nina, Nutchanon',
-                    prefixIcon: const Icon(Icons.person_outline),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const WelcomeHeader(
+                title: 'สร้างบัญชี SmartKitchenAI',
+                subtitle: 'จัดการครัวและวางแผนมื้ออาหารได้อย่างมั่นใจ',
+                caption:
+                    'เพียงไม่กี่ขั้นตอน เราจะช่วยติดตามวัตถุดิบและเมนูที่เหมาะกับคุณ',
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+                child: Form(
+                  key: _formKey,
+                  child: Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(28),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color.fromARGB(13, 0, 0, 0),
+                          blurRadius: 30,
+                          offset: Offset(0, 18),
+                        ),
+                      ],
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.grey[300]!),
-                    ),
-                    focusedBorder: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide(color: Colors.blue, width: 2),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // อีเมล (เช็คซ้ำแบบเรียลไทม์)
-                TextFormField(
-                  controller: _email,
-                  validator: _validateEmailFormat,
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
-                  textInputAction: TextInputAction.next,
-                  keyboardType: TextInputType.emailAddress,
-                  focusNode: _emailFocus,
-                  onChanged: (_) {
-                    // เคลียร์ error ทันทีเมื่อพิมพ์ใหม่
-                    if (_emailError != null) {
-                      setState(() => _emailError = null);
-                    }
-                    // debounce เช็คอีเมลซ้ำหลังหยุดพิมพ์ 500ms
-                    _emailDebounce?.cancel();
-                    _emailDebounce = Timer(
-                      const Duration(milliseconds: 500),
-                      () async {
-                        // ถ้ายังโฟกัสอยู่หรือเพิ่งพิมพ์ แล้วรูปแบบถูกต้อง → เช็ค
-                        if (!mounted) return;
-                        final formatOk =
-                            _validateEmailFormat(_email.text) == null;
-                        if (formatOk) {
-                          await _checkEmailInUse();
-                        }
-                      },
-                    );
-                  },
-                  decoration: InputDecoration(
-                    labelText: 'อีเมล',
-                    hintText: 'example@email.com',
-                    prefixIcon: const Icon(Icons.email_outlined),
-                    suffixIcon: (_emailError == null && _email.text.isNotEmpty)
-                        ? const Padding(
-                            padding: EdgeInsets.only(right: 12),
-                            child: Icon(
-                              Icons.check_circle,
-                              color: Colors.green,
-                              size: 20,
-                            ),
-                          )
-                        : null,
-                    errorText: _emailError, // ✅ แสดง error อีเมลซ้ำใต้ช่อง
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.grey[300]!),
-                    ),
-                    focusedBorder: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide(color: Colors.blue, width: 2),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // รหัสผ่าน
-                TextFormField(
-                  key: _passFieldKey,
-                  controller: _pass,
-                  validator: _validatePass,
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
-                  onChanged: (_) {
-                    // ให้ช่องยืนยันรหัสผ่าน revalidate ทันที
-                    _confirmFieldKey.currentState?.validate();
-                    setState(() {});
-                  },
-                  textInputAction: TextInputAction.next,
-                  obscureText: !_showPass,
-                  decoration: InputDecoration(
-                    labelText: 'รหัสผ่าน',
-                    hintText:
-                        'อย่างน้อย 8 ตัวอักษร + ตัวพิมพ์เล็ก/ใหญ่ + ตัวเลข',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _showPass ? Icons.visibility_off : Icons.visibility,
-                      ),
-                      onPressed: () => setState(() => _showPass = !_showPass),
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.grey[300]!),
-                    ),
-                    focusedBorder: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide(color: Colors.blue, width: 2),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // ยืนยันรหัสผ่าน
-                TextFormField(
-                  key: _confirmFieldKey,
-                  controller: _confirm,
-                  validator: _validateConfirm,
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
-                  onChanged: (_) => _confirmFieldKey.currentState?.validate(),
-                  obscureText: !_showConfirm,
-                  decoration: InputDecoration(
-                    labelText: 'ยืนยันรหัสผ่าน',
-                    hintText: 'กรอกรหัสผ่านอีกครั้ง',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _showConfirm ? Icons.visibility_off : Icons.visibility,
-                      ),
-                      onPressed: () =>
-                          setState(() => _showConfirm = !_showConfirm),
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.grey[300]!),
-                    ),
-                    focusedBorder: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(12)),
-                      borderSide: BorderSide(color: Colors.blue, width: 2),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Terms
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _accept,
-                      onChanged: (v) => setState(() => _accept = v ?? false),
-                      fillColor: WidgetStateProperty.resolveWith((states) {
-                        if (states.contains(WidgetState.selected)) {
-                          return Colors.blue;
-                        }
-                        return Colors.grey[300];
-                      }),
-                      checkColor: Colors.white,
-                    ),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => setState(() => _accept = !_accept),
-                        child: Text.rich(
-                          TextSpan(
-                            text: 'ฉันยอมรับ',
-                            style: TextStyle(color: Colors.grey[700]),
-                            children: const [
-                              TextSpan(
-                                text: 'เงื่อนไขการใช้งาน',
-                                style: TextStyle(
-                                  color: Colors.blue,
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
-                              TextSpan(text: ' และ '),
-                              TextSpan(
-                                text: 'นโยบายความเป็นส่วนตัว',
-                                style: TextStyle(
-                                  color: Colors.blue,
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
-                            ],
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'ข้อมูลสำหรับสมัคร',
+                          textAlign: TextAlign.center,
+                          style: textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: WelcomeTheme.textPrimary,
                           ),
                         ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 30),
-
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: SizedBox(
-                    width: 120,
-                    height: 56,
-                    child: ElevatedButton(
-                      onPressed: _loading ? null : _next,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                        const SizedBox(height: 24),
+                        TextFormField(
+                          controller: _displayName,
+                          validator: _validateDisplayName,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                          textInputAction: TextInputAction.next,
+                          keyboardType: TextInputType.name,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.deny(RegExp(r'\s')),
+                          ],
+                          decoration: decoration(
+                            label: 'ชื่อที่ต้องการแสดง',
+                            hint: 'เช่น Nina, Nutchanon',
+                            prefixIcon: Icons.person_outline,
+                          ),
                         ),
-                        elevation: 2,
-                      ),
-                      child: _loading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.white,
+                        const SizedBox(height: 18),
+                        TextFormField(
+                          controller: _email,
+                          validator: _validateEmailFormat,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                          textInputAction: TextInputAction.next,
+                          keyboardType: TextInputType.emailAddress,
+                          focusNode: _emailFocus,
+                          onChanged: (_) {
+                            if (_emailError != null) {
+                              setState(() => _emailError = null);
+                            }
+                            _emailDebounce?.cancel();
+                            _emailDebounce = Timer(
+                              const Duration(milliseconds: 500),
+                              () async {
+                                if (!mounted) return;
+                                final formatOk =
+                                    _validateEmailFormat(_email.text) == null;
+                                if (formatOk) {
+                                  await _checkEmailInUse();
+                                }
+                              },
+                            );
+                          },
+                          decoration: decoration(
+                            label: 'อีเมล',
+                            hint: 'example@email.com',
+                            prefixIcon: Icons.email_outlined,
+                            suffixIcon:
+                                (_emailError == null && _email.text.isNotEmpty)
+                                ? const Padding(
+                                    padding: EdgeInsets.only(right: 12),
+                                    child: Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                      size: 20,
+                                    ),
+                                  )
+                                : null,
+                          ).copyWith(errorText: _emailError),
+                        ),
+                        const SizedBox(height: 18),
+                        TextFormField(
+                          key: _passFieldKey,
+                          controller: _pass,
+                          validator: _validatePass,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                          onChanged: (_) {
+                            _confirmFieldKey.currentState?.validate();
+                            setState(() {});
+                          },
+                          textInputAction: TextInputAction.next,
+                          obscureText: !_showPass,
+                          decoration: decoration(
+                            label: 'รหัสผ่าน',
+                            prefixIcon: Icons.lock_outline,
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _showPass
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                                color: WelcomeTheme.textSecondary,
+                              ),
+                              onPressed: () =>
+                                  setState(() => _showPass = !_showPass),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        TextFormField(
+                          key: _confirmFieldKey,
+                          controller: _confirm,
+                          validator: _validateConfirm,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                          obscureText: !_showConfirm,
+                          textInputAction: TextInputAction.done,
+                          decoration: decoration(
+                            label: 'ยืนยันรหัสผ่าน',
+                            prefixIcon: Icons.lock_outline,
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _showConfirm
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                                color: WelcomeTheme.textSecondary,
+                              ),
+                              onPressed: () =>
+                                  setState(() => _showConfirm = !_showConfirm),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 22),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Checkbox(
+                              value: _accept,
+                              onChanged: (v) =>
+                                  setState(() => _accept = v ?? false),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              activeColor: WelcomeTheme.primary,
+                            ),
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () => setState(() => _accept = !_accept),
+                                child: Text.rich(
+                                  TextSpan(
+                                    text: 'ฉันยอมรับ ',
+                                    style: textTheme.bodyMedium?.copyWith(
+                                      color: WelcomeTheme.textSecondary,
+                                    ),
+                                    children: [
+                                      TextSpan(
+                                        text: 'เงื่อนไขการใช้งาน',
+                                        style: TextStyle(
+                                          color: WelcomeTheme.primary,
+                                          fontWeight: FontWeight.w600,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                      const TextSpan(text: ' และ '),
+                                      TextSpan(
+                                        text: 'นโยบายความเป็นส่วนตัว',
+                                        style: TextStyle(
+                                          color: WelcomeTheme.primary,
+                                          fontWeight: FontWeight.w600,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            )
-                          : const Text(
-                              'ถัดไป',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 28),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: SizedBox(
+                            width: 140,
+                            height: 54,
+                            child: ElevatedButton(
+                              onPressed: _loading ? null : _next,
+                              style: WelcomeTheme.primaryButtonStyle,
+                              child: _loading
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
+                                            ),
+                                      ),
+                                    )
+                                  : const Text(
+                                      'ถัดไป',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              'มีบัญชีแล้ว? ',
+                              style: textTheme.bodyMedium?.copyWith(
+                                color: WelcomeTheme.textSecondary,
                               ),
                             ),
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.pushNamed(context, '/login'),
+                              style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                foregroundColor: WelcomeTheme.primary,
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              child: const Text('เข้าสู่ระบบ'),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
-
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'มีบัญชีแล้ว? ',
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
-                    GestureDetector(
-                      onTap: () => Navigator.pushNamed(context, '/login'),
-                      child: const Text(
-                        'เข้าสู่ระบบ',
-                        style: TextStyle(
-                          color: Colors.blue,
-                          fontWeight: FontWeight.w600,
-                          decoration: TextDecoration.underline,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
