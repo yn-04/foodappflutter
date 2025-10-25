@@ -235,6 +235,7 @@ class _ExpiredRawPageState extends State<ExpiredRawPage> {
                     itemBuilder: (_, i) {
                       final it = items[i];
                       final icon = Categories.iconFor(it.category);
+                      final color = Categories.colorFor(it.category);
                       final ed = it.expiryDate!;
                       return Material(
                         elevation: 2,
@@ -285,7 +286,7 @@ class _ExpiredRawPageState extends State<ExpiredRawPage> {
                                 // แถวกลาง: หมวดหมู่ + ปริมาณ (ไม่มีกรอบ/ชิป)
                                 Row(
                                   children: [
-                                    Icon(icon, size: 16, color: Colors.black87),
+                                    Icon(icon, size: 16, color: color),
                                     const SizedBox(width: 6),
                                     Text(
                                       Categories.normalize(it.category),
