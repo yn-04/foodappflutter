@@ -45,6 +45,10 @@ class _DashboardTabState extends State<DashboardTab>
   Timer? _refreshDebounce;
   Stream<QuerySnapshot<Map<String, dynamic>>>? _notificationsStream;
 
+  String? _avatarUrlCache;
+  bool _avatarLoadFailed = false;
+  bool _topIngredientsInsightExpanded = false;
+
   // ===== ข้อความภาษาไทย =====
   static const _tHello = 'สวัสดี';
   static const _tWelcomeBack = 'ยินดีต้อนรับกลับ';
@@ -71,6 +75,7 @@ class _DashboardTabState extends State<DashboardTab>
     super.initState();
     _dashboardFuture = _loadDashboardData();
     _usernameFuture = _loadUsername();
+    _avatarUrlCache = _auth.currentUser?.photoURL;
     // ขอเมนูแนะนำล่วงหน้า ถ้ายังไม่มี โหลดครั้งเดียวหลังเฟรมแรก
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final p = context.read<EnhancedRecommendationProvider>();
@@ -229,6 +234,7 @@ class _DashboardTabState extends State<DashboardTab>
           },
         )
         .toList(growable: false);
+    final driJson = data.driTargets.toJson();
 
     final nearest = data.nearestExpiryItem;
     final nearestMap = nearest == null
@@ -245,6 +251,7 @@ class _DashboardTabState extends State<DashboardTab>
       'user': userName,
       'month': _thaiMonthName(now),
       'generated_at': now.toIso8601String(),
+      if (driJson.isNotEmpty) 'user_profile': {'dri': driJson},
       'summary': {
         'total_items': data.totalItems,
         'total_quantity': data.totalQuantity,
@@ -295,7 +302,10 @@ class _DashboardTabState extends State<DashboardTab>
           'this_week': topMenusThisWeek,
           'last_week': topMenusLastWeek,
         },
-        'daily_nutrition': {'days': dailyNutrition},
+        'daily_nutrition': {
+          'days': dailyNutrition,
+          if (driJson.isNotEmpty) 'dri': driJson,
+        },
         'inventory_summary': {
           'total_items': data.totalItems,
           'category_counts': data.categoryCounts,
@@ -548,7 +558,108 @@ class _DashboardTabState extends State<DashboardTab>
       ),
     );
 
+    final nutritionAdvice = _nutritionAdviceMessages(data);
+    if (nutritionAdvice.isNotEmpty) {
+      insights.add(
+        _DashboardInsightEntry(
+          section: 'daily_nutrition',
+          title: 'โภชนาการวันนี้',
+          message: nutritionAdvice.join(' • '),
+        ),
+      );
+    } else if (data.driTargets.hasTargets && data.dailyNutrition.isNotEmpty) {
+      insights.add(
+        _DashboardInsightEntry(
+          section: 'daily_nutrition',
+          title: 'โภชนาการวันนี้',
+          message:
+              'ยอดเยี่ยม! วันนี้ได้รับสารอาหารใกล้เคียงตามเป้าแล้ว รักษาฟอร์มนี้ไว้เลยนะคะ',
+        ),
+      );
+    } else if (!data.driTargets.hasTargets) {
+      insights.add(
+        _DashboardInsightEntry(
+          section: 'daily_nutrition',
+          title: 'โภชนาการวันนี้',
+          message:
+              'อัปเดตข้อมูล DRI ในโปรไฟล์สุขภาพเพื่อรับคำแนะนำโภชนาการที่แม่นยำสำหรับคุณนะคะ',
+        ),
+      );
+    }
+
     return insights;
+  }
+
+  List<String> _nutritionAdviceMessages(_DashboardData data) {
+    final dri = data.driTargets;
+    if (!dri.hasTargets || data.dailyNutrition.isEmpty) {
+      return const <String>[];
+    }
+
+    final totals = data.dailyNutrition.first.totals;
+    final messages = <String>[];
+
+    void addMessage(String text) {
+      if (messages.length >= 3) return;
+      messages.add(text);
+    }
+
+    double _gap(double? target, double actual) {
+      if (target == null) return 0;
+      final diff = target - actual;
+      return diff > 0 ? diff : 0;
+    }
+
+    final energyGap = _gap(dri.energyKcal, totals.calories);
+    if (energyGap > 120) {
+      addMessage(
+        'เติมพลังงานอีกประมาณ ${energyGap.round()} kcal ด้วยคาร์บเชิงซ้อนอย่างข้าวกล้องหรือมันหวานนะคะ',
+      );
+    }
+
+    final proteinGap = _gap(dri.proteinG, totals.protein);
+    if (proteinGap > 5) {
+      addMessage(
+        'โปรตีนยังขาดราว ${proteinGap.round()} g ลองเสริมอกไก่ ไข่ต้ม หรือเต้าหู้สักหน่อยนะคะ',
+      );
+    }
+
+    final carbsGap = _gap(dri.carbMinG, totals.carbs);
+    if (carbsGap > 15 &&
+        (dri.carbMaxG == null || totals.carbs < dri.carbMaxG!)) {
+      addMessage(
+        'เพิ่มคาร์บดีอีกประมาณ ${carbsGap.round()} g เช่น ข้าวโอ๊ตหรือขนมปังโฮลวีต จะช่วยเติมพลังค่ะ',
+      );
+    }
+
+    final fatGap = _gap(dri.fatMinG, totals.fat);
+    if (fatGap > 5 && (dri.fatMaxG == null || totals.fat < dri.fatMaxG!)) {
+      addMessage(
+        'ไขมันดีขาดอยู่ราว ${fatGap.round()} g ลองเพิ่มอะโวคาโด ถั่ว หรือปลาทะเลนิดนึงนะคะ',
+      );
+    }
+
+    final fiberGap = _gap(dri.fiberG, totals.fiber);
+    if (fiberGap > 3) {
+      addMessage(
+        'ไฟเบอร์ยังไม่ถึงเป้า ลองเพิ่มผักใบเขียวหรือผลไม้สดอีกประมาณ ${fiberGap.round()} g เพื่อช่วยระบบย่อยค่ะ',
+      );
+    }
+
+    if (dri.sodiumMaxMg != null) {
+      final sodiumOver = totals.sodium - dri.sodiumMaxMg!;
+      if (sodiumOver > 150) {
+        addMessage(
+          'โซเดียมวันนี้สูงกว่าที่แนะนำราว ${sodiumOver.round()} mg ชิมก่อนปรุงหรือเลือกเมนูรสอ่อนลงนิดนะคะ',
+        );
+      }
+    }
+
+    if (messages.isEmpty) {
+      addMessage('ยอดเยี่ยม! วันนี้คุณได้รับสารอาหารเกือบครบตามเป้าแล้วค่ะ');
+    }
+
+    return messages;
   }
 
   String _defaultInsightTitle(String section) {
@@ -685,6 +796,7 @@ class _DashboardTabState extends State<DashboardTab>
       final userRef = _firestore.collection('users').doc(user.uid);
       final rawCol = userRef.collection('raw_materials');
       final cookCol = userRef.collection('cooking_history');
+      final userDocFuture = userRef.get();
 
       // สร้าง bin รายวัน 7 วันล่าสุด
       final weeklyUsage = List.generate(
@@ -769,6 +881,14 @@ class _DashboardTabState extends State<DashboardTab>
           } catch (_) {
             return null;
           }
+        }
+        return null;
+      }
+
+      Map<String, dynamic>? _asStringMap(dynamic source) {
+        if (source is Map<String, dynamic>) return source;
+        if (source is Map) {
+          return source.map((key, value) => MapEntry(key.toString(), value));
         }
         return null;
       }
@@ -1294,6 +1414,12 @@ class _DashboardTabState extends State<DashboardTab>
       final topMenusThisWeek = _topN(thisWeek);
       final topMenusLastWeek = _topN(lastWeek);
 
+      final userDoc = await userDocFuture;
+      final userData = _asStringMap(userDoc.data());
+      final driTargets = _DriTargets.fromMap(
+        _asStringMap(_asStringMap(userData?['healthProfile'])?['dri']),
+      );
+
       return _DashboardData(
         // แสดงจำนวนเฉพาะที่ยังไม่หมดอายุ
         totalItems: activeItems.length,
@@ -1319,6 +1445,7 @@ class _DashboardTabState extends State<DashboardTab>
         monthCategoryUsage: monthCategoryUsage,
         wastedCount30: wastedCount30,
         dailyNutrition: dailyNutritionLimited,
+        driTargets: driTargets,
       );
     } catch (e, st) {
       debugPrint('Load dashboard failed: $e');
@@ -1348,11 +1475,9 @@ class _DashboardTabState extends State<DashboardTab>
     }
 
     try {
-      final userDoc =
-          await _firestore.collection('users').doc(user.uid).get();
+      final userDoc = await _firestore.collection('users').doc(user.uid).get();
       final data = userDoc.data();
-      final rawFamilyId =
-          (data?['familyId'] ?? data?['family_id']) as String?;
+      final rawFamilyId = (data?['familyId'] ?? data?['family_id']) as String?;
       final fid = rawFamilyId != null && rawFamilyId.trim().isNotEmpty
           ? rawFamilyId.trim()
           : null;
@@ -1370,8 +1495,9 @@ class _DashboardTabState extends State<DashboardTab>
             .collection('items');
       }
 
-      final stream =
-          baseCollection.where('type', isEqualTo: 'expiry').snapshots();
+      final stream = baseCollection
+          .where('type', isEqualTo: 'expiry')
+          .snapshots();
       if (!mounted) return;
       setState(() => _notificationsStream = stream);
     } catch (_) {
@@ -1416,28 +1542,53 @@ class _DashboardTabState extends State<DashboardTab>
   Widget build(BuildContext context) {
     super.build(context);
     final user = _auth.currentUser;
+    final rawPhotoUrl = user?.photoURL;
+    final trimmedPhotoUrl =
+        (rawPhotoUrl != null && rawPhotoUrl.trim().isNotEmpty)
+        ? rawPhotoUrl.trim()
+        : null;
+    if (trimmedPhotoUrl != _avatarUrlCache) {
+      _avatarUrlCache = trimmedPhotoUrl;
+      _avatarLoadFailed = false;
+    }
 
     final cs = Theme.of(context).colorScheme;
-    final primary = cs.primary;
-    final surface = cs.surface;
     final onSurface = cs.onSurface;
+    final appBarColor = cs.surfaceContainerHighest;
+    final avatarBackground = cs.surfaceContainerHigh;
+    final avatarIconColor = cs.onSurfaceVariant;
+    ImageProvider? avatarImage;
+    if (!_avatarLoadFailed) {
+      final cached = _avatarUrlCache;
+      if (cached != null) {
+        avatarImage = NetworkImage(cached);
+      }
+    }
+    final showFallbackAvatar = avatarImage == null;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: surface,
+        backgroundColor: appBarColor,
         foregroundColor: onSurface,
         title: Row(
           children: [
             CircleAvatar(
               radius: 20,
-              backgroundColor: primary.withAlpha(38),
-              backgroundImage: user?.photoURL != null
-                  ? NetworkImage(user!.photoURL!)
-                  : null,
-              child: user?.photoURL == null
-                  ? Icon(Icons.person, color: primary)
+              backgroundColor: avatarBackground,
+              foregroundImage: avatarImage,
+              onForegroundImageError: avatarImage == null
+                  ? null
+                  : (_, __) {
+                      if (mounted && !_avatarLoadFailed) {
+                        setState(() {
+                          _avatarLoadFailed = true;
+                        });
+                      }
+                    },
+              child: showFallbackAvatar
+                  ? Icon(Icons.person, color: avatarIconColor)
                   : null,
             ),
             const SizedBox(width: 12),
@@ -1473,7 +1624,8 @@ class _DashboardTabState extends State<DashboardTab>
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: _notificationsStream,
             builder: (context, snapshot) {
-              final docs = snapshot.data?.docs ??
+              final docs =
+                  snapshot.data?.docs ??
                   <QueryDocumentSnapshot<Map<String, dynamic>>>[];
               final now = DateTime.now();
               final todayOnly = DateTime(now.year, now.month, now.day);
@@ -1489,8 +1641,11 @@ class _DashboardTabState extends State<DashboardTab>
                   expiry = expiryRaw;
                 }
                 if (expiry == null) return null;
-                final onlyExpiry =
-                    DateTime(expiry.year, expiry.month, expiry.day);
+                final onlyExpiry = DateTime(
+                  expiry.year,
+                  expiry.month,
+                  expiry.day,
+                );
                 return onlyExpiry.difference(todayOnly).inDays;
               }
 
@@ -1638,7 +1793,7 @@ class _DashboardTabState extends State<DashboardTab>
     final children = <Widget>[];
     if (insightsEnabled) {
       children.add(
-        _buildInsightSummaryCard(cs, insightsLoading, summaryEntries),
+        _buildInsightKPISection(context, data, loading: insightsLoading),
       );
       children.add(const SizedBox(height: 16));
     }
@@ -1786,16 +1941,17 @@ class _DashboardTabState extends State<DashboardTab>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (insights.isNotEmpty) ...[
-          _buildInsightMessageList(
-            cs,
-            insights,
-            background: cs.surfaceVariant.withAlpha(120),
-            borderColor: cs.outline.withAlpha(90),
-          ),
-          const SizedBox(height: 12),
-        ],
-        ExpiringTodaySection(items: data.expiringTodayItems),
+        ExpiringTodaySection(
+          items: data.expiringTodayItems,
+          insightFooter: (insights.isNotEmpty)
+              ? _buildInsightMessageList(
+                  cs,
+                  insights,
+                  background: Colors.transparent, // โปร่ง
+                  borderColor: Colors.transparent, // ไม่มีกรอบ
+                )
+              : null,
+        ),
       ],
     );
   }
@@ -1806,25 +1962,18 @@ class _DashboardTabState extends State<DashboardTab>
     List<_DashboardInsightEntry> insights = const <_DashboardInsightEntry>[],
   }) {
     final cs = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (insights.isNotEmpty) ...[
-          _buildInsightMessageList(
-            cs,
-            insights,
-            background: cs.surfaceVariant.withAlpha(120),
-            borderColor: cs.outline.withAlpha(90),
-          ),
-          const SizedBox(height: 12),
-        ],
-        InventorySummarySection(
-          totalItems: data.totalItems,
-          counts: data.categoryCounts,
-          latestAdded: data.categoryLatestAdded,
-          topCategory: data.topCategory,
-        ),
-      ],
+    return InventorySummarySection(
+      totalItems: data.totalItems,
+      counts: data.categoryCounts,
+      latestAdded: data.categoryLatestAdded,
+      topCategory: data.topCategory,
+      inlineInsight: insights.isEmpty
+          ? null
+          : _InlineInsightPanel(
+              insights: insights,
+              colorScheme: cs,
+              backgroundColor: cs.surface,
+            ),
     );
   }
 
@@ -1834,39 +1983,157 @@ class _DashboardTabState extends State<DashboardTab>
     List<_DashboardInsightEntry> insights = const <_DashboardInsightEntry>[],
   }) {
     final cs = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (insights.isNotEmpty) ...[
-          _buildInsightMessageList(
-            cs,
-            insights,
-            background: cs.surfaceVariant.withAlpha(120),
-            borderColor: cs.outline.withAlpha(90),
+
+    // Pastel palette
+    const usedColor = Color(0xFFFFAACC); // ชมพูพาสเทล
+    const discardedColor = Color(0xFF9AD7FF); // ฟ้าพาสเทล
+
+    return DefaultTabController(
+      length: 2,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // การ์ดหลัก + แท็บ
+          Container(
+            decoration: BoxDecoration(
+              color: cs.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: cs.outline.withAlpha(40)),
+              boxShadow: [
+                BoxShadow(
+                  color: cs.onSurface.withAlpha(10),
+                  blurRadius: 18,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                  child: Row(
+                    children: [
+                      Icon(Icons.bar_chart_rounded, color: cs.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Top วัตถุดิบ',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: cs.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Tabs
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 15),
+                  child: TabBar(
+                    indicator: BoxDecoration(
+                      color: cs.primary.withAlpha(35),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    labelColor: cs.onSurface,
+                    unselectedLabelColor: cs.onSurface.withAlpha(160),
+                    dividerColor: Colors.transparent,
+                    tabs: const [
+                      Tab(text: 'ใช้บ่อย'),
+                      Tab(text: 'ทิ้งบ่อย'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // เนื้อหาในแต่ละแท็บ
+                SizedBox(
+                  height: 280,
+                  child: TabBarView(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        child: _TopBarsCard(
+                          title: _tTopUsed,
+                          items: data.topUsed,
+                          color: usedColor,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        child: _TopBarsCard(
+                          title: _tTopDiscarded,
+                          items: data.topDiscarded,
+                          color: discardedColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
-        ],
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _TopBarsCard(
-                title: _tTopUsed,
-                items: data.topUsed,
-                color: cs.primary,
+
+          // --- Smart Insight: ฝังในท้ายการ์ด + พับ/กางได้ ---
+          if (insights.isNotEmpty) ...[
+            Divider(height: 1, thickness: 1, color: cs.outline.withAlpha(40)),
+
+            // Header กดพับ/กาง
+            InkWell(
+              onTap: () {
+                setState(() {
+                  _topIngredientsInsightExpanded =
+                      !_topIngredientsInsightExpanded;
+                });
+              },
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Row(
+                  children: [
+                    Icon(Icons.lightbulb, color: cs.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Smart Insight',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: cs.onSurface,
+                        ),
+                      ),
+                    ),
+                    AnimatedRotation(
+                      turns: _topIngredientsInsightExpanded ? 0.5 : 0.0,
+                      duration: const Duration(milliseconds: 180),
+                      child: Icon(
+                        Icons.expand_more_rounded,
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _TopBarsCard(
-                title: _tTopDiscarded,
-                items: data.topDiscarded,
-                color: Colors.redAccent,
-              ),
+
+            // เนื้อหา Insight (พับ/กางได้)
+            AnimatedSize(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              child: _topIngredientsInsightExpanded
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      child: _buildInsightMessageList(
+                        cs,
+                        insights,
+                        background: cs.surfaceContainerHighest.withAlpha(110),
+                        borderColor: cs.outline.withAlpha(90),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
             ),
           ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -1877,6 +2144,16 @@ class _DashboardTabState extends State<DashboardTab>
   }) {
     final cs = Theme.of(context).colorScheme;
     final entries = data.dailyNutrition;
+    final adviceMessages = _nutritionAdviceMessages(data);
+    final combinedInsights = <_DashboardInsightEntry>[
+      ...insights,
+      for (int i = 0; i < adviceMessages.length; i++)
+        _DashboardInsightEntry(
+          section: 'daily_nutrition',
+          title: i == 0 ? 'แนะนำโภชนาการวันนี้' : '',
+          message: adviceMessages[i],
+        ),
+    ];
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1887,15 +2164,6 @@ class _DashboardTabState extends State<DashboardTab>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (insights.isNotEmpty) ...[
-            _buildInsightMessageList(
-              cs,
-              insights,
-              background: cs.surfaceVariant.withAlpha(120),
-              borderColor: cs.outline.withAlpha(90),
-            ),
-            const SizedBox(height: 12),
-          ],
           Text(
             'โภชนาการต่อวัน (7 วันล่าสุด)',
             style: TextStyle(
@@ -1912,111 +2180,224 @@ class _DashboardTabState extends State<DashboardTab>
             )
           else
             SizedBox(
-              height: 200,
+              height: 400,
               child: PageView.builder(
                 controller: PageController(viewportFraction: 0.8),
                 itemCount: entries.length,
                 itemBuilder: (context, index) {
                   final item = entries[index];
                   final totals = item.totals;
+                  final statTiles = <Widget>[
+                    _NutritionStatTile(
+                      emoji: '⚡',
+                      label: 'พลังงาน',
+                      value: '${totals.calories.toStringAsFixed(0)} kcal',
+                      color: Colors.amber.shade400,
+                    ),
+                    _NutritionStatTile(
+                      emoji: '🥚',
+                      label: 'โปรตีน',
+                      value: '${totals.protein.toStringAsFixed(1)} g',
+                      color: Colors.orangeAccent.shade200,
+                    ),
+                    _NutritionStatTile(
+                      emoji: '🍚',
+                      label: 'คาร์บ',
+                      value: '${totals.carbs.toStringAsFixed(1)} g',
+                      color: Colors.lightBlueAccent.shade200,
+                    ),
+                    _NutritionStatTile(
+                      emoji: '🥑',
+                      label: 'ไขมัน',
+                      value: '${totals.fat.toStringAsFixed(1)} g',
+                      color: Colors.tealAccent.shade200,
+                    ),
+                    _NutritionStatTile(
+                      emoji: '🥦',
+                      label: 'ไฟเบอร์',
+                      value: '${totals.fiber.toStringAsFixed(1)} g',
+                      color: Colors.greenAccent.shade200,
+                    ),
+                    _NutritionStatTile(
+                      emoji: '🧂',
+                      label: 'โซเดียม',
+                      value: '${totals.sodium.toStringAsFixed(0)} mg',
+                      color: Colors.purpleAccent.shade200,
+                    ),
+                  ];
                   return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: cs.surface,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: cs.outline.withAlpha(60)),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withAlpha(14),
-                            blurRadius: 14,
-                            offset: const Offset(0, 6),
+                    padding: EdgeInsets.only(
+                      right: index == entries.length - 1 ? 0 : 12,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _formatThaiShortDate(item.date),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                            color: cs.onSurface,
                           ),
-                        ],
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 18,
                         ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _formatThaiShortDate(item.date),
-                              style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 16,
-                                color: cs.onSurface,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            Expanded(
-                              child: DefaultTextStyle(
-                                style: TextStyle(color: cs.onSurface),
-                                child: Table(
-                                  columnWidths: const {
-                                    0: FlexColumnWidth(),
-                                    1: FlexColumnWidth(),
-                                  },
-                                  defaultVerticalAlignment:
-                                      TableCellVerticalAlignment.middle,
-                                  children: [
-                                    TableRow(
-                                      children: [
-                                        _NutritionTableCell(
-                                          label: 'พลังงาน',
-                                          value:
-                                              '${totals.calories.toStringAsFixed(0)} kcal',
-                                        ),
-                                        _NutritionTableCell(
-                                          label: 'โปรตีน',
-                                          value:
-                                              '${totals.protein.toStringAsFixed(1)} g',
-                                        ),
-                                      ],
-                                    ),
-                                    TableRow(
-                                      children: [
-                                        _NutritionTableCell(
-                                          label: 'คาร์โบไฮเดรต',
-                                          value:
-                                              '${totals.carbs.toStringAsFixed(1)} g',
-                                        ),
-                                        _NutritionTableCell(
-                                          label: 'ไขมัน',
-                                          value:
-                                              '${totals.fat.toStringAsFixed(1)} g',
-                                        ),
-                                      ],
-                                    ),
-                                    TableRow(
-                                      children: [
-                                        _NutritionTableCell(
-                                          label: 'ไฟเบอร์',
-                                          value:
-                                              '${totals.fiber.toStringAsFixed(1)} g',
-                                        ),
-                                        _NutritionTableCell(
-                                          label: 'โซเดียม',
-                                          value:
-                                              '${totals.sodium.toStringAsFixed(0)} mg',
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
+                        const SizedBox(height: 12),
+                        Expanded(
+                          child: Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: statTiles,
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   );
                 },
               ),
             ),
+          if (combinedInsights.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _InlineInsightPanel(
+              insights: combinedInsights,
+              colorScheme: cs,
+              backgroundColor: cs.surface,
+              collapsible: true,
+              maxPreviewLines: 3,
+              initiallyVisible: true,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // === ส่วนหลัก: การ์ด KPI + Subtitle ===
+  Widget _buildInsightKPISection(
+    BuildContext context,
+    _DashboardData data, {
+    bool loading = false,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+
+    if (loading) {
+      return Row(
+        children: [
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, color: cs.primary),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'กำลังวิเคราะห์ข้อมูลล่าสุด.',
+            style: TextStyle(color: cs.onSurface.withAlpha(170)),
+          ),
+        ],
+      );
+    }
+
+    // ===== เตรียมค่า KPI จาก _DashboardData =====
+    final expiringToday = data.expiringTodayItems.length; // รายการหมดอายุวันนี้
+    final totalServings = data.weeklyCooking.fold<int>(
+      0,
+      (a, d) => a + d.count,
+    ); // รวมที่ทำอาหาร/สัปดาห์ :contentReference[oaicite:1]{index=1}
+    final pctUse = data
+        .pctUseBeforeExpiryThisMonth; // ใช้ก่อนหมดอายุเดือนนี้ :contentReference[oaicite:2]{index=2}
+    final wasted30 = data
+        .wastedCount30; // จำนวนทิ้ง 30 วันล่าสุด (มีอยู่ในโมเดล) :contentReference[oaicite:3]{index=3}
+
+    // พาสเทลโทน
+    const pink = Color(0xFFFFAACC);
+    const mint = Color(0xFFB8F1D6);
+    const blue = Color(0xFF9AD7FF);
+    const purple = Color(0xFFCBB7FF);
+
+    final items = <_InsightKPI>[
+      _InsightKPI(
+        icon: Icons.warning_amber_rounded,
+        value: '$expiringToday',
+        title: 'หมดอายุวันนี้',
+        subtitle: 'จัดการให้ทันก่อนเสียของ',
+        tint: pink,
+        onTap: () {
+          // TODO: เลื่อน/สโครลไปยังส่วน Expiring Today
+        },
+      ),
+      _InsightKPI(
+        icon: Icons.restaurant_menu_rounded,
+        value: '$totalServings',
+        title: 'ทำอาหาร/สัปดาห์',
+        subtitle: 'อัปเดตจากบันทึกการทำอาหาร',
+        tint: mint,
+      ),
+      _InsightKPI(
+        icon: Icons.check_circle_rounded,
+        value: '${pctUse.toStringAsFixed(0)}%',
+        title: 'ใช้ก่อนหมดอายุ',
+        subtitle: 'เทียบเดือนนี้',
+        tint: blue,
+      ),
+      _InsightKPI(
+        icon: Icons.delete_outline_rounded,
+        value: '$wasted30',
+        title: 'ทิ้งใน 30 วัน',
+        subtitle: 'ลดให้เหลือน้อยที่สุด',
+        tint: purple,
+      ),
+    ];
+
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: cs.outline.withAlpha(40)),
+        boxShadow: [
+          BoxShadow(
+            color: cs.onSurface.withAlpha(10),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.dashboard_rounded, color: cs.primary),
+              const SizedBox(width: 8),
+              Text(
+                'ภาพรวมจาก Insight',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: cs.onSurface,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, c) {
+              final cross = c.maxWidth >= 900 ? 4 : 2;
+              return GridView.builder(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: items.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: cross,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.9,
+                ),
+                itemBuilder: (context, i) => _KpiCard(item: items[i]),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -2033,56 +2414,59 @@ class _DashboardTabState extends State<DashboardTab>
     final wNow = data.pctWasteThisMonth;
     final wPrev = data.pctWastePrevMonth;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (insights.isNotEmpty) ...[
-          _buildInsightMessageList(
-            cs,
-            insights,
-            background: cs.surfaceVariant.withAlpha(120),
-            borderColor: cs.outline.withAlpha(90),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outline.withAlpha(76)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(12),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$_tUseBeforeExpiry ($_tThisMonth vs $_tLastMonth)',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: cs.onSurface,
+            ),
           ),
           const SizedBox(height: 12),
+          _LabeledProgress(
+            label: 'วัตถุดิบถูกใช้ก่อนหมดอายุ',
+            percent: pNow,
+            previous: pPrev,
+            color: cs.primary,
+            higherIsBetter: true,
+          ),
+          const SizedBox(height: 16),
+          _LabeledProgress(
+            label: 'วัตถุดิบถูกทิ้ง',
+            percent: wNow,
+            previous: wPrev,
+            color: cs.error,
+            higherIsBetter: false,
+          ),
+          if (insights.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _InlineInsightPanel(
+              insights: insights,
+              colorScheme: cs,
+              backgroundColor: cs.surface,
+              collapsible: true,
+              maxPreviewLines: 3,
+            ),
+          ],
         ],
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: cs.surface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: cs.outline.withAlpha(76)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$_tUseBeforeExpiry ($_tThisMonth vs $_tLastMonth)',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: cs.onSurface,
-                ),
-              ),
-              const SizedBox(height: 12),
-              _LabeledProgress(
-                label: 'วัตถุดิบถูกใช้ก่อนหมดอายุ',
-                percent: pNow,
-                previous: pPrev,
-                color: cs.primary,
-                higherIsBetter: true,
-              ),
-              const SizedBox(height: 16),
-              _LabeledProgress(
-                label: 'วัตถุดิบถูกทิ้ง',
-                percent: wNow,
-                previous: wPrev,
-                color: cs.error,
-                higherIsBetter: false,
-              ),
-            ],
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -2091,40 +2475,12 @@ class _DashboardTabState extends State<DashboardTab>
     _DashboardData data, {
     List<_DashboardInsightEntry> insights = const <_DashboardInsightEntry>[],
   }) {
-    final cs = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (insights.isNotEmpty) ...[
-          _buildInsightMessageList(
-            cs,
-            insights,
-            background: cs.surfaceVariant.withAlpha(120),
-            borderColor: cs.outline.withAlpha(90),
-          ),
-          const SizedBox(height: 12),
-        ],
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _MenuBarListCard(
-                title: _tMenuThisWeek,
-                items: data.topMenusThisWeek,
-                barColor: cs.primary,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _MenuBarListCard(
-                title: _tMenuLastWeek,
-                items: data.topMenusLastWeek,
-                barColor: cs.secondary,
-              ),
-            ),
-          ],
-        ),
-      ],
+    return _TopMenusSwitcherCard(
+      thisWeekTitle: _tMenuThisWeek,
+      lastWeekTitle: _tMenuLastWeek,
+      thisWeek: data.topMenusThisWeek,
+      lastWeek: data.topMenusLastWeek,
+      insights: insights,
     );
   }
 
@@ -2139,43 +2495,59 @@ class _DashboardTabState extends State<DashboardTab>
       (acc, d) => acc + d.count,
     );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (insights.isNotEmpty) ...[
-          _buildInsightMessageList(
-            cs,
-            insights,
-            background: cs.surfaceVariant.withAlpha(120),
-            borderColor: cs.outline.withAlpha(90),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outline.withAlpha(76)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(12),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
           ),
-          const SizedBox(height: 12),
         ],
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              _tWeeklyCooking,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                color: cs.onSurface,
-              ),
-            ),
-            if (data.hasCookingData)
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
               Text(
-                '$_tTotalServingsPrefix$totalServings$_tTotalServingsSuffix',
+                _tWeeklyCooking,
                 style: TextStyle(
-                  fontSize: 14,
-                  color: cs.onSurface.withAlpha(166),
-                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: cs.onSurface,
                 ),
               ),
+              if (data.hasCookingData)
+                Text(
+                  '$_tTotalServingsPrefix$totalServings$_tTotalServingsSuffix',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: cs.onSurface.withAlpha(166),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildWeeklyChart(context, data.weeklyCooking),
+          if (insights.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _InlineInsightPanel(
+              insights: insights,
+              colorScheme: cs,
+              backgroundColor: cs.surface,
+              collapsible: true,
+              maxPreviewLines: 3,
+            ),
           ],
-        ),
-        const SizedBox(height: 12),
-        _buildWeeklyChart(context, data.weeklyCooking),
-      ],
+        ],
+      ),
     );
   }
 
@@ -2360,49 +2732,34 @@ class _DashboardTabState extends State<DashboardTab>
     final hasData = maxValue > 0;
     final today = DateTime.now();
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(10),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+    return Column(
+      children: [
+        SizedBox(
+          height: 170,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              for (final day in usage)
+                _buildChartBar(
+                  context,
+                  day,
+                  maxValue,
+                  _isSameDay(day.date, today)
+                      ? cs.primary
+                      : cs.primary.withAlpha(191),
+                ),
+            ],
+          ),
+        ),
+        if (!hasData) ...[
+          const SizedBox(height: 12),
+          Text(
+            _tNoWeeklyData,
+            style: TextStyle(color: cs.onSurface.withAlpha(178)),
           ),
         ],
-        border: Border.all(color: cs.outline.withAlpha(76)),
-      ),
-      child: Column(
-        children: [
-          SizedBox(
-            height: 170,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                for (final day in usage)
-                  _buildChartBar(
-                    context,
-                    day,
-                    maxValue,
-                    _isSameDay(day.date, today)
-                        ? cs.primary
-                        : cs.primary.withAlpha(191),
-                  ),
-              ],
-            ),
-          ),
-          if (!hasData) ...[
-            const SizedBox(height: 12),
-            Text(
-              _tNoWeeklyData,
-              style: TextStyle(color: cs.onSurface.withAlpha(178)),
-            ),
-          ],
-        ],
-      ),
+      ],
     );
   }
 
@@ -2494,6 +2851,76 @@ class _DashboardInsightEntry {
   final String message;
 }
 
+class _DriTargets {
+  const _DriTargets({
+    this.energyKcal,
+    this.proteinG,
+    this.carbMinG,
+    this.carbMaxG,
+    this.fatMinG,
+    this.fatMaxG,
+    this.fiberG,
+    this.sodiumMaxMg,
+  });
+
+  final double? energyKcal;
+  final double? proteinG;
+  final double? carbMinG;
+  final double? carbMaxG;
+  final double? fatMinG;
+  final double? fatMaxG;
+  final double? fiberG;
+  final double? sodiumMaxMg;
+
+  static const empty = _DriTargets();
+
+  bool get hasTargets =>
+      energyKcal != null ||
+      proteinG != null ||
+      carbMinG != null ||
+      fatMinG != null ||
+      fiberG != null ||
+      sodiumMaxMg != null;
+
+  factory _DriTargets.fromMap(Map<String, dynamic>? map) {
+    if (map == null || map.isEmpty) return empty;
+
+    double? _toDouble(dynamic value) {
+      if (value is num) return value.toDouble();
+      if (value is String) return double.tryParse(value);
+      return null;
+    }
+
+    return _DriTargets(
+      energyKcal: _toDouble(map['energy_kcal']),
+      proteinG: _toDouble(map['protein_g']),
+      carbMinG: _toDouble(map['carb_min_g']),
+      carbMaxG: _toDouble(map['carb_max_g']),
+      fatMinG: _toDouble(map['fat_min_g']),
+      fatMaxG: _toDouble(map['fat_max_g']),
+      fiberG: _toDouble(map['fiber_g']),
+      sodiumMaxMg: _toDouble(map['sodium_max_mg']),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    final map = <String, dynamic>{};
+    void put(String key, double? value) {
+      if (value != null) map[key] = value;
+    }
+
+    put('energy_kcal', energyKcal);
+    put('protein_g', proteinG);
+    put('carb_min_g', carbMinG);
+    put('carb_max_g', carbMaxG);
+    put('fat_min_g', fatMinG);
+    put('fat_max_g', fatMaxG);
+    put('fiber_g', fiberG);
+    put('sodium_max_mg', sodiumMaxMg);
+    return map;
+  }
+}
+
 class _DashboardData {
   const _DashboardData({
     required this.totalItems,
@@ -2503,9 +2930,9 @@ class _DashboardData {
     required this.expiringTodayItems,
     required this.nearestExpiryItem,
     required this.weeklyCooking,
-    required this.categoryCounts, // <- เพิ่ม
+    required this.categoryCounts,
     required this.categoryLatestAdded,
-    required this.topCategory, // <- เพิ่ม
+    required this.topCategory,
     required this.topUsed,
     required this.topDiscarded,
     required this.wastedByCategory,
@@ -2519,6 +2946,7 @@ class _DashboardData {
     required this.monthCategoryUsage,
     required this.wastedCount30,
     required this.dailyNutrition,
+    required this.driTargets,
   });
 
   factory _DashboardData.empty() {
@@ -2551,6 +2979,7 @@ class _DashboardData {
       monthCategoryUsage: const {},
       wastedCount30: 0,
       dailyNutrition: const [],
+      driTargets: _DriTargets.empty,
     );
   }
 
@@ -2578,6 +3007,7 @@ class _DashboardData {
   final Map<String, int> monthCategoryUsage; // category → usage count
   final int wastedCount30;
   final List<_DailyNutrition> dailyNutrition;
+  final _DriTargets driTargets;
 
   bool get hasCookingData => weeklyCooking.any((d) => d.count > 0);
   bool get hasExpiringToday => expiringTodayItems.isNotEmpty;
@@ -2660,6 +3090,7 @@ class _TopBarsCard extends StatelessWidget {
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min, // เพิ่มบรรทัดนี้
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
@@ -3000,37 +3431,57 @@ class _LabeledProgress extends StatelessWidget {
   }
 }
 
-class _NutritionTableCell extends StatelessWidget {
-  const _NutritionTableCell({required this.label, required this.value});
+class _NutritionStatTile extends StatelessWidget {
+  const _NutritionStatTile({
+    required this.emoji,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String emoji;
   final String label;
   final String value;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: cs.onSurface.withAlpha(210),
+    final background = color.withOpacity(0.18);
+    final borderColor = color.withOpacity(0.4);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 120, maxWidth: 140),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: borderColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 20)),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: cs.onSurface,
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: cs.onSurface.withAlpha(200),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -3041,16 +3492,57 @@ class _MenuBarListCard extends StatelessWidget {
     required this.title,
     required this.items,
     required this.barColor,
+    this.inlineInsight,
+    this.headerTrailing,
   });
   final String title;
   final List<_NameCountWithImage> items;
   final Color barColor;
+  final Widget? inlineInsight;
+  final Widget? headerTrailing;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final limited = items.length > 5 ? items.take(5).toList() : items;
     final maxV = limited.fold<int>(0, (m, e) => e.count > m ? e.count : m);
+    final children = <Widget>[
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: cs.onSurface,
+              ),
+            ),
+          ),
+          if (headerTrailing != null) ...[
+            const SizedBox(width: 12),
+            headerTrailing!,
+          ],
+        ],
+      ),
+      const SizedBox(height: 12),
+      if (items.isEmpty)
+        Text(
+          'ยังไม่มีข้อมูล',
+          style: TextStyle(color: cs.onSurface.withAlpha(170)),
+        )
+      else
+        ...limited.map(
+          (e) => _MenuRow(item: e, maxValue: maxV, barColor: barColor),
+        ),
+    ];
+
+    if (inlineInsight != null) {
+      children.add(const SizedBox(height: 12));
+      children.add(inlineInsight!);
+    }
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -3060,28 +3552,7 @@ class _MenuBarListCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: cs.onSurface,
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (items.isEmpty)
-            Text(
-              'ยังไม่มีข้อมูล',
-              style: TextStyle(color: cs.onSurface.withAlpha(170)),
-            )
-          else
-            ...limited
-                .map(
-                  (e) => _MenuRow(item: e, maxValue: maxV, barColor: barColor),
-                )
-                .toList(),
-        ],
+        children: children,
       ),
     );
   }
@@ -3152,7 +3623,404 @@ class _MenuRow extends StatelessWidget {
   }
 }
 
+class _TopMenusSwitcherCard extends StatefulWidget {
+  const _TopMenusSwitcherCard({
+    required this.thisWeekTitle,
+    required this.lastWeekTitle,
+    required this.thisWeek,
+    required this.lastWeek,
+    required this.insights,
+  });
+
+  final String thisWeekTitle;
+  final String lastWeekTitle;
+  final List<_NameCountWithImage> thisWeek;
+  final List<_NameCountWithImage> lastWeek;
+  final List<_DashboardInsightEntry> insights;
+
+  @override
+  State<_TopMenusSwitcherCard> createState() => _TopMenusSwitcherCardState();
+}
+
+class _TopMenusSwitcherCardState extends State<_TopMenusSwitcherCard> {
+  int _selectedIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isThisWeek = _selectedIndex == 0;
+    final title = isThisWeek ? widget.thisWeekTitle : widget.lastWeekTitle;
+    final items = isThisWeek ? widget.thisWeek : widget.lastWeek;
+    final barColor = isThisWeek ? cs.primary : cs.secondary;
+
+    return _MenuBarListCard(
+      title: title,
+      items: items,
+      barColor: barColor,
+      headerTrailing: _TopMenusToggle(
+        selectedIndex: _selectedIndex,
+        onChanged: (index) {
+          if (_selectedIndex == index) return;
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+      ),
+      inlineInsight: widget.insights.isEmpty
+          ? null
+          : _InlineInsightPanel(
+              insights: widget.insights,
+              colorScheme: cs,
+              backgroundColor: cs.surface,
+            ),
+    );
+  }
+}
+
+class _TopMenusToggle extends StatelessWidget {
+  const _TopMenusToggle({required this.selectedIndex, required this.onChanged});
+
+  final int selectedIndex;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isSelected = <bool>[selectedIndex == 0, selectedIndex == 1];
+
+    return ToggleButtons(
+      borderRadius: BorderRadius.circular(18),
+      constraints: const BoxConstraints(minHeight: 32, minWidth: 92),
+      borderColor: cs.outline.withAlpha(110),
+      selectedBorderColor: cs.primary,
+      fillColor: cs.primary.withAlpha(40),
+      color: cs.onSurface.withAlpha(178),
+      selectedColor: cs.primary,
+      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      renderBorder: true,
+      isSelected: isSelected,
+      onPressed: (index) => onChanged(index),
+      children: const [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 6),
+          child: Text('สัปดาห์นี้'),
+        ),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 6),
+          child: Text('สัปดาห์ก่อน'),
+        ),
+      ],
+    );
+  }
+}
+
+class _InlineInsightPanel extends StatefulWidget {
+  const _InlineInsightPanel({
+    required this.insights,
+    required this.colorScheme,
+    this.backgroundColor,
+    this.collapsible = false,
+    this.maxPreviewLines = 2,
+    this.initiallyVisible = false,
+  });
+
+  final List<_DashboardInsightEntry> insights;
+  final ColorScheme colorScheme;
+  final Color? backgroundColor;
+  final bool collapsible;
+  final int maxPreviewLines;
+  final bool initiallyVisible;
+
+  @override
+  State<_InlineInsightPanel> createState() => _InlineInsightPanelState();
+}
+
+class _InlineInsightPanelState extends State<_InlineInsightPanel> {
+  bool _panelVisible = false;
+  bool _showFullText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _panelVisible = widget.initiallyVisible && widget.insights.isNotEmpty;
+  }
+
+  @override
+  void didUpdateWidget(covariant _InlineInsightPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.insights.length != widget.insights.length ||
+        oldWidget.initiallyVisible != widget.initiallyVisible) {
+      _panelVisible = widget.initiallyVisible && widget.insights.isNotEmpty;
+      _showFullText = false;
+    }
+  }
+
+  bool get _shouldCollapse {
+    if (!widget.collapsible || widget.insights.isEmpty) return false;
+    if (widget.insights.length > 1) return true;
+    final message = widget.insights.first.message.trim();
+    if (message.contains('\n')) return true;
+    final estimatedChars = widget.maxPreviewLines * 40;
+    return message.length > estimatedChars;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.insights.isEmpty) return const SizedBox.shrink();
+    final cs = widget.colorScheme;
+    final bg = widget.backgroundColor ?? cs.surface;
+    final shouldCollapse = _shouldCollapse;
+    final visibleEntries = (!shouldCollapse || _showFullText)
+        ? widget.insights
+        : widget.insights.take(1).toList();
+
+    final content = Container(
+      key: const ValueKey('insight-content'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.insights_outlined, color: cs.primary, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ...List.generate(visibleEntries.length, (index) {
+                      final entry = visibleEntries[index];
+                      return Padding(
+                        padding: EdgeInsets.only(top: index == 0 ? 0 : 8),
+                        child: _InsightText(
+                          entry: entry,
+                          colorScheme: cs,
+                          maxLines: shouldCollapse && !_showFullText
+                              ? widget.maxPreviewLines
+                              : null,
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (shouldCollapse)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: cs.primary,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 0,
+                  ),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _showFullText = !_showFullText;
+                  });
+                },
+                icon: Icon(
+                  _showFullText ? Icons.expand_less : Icons.expand_more,
+                ),
+                label: Text(_showFullText ? 'ย่อ' : 'ดูเพิ่มเติม'),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          transitionBuilder: (child, animation) {
+            return SizeTransition(
+              sizeFactor: animation,
+              child: FadeTransition(opacity: animation, child: child),
+            );
+          },
+          child: _panelVisible ? content : const SizedBox.shrink(),
+        ),
+        SizedBox(height: _panelVisible ? 8 : 0),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: cs.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () {
+              setState(() {
+                if (_panelVisible) {
+                  _panelVisible = false;
+                  _showFullText = false;
+                } else {
+                  _panelVisible = true;
+                }
+              });
+            },
+            icon: Icon(
+              _panelVisible
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined,
+            ),
+            label: Text(_panelVisible ? 'ซ่อน Insight' : 'ดู Insight'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InsightText extends StatelessWidget {
+  const _InsightText({
+    required this.entry,
+    required this.colorScheme,
+    this.maxLines,
+  });
+
+  final _DashboardInsightEntry entry;
+  final ColorScheme colorScheme;
+  final int? maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (entry.title.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Text(
+              entry.title,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
+              ),
+            ),
+          ),
+        Text(
+          entry.message,
+          maxLines: maxLines,
+          overflow: maxLines != null ? TextOverflow.ellipsis : null,
+          style: TextStyle(
+            color: cs.onSurface.withAlpha(210),
+            height: 1.35,
+            fontSize: 12.5,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 bool get _aiInsightEnabled {
   final v = (dotenv.env['AI_INSIGHT_ENABLED'] ?? 'true').trim().toLowerCase();
   return !(v == 'false' || v == '0' || v == 'off');
+}
+
+// === Insight KPI model (ภายในไฟล์) ===
+class _InsightKPI {
+  final IconData icon;
+  final String value; // ตัวเลข/เปอร์เซ็นต์เด่น
+  final String title; // หัวข้อสั้น
+  final String subtitle; // คำอธิบายสั้น
+  final Color tint; // สีพาสเทล
+  final VoidCallback? onTap;
+  const _InsightKPI({
+    required this.icon,
+    required this.value,
+    required this.title,
+    required this.subtitle,
+    required this.tint,
+    this.onTap,
+  });
+} // === ใบ KPI เดี่ยว ===
+
+class _KpiCard extends StatelessWidget {
+  const _KpiCard({required this.item});
+  final _InsightKPI item;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final base = item.tint;
+
+    return Material(
+      color: base.withAlpha(40),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: item.onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Value + Title (baseline alignment)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Flexible(
+                    child: Text(
+                      item.value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      item.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface.withAlpha(170),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+
+              // Subtitle
+              Text(
+                item.subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
