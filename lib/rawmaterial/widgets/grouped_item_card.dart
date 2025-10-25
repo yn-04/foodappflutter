@@ -50,6 +50,7 @@ class GroupedItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final category = items.first.category;
+    final color = Categories.colorFor(category);
 
     // รวมจำนวน + หน่วย
     final unitSet = items.map((e) => Units.safe(e.unit)).toSet();
@@ -120,10 +121,10 @@ class GroupedItemCard extends StatelessWidget {
                     // ไอคอนหมวด
                     CircleAvatar(
                       radius: 24,
-                      backgroundColor: Colors.grey[100],
+                      backgroundColor: color.withAlpha((255 * 0.16).round()),
                       child: Icon(
                         Categories.iconFor(category),
-                        color: Colors.grey[700],
+                        color: color,
                       ),
                     ),
                     const SizedBox(width: 12),

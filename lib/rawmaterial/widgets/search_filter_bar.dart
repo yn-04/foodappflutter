@@ -1,4 +1,4 @@
-﻿// lib/rawmaterial/widgets/search_filter_bar.dart — แถบค้นหา + ตัวกรองวันหมดอายุ
+// lib/rawmaterial/widgets/search_filter_bar.dart — แถบค้นหา + ตัวกรองวันหมดอายุ
 import 'package:flutter/material.dart';
 
 class SearchFilterBar extends StatelessWidget {

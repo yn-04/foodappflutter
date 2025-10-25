@@ -1,4 +1,4 @@
-﻿// lib/rawmaterial/widgets/item_group_detail_card.dart — แสดงรายละเอียดกลุ่ม (ชื่อซ้ำ) แบบ Pop-up
+// lib/rawmaterial/widgets/item_group_detail_card.dart — แสดงรายละเอียดกลุ่ม (ชื่อซ้ำ) แบบ Pop-up
 // โชว์รายการด้วยการ์ด ShoppingItemCard และให้แก้ไข/ลบได้
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';

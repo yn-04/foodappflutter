@@ -80,6 +80,9 @@ class CategoryBar extends StatelessWidget {
         itemBuilder: (_, idx) {
           final c = visibleCategories[idx];
           final isSelected = selected == c;
+          final color = Categories.colorFor(c);
+          final fillColor = color.withAlpha((255 * (isSelected ? 0.24 : 0.08)).round());
+          final borderColor = color.withAlpha((255 * (isSelected ? 0.8 : 0.25)).round());
 
           return GestureDetector(
             onTap: () => onSelect(c),
@@ -87,16 +90,16 @@ class CategoryBar extends StatelessWidget {
               margin: const EdgeInsets.only(right: 12, top: 8, bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: isSelected ? Colors.yellow[300] : Colors.grey[200],
+                color: fillColor,
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: isSelected ? Colors.yellow[700]! : Colors.grey[300]!,
+                  color: borderColor,
                   width: 1.4,
                 ),
               ),
               child: Row(
                 children: [
-                  Icon(Categories.iconFor(c), size: 18, color: Colors.black87),
+                  Icon(Categories.iconFor(c), size: 18, color: color),
                   const SizedBox(width: 6),
                   Text(
                     c,
