@@ -1,4 +1,4 @@
-﻿// lib/rawmaterial/constants/categories.dart
+// lib/rawmaterial/constants/categories.dart
 // ยูทิลิตี้จัดการรายชื่อหมวดหมู่ + หมวดย่อย
 
 import 'package:flutter/material.dart';
@@ -16,8 +16,46 @@ class Categories {
   );
 
   static const IconData _defaultIcon = Icons.category_outlined;
+  static const Color _defaultColor = Color(0xFF9E9E9E);
+
+  static const Map<String, Color> _categoryColors = {
+    'ผักผลไม้สด': Color(0xFF4CAF50),
+    'เนื้อสัตว์/อาหารทะเล': Color(0xFFE57373),
+    'นม/ชีส/ไข่': Color(0xFFFFB74D),
+    'ของแห้ง/เครื่องปรุง': Color(0xFF8D6E63),
+    'กับข้าว/พร้อมทาน': Color(0xFF7E57C2),
+    'เบเกอรี่/ขนม': Color(0xFFF06292),
+    'เครื่องดื่ม': Color(0xFF42A5F5),
+    'น้ำมัน': Color(0xFFFFA726),
+  };
+
+  static const List<Color> _fallbackPalette = [
+    Color(0xFF607D8B),
+    Color(0xFF009688),
+    Color(0xFF26A69A),
+    Color(0xFF5C6BC0),
+    Color(0xFFAB47BC),
+    Color(0xFFFF7043),
+    Color(0xFF29B6F6),
+    Color(0xFF66BB6A),
+  ];
 
   // ใช้ normalize ทั้งกับข้อความที่ผู้ใช้พิมพ์ และตอนสร้างดัชนีค้นหา
+  static Color colorFor(String? category) {
+    final normalized = normalize(category);
+    if (normalized.isEmpty) return _defaultColor;
+    if (normalized == allLabel) {
+      return const Color(0xFF607D8B);
+    }
+    final direct = _categoryColors[normalized];
+    if (direct != null) return direct;
+    if (_fallbackPalette.isEmpty) {
+      return _defaultColor;
+    }
+    final index = normalized.hashCode.abs() % _fallbackPalette.length;
+    return _fallbackPalette[index];
+  }
+
   static final RegExp _normalizePattern = RegExp(r'[\s\-_/()]+');
 
   /// ดัชนีไอเท็ม (normalize แล้ว) -> รายการหมวดย่อย (เหมือน shelfLifeItemIndex แต่ค้นหาแม่นกว่า)
