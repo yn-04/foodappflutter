@@ -1,4 +1,4 @@
-﻿// lib/rawmaterial/constants/shelf_life.dart
+// lib/rawmaterial/constants/shelf_life.dart
 // ข้อมูล Shelf Life และ helper functions สำหรับระบบเพิ่มวัตถุดิบ
 
 import 'package:my_app/rawmaterial/constants/shelf_life_dataset.dart';
