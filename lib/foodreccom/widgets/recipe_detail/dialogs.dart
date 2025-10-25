@@ -272,37 +272,47 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                             ),
                             const SizedBox(height: 8),
                             Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                IconButton(
-                                  onPressed: () {
-                                    double next = value - step;
-                                    if (next < 0) next = 0;
-                                    final normalized = _normalizeAmount(next);
-                                    setState(() {
-                                      working[key] = normalized;
-                                    });
-                                    final updated = _formatAmount(
-                                      normalized,
-                                      unit: displayUnit,
-                                      ingredientName: entry.name,
-                                    );
-                                    if (controller.text != updated) {
-                                      controller.value = controller.value.copyWith(
-                                        text: updated,
-                                        selection: TextSelection.collapsed(
-                                          offset: updated.length,
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  icon: const Icon(Icons.remove_circle_outline),
-                                ),
-                                Expanded(
-                                  child: Column(
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: Colors.grey[300]!),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 4,
+                                  ),
+                                  child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
+                                      _QuantityButton(
+                                        icon: Icons.remove,
+                                        onTap: () {
+                                          double next = value - step;
+                                          if (next < 0) next = 0;
+                                          final normalized = _normalizeAmount(next);
+                                          setState(() {
+                                            working[key] = normalized;
+                                          });
+                                          final updated = _formatAmount(
+                                            normalized,
+                                            unit: displayUnit,
+                                            ingredientName: entry.name,
+                                          );
+                                          if (controller.text != updated) {
+                                            controller.value = controller.value.copyWith(
+                                              text: updated,
+                                              selection: TextSelection.collapsed(
+                                                offset: updated.length,
+                                              ),
+                                            );
+                                          }
+                                        },
+                                      ),
                                       SizedBox(
-                                        width: 96,
+                                        width: 70,
                                         child: TextField(
                                           controller: controller,
                                           textAlign: TextAlign.center,
@@ -312,9 +322,13 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                                               RegExp(r'^\d*\.?\d{0,2}$'),
                                             ),
                                           ],
+                                          decoration: const InputDecoration(
+                                            isDense: true,
+                                            border: InputBorder.none,
+                                            contentPadding: EdgeInsets.symmetric(vertical: 4),
+                                          ),
                                           onTap: () {
-                                            controller.selection =
-                                                TextSelection(
+                                            controller.selection = TextSelection(
                                               baseOffset: 0,
                                               extentOffset: controller.text.length,
                                             );
@@ -339,58 +353,58 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                                               );
                                             }
                                           },
-                                          decoration: InputDecoration(
-                                            isDense: true,
-                                            contentPadding: const EdgeInsets.symmetric(
-                                              vertical: 8,
-                                            ),
-                                            suffixText: unitLabel.trim().isEmpty ? null : unitLabel.trim(),
-                                            border: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(8),
-                                            ),
-                                          ),
                                         ),
                                       ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'สูตรแนะนำ: ${_formatAmount(
-                                              defaultValue,
-                                              unit: displayUnit,
-                                              ingredientName: entry.name,
-                                            )}$unitLabel',
-                                        style: const TextStyle(
-                                          color: Colors.black54,
-                                          fontSize: 12,
-                                        ),
+                                      _QuantityButton(
+                                        icon: Icons.add,
+                                        onTap: () {
+                                          double next = value + step;
+                                          if (next > 99999) next = 99999;
+                                          final normalized = _normalizeAmount(next);
+                                          setState(() {
+                                            working[key] = normalized;
+                                          });
+                                          final updated = _formatAmount(
+                                            normalized,
+                                            unit: displayUnit,
+                                            ingredientName: entry.name,
+                                          );
+                                          if (controller.text != updated) {
+                                            controller.value = controller.value.copyWith(
+                                              text: updated,
+                                              selection: TextSelection.collapsed(
+                                                offset: updated.length,
+                                              ),
+                                            );
+                                          }
+                                        },
                                       ),
                                     ],
                                   ),
                                 ),
-                                IconButton(
-                                  onPressed: () {
-                                    double next = value + step;
-                                    if (next > 99999) next = 99999;
-                                    final normalized = _normalizeAmount(next);
-                                    setState(() {
-                                      working[key] = normalized;
-                                    });
-                                    final updated = _formatAmount(
-                                      normalized,
-                                      unit: displayUnit,
-                                      ingredientName: entry.name,
-                                    );
-                                    if (controller.text != updated) {
-                                      controller.value = controller.value.copyWith(
-                                        text: updated,
-                                        selection: TextSelection.collapsed(
-                                          offset: updated.length,
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  icon: const Icon(Icons.add_circle_outline),
-                                ),
+                                if (unitLabel.trim().isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    unitLabel.trim(),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
                               ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'สูตรแนะนำ: ${_formatAmount(
+                                    defaultValue,
+                                    unit: displayUnit,
+                                    ingredientName: entry.name,
+                                  )}${unitLabel.trim().isEmpty ? '' : unitLabel.trim()}',
+                              style: const TextStyle(
+                                color: Colors.black54,
+                                fontSize: 12,
+                              ),
                             ),
                             Align(
                               alignment: Alignment.centerRight,
@@ -661,6 +675,27 @@ Future<void> showPartialSuccessDialog(
       ],
     ),
   );
+}
+
+class _QuantityButton extends StatelessWidget {
+  const _QuantityButton({
+    required this.icon,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: onTap,
+      icon: Icon(icon, size: 20, color: Colors.grey[800]),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+      splashRadius: 18,
+    );
+  }
 }
 
 String _formatAmount(

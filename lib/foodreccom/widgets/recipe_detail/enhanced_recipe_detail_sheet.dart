@@ -41,8 +41,22 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
         ? 1
         : widget.recipe.servings;
     _maxSelectableServings = math.max(10, baseServings);
-    // เริ่มต้น UI ที่ 1 เสิร์ฟ แต่ยังปรับตามสูตรได้สูงสุดตามข้อมูลจริง
-    _selectedServings = 1;
+    final provider =
+        context.read<EnhancedRecommendationProvider>();
+    final override =
+        provider.getServingsOverride(widget.recipe.id);
+    if (override != null && override > 0) {
+      _selectedServings = override;
+    } else {
+      _selectedServings = 1;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        provider.setServingsOverride(
+          widget.recipe.id,
+          _selectedServings,
+        );
+      });
+    }
   }
 
   @override
@@ -62,10 +76,11 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
           ),
           child: Column(
             children: [
+              const SizedBox(height: 16),
               RecipeHeader(recipe: widget.recipe),
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -75,10 +90,18 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
                       ServingsSelector(
                         selected: _selectedServings,
                         max: _maxSelectableServings,
-                        onChanged: (value) => setState(() {
-                          _selectedServings = value;
-                          _manualIngredientAmounts = const {};
-                        }),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedServings = value;
+                            _manualIngredientAmounts = const {};
+                          });
+                          context
+                              .read<EnhancedRecommendationProvider>()
+                              .setServingsOverride(
+                                widget.recipe.id,
+                                value,
+                              );
+                        },
                       ),
                       // Missing ingredients block (highlight)
                       MissingIngredientsSection(
