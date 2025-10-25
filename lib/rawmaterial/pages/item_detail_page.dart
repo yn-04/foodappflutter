@@ -1,4 +1,4 @@
-﻿// lib/rawmaterial/pages/item_detail_page.dart
+// lib/rawmaterial/pages/item_detail_page.dart
 // หน้า “รายละเอียดวัตถุดิบ” แบบกระทัดรัด การ์ดกลางจอ + แถบหัวไอคอนล้วน
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -407,15 +407,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                   menuMaxHeight: 320,
                                   items: Categories.list.map((c) {
                                     final icon = Categories.iconFor(c);
+                                    final color = Categories.colorFor(c);
                                     return DropdownMenuItem(
                                       value: c,
                                       child: Row(
                                         children: [
-                                          Icon(
-                                            icon,
-                                            size: 18,
-                                            color: Colors.black87,
-                                          ),
+                                          Icon(icon, size: 18, color: color),
                                           const SizedBox(width: 8),
                                           Expanded(
                                             child: Text(
@@ -431,13 +428,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                   selectedItemBuilder: (context) {
                                     return Categories.list.map((c) {
                                       final icon = Categories.iconFor(c);
+                                      final color = Categories.colorFor(c);
                                       return Row(
                                         children: [
-                                          Icon(
-                                            icon,
-                                            size: 18,
-                                            color: Colors.black87,
-                                          ),
+                                          Icon(icon, size: 18, color: color),
                                           const SizedBox(width: 8),
                                           Flexible(
                                             child: Text(
@@ -799,15 +793,12 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                     menuMaxHeight: 320,
                                     items: Categories.list.map((c) {
                                       final icon = Categories.iconFor(c);
+                                      final color = Categories.colorFor(c);
                                       return DropdownMenuItem(
                                         value: c,
                                         child: Row(
                                           children: [
-                                            Icon(
-                                              icon,
-                                              size: 18,
-                                              color: Colors.black87,
-                                            ),
+                                            Icon(icon, size: 18, color: color),
                                             const SizedBox(width: 8),
                                             Expanded(
                                               child: Text(
@@ -824,13 +815,10 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                     selectedItemBuilder: (context) {
                                       return Categories.list.map((c) {
                                         final icon = Categories.iconFor(c);
+                                        final color = Categories.colorFor(c);
                                         return Row(
                                           children: [
-                                            Icon(
-                                              icon,
-                                              size: 18,
-                                              color: Colors.black87,
-                                            ),
+                                            Icon(icon, size: 18, color: color),
                                             const SizedBox(width: 8),
                                             Flexible(
                                               child: Text(
