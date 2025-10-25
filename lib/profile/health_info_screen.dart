@@ -1,4 +1,4 @@
-// lib/profile/health_info_screen.dart — Health Info (Modern UI + Always Editable + BMI no-overflow + Allergy suggestions
+﻿// lib/profile/health_info_screen.dart — Health Info (Modern UI + Always Editable + BMI no-overflow + Allergy suggestions
 import 'dart:io';
 // ADD
 import 'dart:async';

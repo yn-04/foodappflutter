@@ -505,10 +505,7 @@ class RapidAPIRecipeService {
     if (diets.isNotEmpty) query['diet'] = diets.first;
 
     // Intolerances mapping
-    const intoleranceMap = {
-      'gluten-free': 'gluten',
-      'dairy-free': 'dairy',
-    };
+    const intoleranceMap = {'gluten-free': 'gluten', 'dairy-free': 'dairy'};
     final intoleranceList = intoleranceMap.entries
         .where((entry) => goals.contains(entry.key))
         .map((entry) => entry.value)
@@ -524,8 +521,8 @@ class RapidAPIRecipeService {
     final mc = (maxCarbs != null && maxCarbs > 0)
         ? maxCarbs
         : (goals.contains('low-carb') || goals.contains('ketogenic'))
-            ? 20
-            : null;
+        ? 20
+        : null;
     final mf = (maxFat != null && maxFat > 0)
         ? maxFat
         : (goals.contains('low-fat') ? 15 : null);
@@ -918,7 +915,8 @@ class RapidAPIRecipeService {
     final ing = [...translatedNames]..sort();
     final cuisines = [...cuisineFilters]..sort();
     final diets = [...dietGoals.map((e) => e.toLowerCase())]..sort();
-    final excludes = [...excludeIngredients.map((e) => e.toLowerCase())]..sort();
+    final excludes = [...excludeIngredients.map((e) => e.toLowerCase())]
+      ..sort();
     final buffer = StringBuffer(_cacheKey);
     buffer.write('_i:${ing.join("|")}');
     if (cuisines.isNotEmpty) buffer.write('_c:${cuisines.join("|")}');
@@ -1002,7 +1000,8 @@ class RapidAPIRecipeService {
         // Macro goals
         final proteinMin =
             minProtein ?? (goals.contains('high-protein') ? 30 : null);
-        final carbsMax = maxCarbs ??
+        final carbsMax =
+            maxCarbs ??
             ((goals.contains('low-carb') || goals.contains('ketogenic'))
                 ? 20
                 : null);

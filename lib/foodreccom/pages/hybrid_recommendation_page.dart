@@ -230,10 +230,7 @@ class _HybridRecommendationPageState extends State<HybridRecommendationPage>
               const SizedBox(width: 8),
               const Text(
                 'เมนูที่เคยทำล่าสุด',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
-                ),
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
               ),
             ],
           ),
@@ -269,7 +266,11 @@ class _HybridRecommendationPageState extends State<HybridRecommendationPage>
                       const Spacer(),
                       Row(
                         children: [
-                          const Icon(Icons.people_alt, size: 14, color: Colors.grey),
+                          const Icon(
+                            Icons.people_alt,
+                            size: 14,
+                            color: Colors.grey,
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             '${item.servingsMade} เสิร์ฟ',
@@ -283,8 +284,11 @@ class _HybridRecommendationPageState extends State<HybridRecommendationPage>
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          const Icon(Icons.calendar_today_outlined,
-                              size: 14, color: Colors.grey),
+                          const Icon(
+                            Icons.calendar_today_outlined,
+                            size: 14,
+                            color: Colors.grey,
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             _formatThaiDate(item.cookedAt),

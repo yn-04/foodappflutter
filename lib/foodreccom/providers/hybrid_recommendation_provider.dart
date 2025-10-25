@@ -115,17 +115,24 @@ class HybridRecommendationProvider extends ChangeNotifier {
           .collection('raw_materials')
           .get();
 
-      final debugLogsEnabled =
-          (dotenv.env['DEBUG_FILTER_LOGS'] ?? 'false').trim().toLowerCase();
+      final debugLogsEnabled = (dotenv.env['DEBUG_FILTER_LOGS'] ?? 'false')
+          .trim()
+          .toLowerCase();
       final isDebug =
-          debugLogsEnabled == 'true' || debugLogsEnabled == '1' || debugLogsEnabled == 'on';
+          debugLogsEnabled == 'true' ||
+          debugLogsEnabled == '1' ||
+          debugLogsEnabled == 'on';
 
       if (isDebug) {
         for (final doc in snapshot.docs) {
           final data = doc.data();
           final rawExpiry = data['expiry_date'];
           final parsedExpiry = parseDate(rawExpiry);
-          final expiryLocal = DateTime(parsedExpiry.year, parsedExpiry.month, parsedExpiry.day);
+          final expiryLocal = DateTime(
+            parsedExpiry.year,
+            parsedExpiry.month,
+            parsedExpiry.day,
+          );
           final rawType = rawExpiry == null ? 'null' : rawExpiry.runtimeType;
           print(
             '🐞 [RawExpiry] ${data['name']} raw=$rawExpiry (type=$rawType) → parsed=${parsedExpiry.toIso8601String()} (localDate=${expiryLocal.toIso8601String()})',
@@ -196,12 +203,15 @@ class HybridRecommendationProvider extends ChangeNotifier {
           }).toList();
         }
 
-        _hybridResult!.externalRecipes =
-            updateMissing(_hybridResult!.externalRecipes);
-        _hybridResult!.combinedRecommendations =
-            updateMissing(_hybridResult!.combinedRecommendations);
-        _hybridResult!.aiRecommendations =
-            updateMissing(_hybridResult!.aiRecommendations);
+        _hybridResult!.externalRecipes = updateMissing(
+          _hybridResult!.externalRecipes,
+        );
+        _hybridResult!.combinedRecommendations = updateMissing(
+          _hybridResult!.combinedRecommendations,
+        );
+        _hybridResult!.aiRecommendations = updateMissing(
+          _hybridResult!.aiRecommendations,
+        );
       }
 
       if (!_hybridResult!.isSuccess) {
@@ -350,10 +360,9 @@ class HybridRecommendationProvider extends ChangeNotifier {
   // ใช้ logic จาก utils/ingredient_utils + cross-language (TH↔EN)
   List<String> _computeMissingIngredients(RecipeModel recipe) {
     final thaiInv = _ingredients.map((i) => _norm(i.name)).toList();
-    final engInv = IngredientTranslator
-        .translateList(_ingredients.map((i) => i.name).toList())
-        .map(_norm)
-        .toList();
+    final engInv = IngredientTranslator.translateList(
+      _ingredients.map((i) => i.name).toList(),
+    ).map(_norm).toList();
 
     bool matchAny(String need) {
       final nThai = _norm(need);
@@ -408,7 +417,10 @@ class HybridRecommendationProvider extends ChangeNotifier {
         final key = name.trim().toLowerCase();
         if (key.isEmpty) continue;
 
-        final exists = await col.where('name_key', isEqualTo: key).limit(1).get();
+        final exists = await col
+            .where('name_key', isEqualTo: key)
+            .limit(1)
+            .get();
         if (exists.docs.isNotEmpty) continue;
 
         final guessedCategory = _guessCategory(name);
@@ -443,18 +455,138 @@ class HybridRecommendationProvider extends ChangeNotifier {
 
   String _guessCategory(String name) {
     final n = name.trim().toLowerCase();
-    const meat = ['ไก่','หมู','เนื้อ','วัว','ปลา','กุ้ง','หมึก','เป็ด','แฮม','เบคอน','pork','beef','chicken','fish','shrimp','squid'];
-    const egg = ['ไข่','egg'];
-    const veg = ['ผัก','หอม','หัวหอม','ต้นหอม','กระเทียม','พริก','มะเขือเทศ','คะน้า','กะหล่ำ','แครอท','แตง','เห็ด','ขิง','ข่า','ตะไคร้','ใบมะกรูด','onion','garlic','chili','tomato','cabbage','carrot','mushroom','ginger','lemongrass','lime leaf'];
-    const fruit = ['ผลไม้','กล้วย','ส้ม','แอปเปิ้ล','สตรอ','มะม่วง','สับปะรด','องุ่น','banana','orange','apple','strawberry','mango','pineapple','grape','lemon','lime'];
-    const dairy = ['นม','ชีส','โยเกิร์ต','ครีม','เนย','milk','cheese','yogurt','butter','cream'];
-    const rice = ['ข้าว','ข้าวสาร','rice','ข้าวหอมมะลิ'];
-    const spice = ['เครื่องเทศ','ยี่หร่า','อบเชย','ผงกะหรี่','ซินนามอน','cumin','curry powder','cinnamon','peppercorn'];
-    const condiment = ['ซอส','น้ำปลา','ซีอิ๊ว','เกลือ','น้ำตาล','ผงชูรส','เต้าเจี้ยว','ซอสมะเขือเทศ','มายองเนส','ซอสหอยนางรม','sauce','fish sauce','soy','salt','sugar','ketchup','mayonnaise','oyster sauce'];
-    const flour = ['แป้ง','ขนมปัง','เส้น','พาสต้า','noodle','pasta','flour','bread'];
-    const oil = ['น้ำมัน','olive oil','vegetable oil','oil'];
-    const drink = ['น้ำอัดลม','โซดา','กาแฟ','ชา','juice','soda','coffee','tea'];
-    const frozen = ['แช่แข็ง','frozen'];
+    const meat = [
+      'ไก่',
+      'หมู',
+      'เนื้อ',
+      'วัว',
+      'ปลา',
+      'กุ้ง',
+      'หมึก',
+      'เป็ด',
+      'แฮม',
+      'เบคอน',
+      'pork',
+      'beef',
+      'chicken',
+      'fish',
+      'shrimp',
+      'squid',
+    ];
+    const egg = ['ไข่', 'egg'];
+    const veg = [
+      'ผัก',
+      'หอม',
+      'หัวหอม',
+      'ต้นหอม',
+      'กระเทียม',
+      'พริก',
+      'มะเขือเทศ',
+      'คะน้า',
+      'กะหล่ำ',
+      'แครอท',
+      'แตง',
+      'เห็ด',
+      'ขิง',
+      'ข่า',
+      'ตะไคร้',
+      'ใบมะกรูด',
+      'onion',
+      'garlic',
+      'chili',
+      'tomato',
+      'cabbage',
+      'carrot',
+      'mushroom',
+      'ginger',
+      'lemongrass',
+      'lime leaf',
+    ];
+    const fruit = [
+      'ผลไม้',
+      'กล้วย',
+      'ส้ม',
+      'แอปเปิ้ล',
+      'สตรอ',
+      'มะม่วง',
+      'สับปะรด',
+      'องุ่น',
+      'banana',
+      'orange',
+      'apple',
+      'strawberry',
+      'mango',
+      'pineapple',
+      'grape',
+      'lemon',
+      'lime',
+    ];
+    const dairy = [
+      'นม',
+      'ชีส',
+      'โยเกิร์ต',
+      'ครีม',
+      'เนย',
+      'milk',
+      'cheese',
+      'yogurt',
+      'butter',
+      'cream',
+    ];
+    const rice = ['ข้าว', 'ข้าวสาร', 'rice', 'ข้าวหอมมะลิ'];
+    const spice = [
+      'เครื่องเทศ',
+      'ยี่หร่า',
+      'อบเชย',
+      'ผงกะหรี่',
+      'ซินนามอน',
+      'cumin',
+      'curry powder',
+      'cinnamon',
+      'peppercorn',
+    ];
+    const condiment = [
+      'ซอส',
+      'น้ำปลา',
+      'ซีอิ๊ว',
+      'เกลือ',
+      'น้ำตาล',
+      'ผงชูรส',
+      'เต้าเจี้ยว',
+      'ซอสมะเขือเทศ',
+      'มายองเนส',
+      'ซอสหอยนางรม',
+      'sauce',
+      'fish sauce',
+      'soy',
+      'salt',
+      'sugar',
+      'ketchup',
+      'mayonnaise',
+      'oyster sauce',
+    ];
+    const flour = [
+      'แป้ง',
+      'ขนมปัง',
+      'เส้น',
+      'พาสต้า',
+      'noodle',
+      'pasta',
+      'flour',
+      'bread',
+    ];
+    const oil = ['น้ำมัน', 'olive oil', 'vegetable oil', 'oil'];
+    const drink = [
+      'น้ำอัดลม',
+      'โซดา',
+      'กาแฟ',
+      'ชา',
+      'juice',
+      'soda',
+      'coffee',
+      'tea',
+    ];
+    const frozen = ['แช่แข็ง', 'frozen'];
 
     bool any(List<String> list) => list.any((k) => n.contains(k));
 
@@ -476,7 +608,12 @@ class HybridRecommendationProvider extends ChangeNotifier {
   String _guessUnit(String name) {
     final n = name.trim().toLowerCase();
     if (n.contains('ไข่') || n.contains('egg')) return 'ฟอง';
-    if (n.contains('นม') || n.contains('ซอส') || n.contains('น้ำ') || n.contains('ครีม') || n.contains('milk') || n.contains('sauce')) {
+    if (n.contains('นม') ||
+        n.contains('ซอส') ||
+        n.contains('น้ำ') ||
+        n.contains('ครีม') ||
+        n.contains('milk') ||
+        n.contains('sauce')) {
       return 'มิลลิลิตร';
     }
     if (n.contains('ขวด') || n.contains('กระป๋อง')) return 'ชิ้น';

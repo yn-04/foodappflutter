@@ -81,8 +81,12 @@ class CategoryBar extends StatelessWidget {
           final c = visibleCategories[idx];
           final isSelected = selected == c;
           final color = Categories.colorFor(c);
-          final fillColor = color.withAlpha((255 * (isSelected ? 0.24 : 0.08)).round());
-          final borderColor = color.withAlpha((255 * (isSelected ? 0.8 : 0.25)).round());
+          final fillColor = color.withAlpha(
+            (255 * (isSelected ? 0.24 : 0.08)).round(),
+          );
+          final borderColor = color.withAlpha(
+            (255 * (isSelected ? 0.8 : 0.25)).round(),
+          );
 
           return GestureDetector(
             onTap: () => onSelect(c),
@@ -92,10 +96,7 @@ class CategoryBar extends StatelessWidget {
               decoration: BoxDecoration(
                 color: fillColor,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: borderColor,
-                  width: 1.4,
-                ),
+                border: Border.all(color: borderColor, width: 1.4),
               ),
               child: Row(
                 children: [

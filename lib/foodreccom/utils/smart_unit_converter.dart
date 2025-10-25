@@ -2,8 +2,7 @@
 import 'dart:math' as math;
 
 import 'package:my_app/common/measurement_constants.dart';
-import 'package:my_app/common/smart_unit_converter.dart'
-    as piece_converter;
+import 'package:my_app/common/smart_unit_converter.dart' as piece_converter;
 import '../constants/unit_conversions.dart';
 import '../services/unit_conversion_service.dart'; // การเรียก Spoonacular (ถ้ามี)
 import 'ingredient_translator.dart';
@@ -257,26 +256,43 @@ class _ManualUnitRule {
 }
 
 const Map<String, _ManualUnitRule> _manualUnitRules = {
-  'ช้อนแกง':
-      _ManualUnitRule(MeasurementConstants.millilitersPerTablespoon, 'milliliter'),
-  'ช้อนกินข้าว':
-      _ManualUnitRule(MeasurementConstants.millilitersPerTablespoon, 'milliliter'),
-  'ช้อนซุป':
-      _ManualUnitRule(MeasurementConstants.millilitersPerTablespoon, 'milliliter'),
-  'ช้อนกาแฟ':
-      _ManualUnitRule(MeasurementConstants.millilitersPerTeaspoon, 'milliliter'),
-  'ช้อนหวาน':
-      _ManualUnitRule(MeasurementConstants.millilitersPerTeaspoon, 'milliliter'),
-  'ช้อนชาเล็ก':
-      _ManualUnitRule(MeasurementConstants.millilitersPerTeaspoon, 'milliliter'),
-  'แก้ว':
-      _ManualUnitRule(MeasurementConstants.millilitersPerCup, 'milliliter'),
-  'แก้วน้ำ':
-      _ManualUnitRule(MeasurementConstants.millilitersPerCup, 'milliliter'),
-  'ถ้วยตวง':
-      _ManualUnitRule(MeasurementConstants.millilitersPerCup, 'milliliter'),
-  'ทัพพี':
-      _ManualUnitRule(MeasurementConstants.millilitersPerCup / 2, 'milliliter'),
+  'ช้อนแกง': _ManualUnitRule(
+    MeasurementConstants.millilitersPerTablespoon,
+    'milliliter',
+  ),
+  'ช้อนกินข้าว': _ManualUnitRule(
+    MeasurementConstants.millilitersPerTablespoon,
+    'milliliter',
+  ),
+  'ช้อนซุป': _ManualUnitRule(
+    MeasurementConstants.millilitersPerTablespoon,
+    'milliliter',
+  ),
+  'ช้อนกาแฟ': _ManualUnitRule(
+    MeasurementConstants.millilitersPerTeaspoon,
+    'milliliter',
+  ),
+  'ช้อนหวาน': _ManualUnitRule(
+    MeasurementConstants.millilitersPerTeaspoon,
+    'milliliter',
+  ),
+  'ช้อนชาเล็ก': _ManualUnitRule(
+    MeasurementConstants.millilitersPerTeaspoon,
+    'milliliter',
+  ),
+  'แก้ว': _ManualUnitRule(MeasurementConstants.millilitersPerCup, 'milliliter'),
+  'แก้วน้ำ': _ManualUnitRule(
+    MeasurementConstants.millilitersPerCup,
+    'milliliter',
+  ),
+  'ถ้วยตวง': _ManualUnitRule(
+    MeasurementConstants.millilitersPerCup,
+    'milliliter',
+  ),
+  'ทัพพี': _ManualUnitRule(
+    MeasurementConstants.millilitersPerCup / 2,
+    'milliliter',
+  ),
   'กำมือ': _ManualUnitRule(15, 'gram'),
   'หยิบมือ': _ManualUnitRule(5, 'gram'),
   'ซอง': _ManualUnitRule(12, 'gram'),

@@ -1,4 +1,4 @@
-// lib/rawmaterial/pages/item_detail_page.dart
+﻿// lib/rawmaterial/pages/item_detail_page.dart
 // หน้า “รายละเอียดวัตถุดิบ” แบบกระทัดรัด การ์ดกลางจอ + แถบหัวไอคอนล้วน
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';

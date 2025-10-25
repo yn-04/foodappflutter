@@ -3,8 +3,7 @@ import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:my_app/common/measurement_constants.dart';
-import 'package:my_app/common/smart_unit_converter.dart'
-    as PieceUnitConverter;
+import 'package:my_app/common/smart_unit_converter.dart' as PieceUnitConverter;
 import 'package:my_app/rawmaterial/utils/unit_converter.dart'
     as StockConverter; // 📦 ใช้สำหรับจัดการสต็อกโดยเฉพาะ
 import 'package:my_app/foodreccom/models/recipe/recipe_ingredient.dart'; // ตรวจสอบ Path ให้ถูกต้อง
@@ -155,8 +154,7 @@ class CookingService {
 
         // รวมปริมาณวัตถุดิบทั้งหมดที่มีในคลังให้เป็นหน่วย Canonical เดียวกัน
         double availableCanonicalAmount = 0;
-        final inventoryDocs =
-            await _findInventoryDocs(user.uid, ing.name);
+        final inventoryDocs = await _findInventoryDocs(user.uid, ing.name);
 
         for (final doc in inventoryDocs) {
           final data = doc.data();
@@ -226,8 +224,7 @@ class CookingService {
       }
 
       // ดึงรายการวัตถุดิบทั้งหมดที่ชื่อตรงกัน (รวมกรณีชื่อคล้าย)
-      final inventoryDocs =
-          await _findInventoryDocs(user.uid, ing.name);
+      final inventoryDocs = await _findInventoryDocs(user.uid, ing.name);
       double amountRemaining = requiredCanonical.amount;
       double consumedCanonical = 0;
       String? usedCategory;
@@ -409,10 +406,10 @@ class CookingService {
           final targetUnit = canonicalUnit == 'ฟอง' ? 'ฟอง' : 'ชิ้น';
           final pieces =
               PieceUnitConverter.SmartUnitConverter.convertGramsToPiece(
-            grams,
-            targetUnit,
-            ingredientName,
-          );
+                grams,
+                targetUnit,
+                ingredientName,
+              );
           if (pieces != null) return pieces;
         }
         return value;
@@ -424,10 +421,10 @@ class CookingService {
         final targetUnit = canonicalUnit == 'ฟอง' ? 'ฟอง' : 'ชิ้น';
         final pieces =
             PieceUnitConverter.SmartUnitConverter.convertGramsToPiece(
-          grams,
-          targetUnit,
-          ingredientName,
-        );
+              grams,
+              targetUnit,
+              ingredientName,
+            );
         if (pieces != null) return pieces;
       }
     }
@@ -461,13 +458,15 @@ class CookingService {
         u.toLowerCase() == 'liter' ||
         u.toLowerCase() == 'liters';
 
-    if (_isGramUnit(normalizedOriginal) || _isKilogramUnit(normalizedOriginal)) {
+    if (_isGramUnit(normalizedOriginal) ||
+        _isKilogramUnit(normalizedOriginal)) {
       double grams = 0;
       if (canonicalUnit == 'gram') {
         grams = safeAmount.toDouble();
       } else if (canonicalUnit == 'milliliter') {
         grams =
-            (_gramsFromVolume(ingredientName, safeAmount.toDouble()) ?? safeAmount.toDouble());
+            (_gramsFromVolume(ingredientName, safeAmount.toDouble()) ??
+            safeAmount.toDouble());
       } else {
         grams = safeAmount.toDouble();
       }
@@ -485,13 +484,15 @@ class CookingService {
       return _StockQuantity(rounded, StockConverter.UnitConverter.gram);
     }
 
-    if (_isMilliliterUnit(normalizedOriginal) || _isLiterUnit(normalizedOriginal)) {
+    if (_isMilliliterUnit(normalizedOriginal) ||
+        _isLiterUnit(normalizedOriginal)) {
       double milliliters = 0;
       if (canonicalUnit == 'milliliter') {
         milliliters = safeAmount.toDouble();
       } else if (canonicalUnit == 'gram') {
         milliliters =
-            (_volumeFromGrams(ingredientName, safeAmount.toDouble()) ?? safeAmount.toDouble());
+            (_volumeFromGrams(ingredientName, safeAmount.toDouble()) ??
+            safeAmount.toDouble());
       } else {
         milliliters = safeAmount.toDouble();
       }
@@ -509,10 +510,13 @@ class CookingService {
       return _StockQuantity(rounded, StockConverter.UnitConverter.milliliter);
     }
 
-    if (PieceUnitConverter.SmartUnitConverter.isPieceUnit(normalizedOriginal.toLowerCase())) {
+    if (PieceUnitConverter.SmartUnitConverter.isPieceUnit(
+      normalizedOriginal.toLowerCase(),
+    )) {
       double pieces = safeAmount.toDouble();
-      final resolvedUnit =
-          normalizedOriginal.isEmpty ? _mapCanonicalUnitToStockUnit('piece') : normalizedOriginal;
+      final resolvedUnit = normalizedOriginal.isEmpty
+          ? _mapCanonicalUnitToStockUnit('piece')
+          : normalizedOriginal;
 
       double? _convertFromGrams(double grams, String targetUnit) {
         return PieceUnitConverter.SmartUnitConverter.convertGramsToPiece(
@@ -523,11 +527,15 @@ class CookingService {
       }
 
       if (canonicalUnit == 'gram') {
-        final converted = _convertFromGrams(safeAmount.toDouble(), resolvedUnit);
+        final converted = _convertFromGrams(
+          safeAmount.toDouble(),
+          resolvedUnit,
+        );
         if (converted != null) pieces = converted;
       } else if (canonicalUnit == 'milliliter') {
         final grams =
-            _gramsFromVolume(ingredientName, safeAmount.toDouble()) ?? safeAmount.toDouble();
+            _gramsFromVolume(ingredientName, safeAmount.toDouble()) ??
+            safeAmount.toDouble();
         final converted = _convertFromGrams(grams, resolvedUnit);
         if (converted != null) pieces = converted;
       } else if (canonicalUnit == 'ฟอง') {
@@ -588,8 +596,9 @@ class CookingService {
         .collection('raw_materials');
 
     for (final alias in aliases) {
-      final snapshot =
-          await collection.where('name_key', isEqualTo: alias).get();
+      final snapshot = await collection
+          .where('name_key', isEqualTo: alias)
+          .get();
       for (final doc in snapshot.docs) {
         results[doc.id] = doc;
       }
@@ -625,16 +634,15 @@ class CookingService {
     return aliases..removeWhere((value) => value.isEmpty);
   }
 
-  bool _matchesAlias(
-    Map<String, dynamic> data,
-    Set<String> aliases,
-  ) {
+  bool _matchesAlias(Map<String, dynamic> data, Set<String> aliases) {
     if (aliases.isEmpty) return false;
     final rawName = data['name']?.toString() ?? '';
     final rawKey = data['name_key']?.toString() ?? '';
     final normalizedName = _normalizeName(rawName);
     final normalizedKey = _normalizeName(rawKey);
-    final translatedName = _normalizeName(IngredientTranslator.translate(rawName));
+    final translatedName = _normalizeName(
+      IngredientTranslator.translate(rawName),
+    );
 
     for (final alias in aliases) {
       if (alias.isEmpty) continue;
@@ -650,9 +658,7 @@ class CookingService {
       }
       if (aliasCollapsed.isNotEmpty &&
           (normalizedName.replaceAll(' ', '').contains(aliasCollapsed) ||
-              aliasCollapsed.contains(
-                normalizedName.replaceAll(' ', ''),
-              ))) {
+              aliasCollapsed.contains(normalizedName.replaceAll(' ', '')))) {
         return true;
       }
 

@@ -1250,10 +1250,12 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
 
                       // เลือกไอคอน: "ทั้งหมด" ใช้ไอคอนรวมหมวด, อื่น ๆ ใช้จาก Categories.iconFor
                       final IconData icon = (c == _ALL)
-                          ? Icons.apps // หรือ Icons.dashboard_customize_outlined
+                          ? Icons
+                                .apps // หรือ Icons.dashboard_customize_outlined
                           : Categories.iconFor(c);
-                      final Color accent =
-                          c == _ALL ? Colors.indigoAccent : Categories.colorFor(c);
+                      final Color accent = c == _ALL
+                          ? Colors.indigoAccent
+                          : Categories.colorFor(c);
                       final Color fillColor = accent.withAlpha(
                         (255 * (isSelected ? 0.22 : 0.1)).round(),
                       );
@@ -1276,19 +1278,12 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                           decoration: BoxDecoration(
                             color: fillColor,
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: borderColor,
-                              width: 1.2,
-                            ),
+                            border: Border.all(color: borderColor, width: 1.2),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(
-                                icon,
-                                size: 18,
-                                color: accent,
-                              ),
+                              Icon(icon, size: 18, color: accent),
                               const SizedBox(width: 8),
                               Text(
                                 c,

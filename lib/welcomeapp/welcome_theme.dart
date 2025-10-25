@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 /// Shared colors and components for Welcome app screens.

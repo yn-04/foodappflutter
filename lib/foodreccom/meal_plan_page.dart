@@ -29,13 +29,19 @@ class _MealPlanPageState extends State<MealPlanPage> {
   }
 
   Future<void> _generate() async {
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final p = context.read<EnhancedRecommendationProvider>();
       final mp = context.read<MealPlanProvider>();
       await mp.generateWeeklyPlan(p);
-    } catch (e) { setState(() => _error = e.toString()); }
-    finally { setState(() => _loading = false); }
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      setState(() => _loading = false);
+    }
   }
 
   String _frequencySummaryText(Map<ConsumptionFrequency, int> counts) {
@@ -73,208 +79,257 @@ class _MealPlanPageState extends State<MealPlanPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text('Error: $_error'))
-              : plan == null
-                  ? const Center(child: Text('No plan'))
-                  : ListView.builder(
-                      padding: const EdgeInsets.only(bottom: 90),
-                      itemCount: plan.days.length + 1,
-                      itemBuilder: (ctx, i) {
-                        if (i == 0) {
-                        final summary =
-                            mealPlanProvider.frequencySummary(recProvider.ingredients);
-                        return _MealPlanSummaryCard(summary: summary);
-                      }
-                      final dayIndex = i - 1;
-                      final d = plan.days[dayIndex];
-                      final dayCounts = mealPlanProvider.dayFrequencyCounts(
-                        d,
-                        recProvider.ingredients,
-                      );
-                        final daySummary = mealPlanProvider.summaryFor(d.date);
-                        final dayInsight = mealPlanProvider.insightFor(d.date);
-                        final highRisk = (dayCounts[ConsumptionFrequency.weekly] ?? 0) +
-                                (dayCounts[ConsumptionFrequency.occasional] ?? 0) >
-                            1;
-                        return Card(
-                          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
+          ? Center(child: Text('Error: $_error'))
+          : plan == null
+          ? const Center(child: Text('No plan'))
+          : ListView.builder(
+              padding: const EdgeInsets.only(bottom: 90),
+              itemCount: plan.days.length + 1,
+              itemBuilder: (ctx, i) {
+                if (i == 0) {
+                  final summary = mealPlanProvider.frequencySummary(
+                    recProvider.ingredients,
+                  );
+                  return _MealPlanSummaryCard(summary: summary);
+                }
+                final dayIndex = i - 1;
+                final d = plan.days[dayIndex];
+                final dayCounts = mealPlanProvider.dayFrequencyCounts(
+                  d,
+                  recProvider.ingredients,
+                );
+                final daySummary = mealPlanProvider.summaryFor(d.date);
+                final dayInsight = mealPlanProvider.insightFor(d.date);
+                final highRisk =
+                    (dayCounts[ConsumptionFrequency.weekly] ?? 0) +
+                        (dayCounts[ConsumptionFrequency.occasional] ?? 0) >
+                    1;
+                return Card(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'วันที่ ${_formatDate(d.date)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              if (highRisk)
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.warning_amber_rounded,
+                                      color: Colors.deepOrange,
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'มื้อเสี่ยง ${dayCounts[ConsumptionFrequency.weekly] ?? 0 + (dayCounts[ConsumptionFrequency.occasional] ?? 0)}',
+                                      style: const TextStyle(
+                                        color: Colors.deepOrange,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ),
+                        if (daySummary != null)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          'วันที่ ${_formatDate(d.date)}',
-                                          style: const TextStyle(fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
-                                      if (highRisk)
-                                        Row(
-                                          children: [
-                                            const Icon(Icons.warning_amber_rounded,
-                                                color: Colors.deepOrange, size: 16),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              'มื้อเสี่ยง ${dayCounts[ConsumptionFrequency.weekly] ?? 0 + (dayCounts[ConsumptionFrequency.occasional] ?? 0)}',
-                                              style: const TextStyle(
-                                                color: Colors.deepOrange,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                    ],
+                                Text(
+                                  'โภชนาการรวมทั้งวัน',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.blueGrey[800],
                                   ),
                                 ),
-                                if (daySummary != null)
+                                const SizedBox(height: 6),
+                                _DailyNutritionRow(summary: daySummary),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _frequencySummaryText(dayCounts),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[700],
+                                  ),
+                                ),
+                                if (mealPlanProvider.isGeneratingInsights &&
+                                    dayInsight == null)
+                                  const Padding(
+                                    padding: EdgeInsets.only(top: 6),
+                                    child: SizedBox(
+                                      height: 16,
+                                      width: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  )
+                                else if (dayInsight != null)
                                   Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'โภชนาการรวมทั้งวัน',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.blueGrey[800],
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        _DailyNutritionRow(summary: daySummary),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          _frequencySummaryText(dayCounts),
-                                          style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-                                        ),
-                                        if (mealPlanProvider.isGeneratingInsights && dayInsight == null)
-                                          const Padding(
-                                            padding: EdgeInsets.only(top: 6),
-                                            child: SizedBox(
-                                              height: 16,
-                                              width: 16,
-                                              child: CircularProgressIndicator(strokeWidth: 2),
-                                            ),
-                                          )
-                                        else if (dayInsight != null)
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 6),
-                                            child: Text(
-                                              dayInsight,
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: Colors.teal[700],
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ),
-                                      ],
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Text(
+                                      dayInsight,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.teal[700],
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
-                                const Divider(height: 1),
-                                ...List.generate(d.meals.length, (idx) {
-                                  final e = d.meals[idx];
-                                  final freqInfo = mealPlanProvider.mealFrequencyInfo(
-                                    e,
-                                    recProvider.ingredients,
-                                  );
-                                  final nearCount = _nearExpiryCount(context, e.recipe);
-                                  final statusText = e.done ? 'ทำแล้ว' : 'ยังไม่ได้ทำ';
-                                  final statusColor = e.done ? Colors.green : Colors.red;
-                                  return ListTile(
-                                    onTap: () => _openRecipeDetail(context, e.recipe),
-                                    leading: Stack(
-                                      children: [
-                                        CircleAvatar(
-                                          backgroundColor: Colors.blue[50],
-                                          child: Text(
-                                            _mealEmoji(idx),
-                                            style: const TextStyle(fontSize: 16),
-                                          ),
-                                        ),
-                                        if (nearCount > 0)
-                                          Positioned(
-                                            right: -2,
-                                            top: -2,
-                                            child: CircleAvatar(
-                                              radius: 8,
-                                              backgroundColor: Colors.red,
-                                              child: Text('$nearCount', style: const TextStyle(fontSize: 10, color: Colors.white)),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                    title: Text(e.recipe.name),
-                                    subtitle: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text('มื้อ: ${_mealLabel(idx)}'),
-                                        Text(statusText, style: TextStyle(color: statusColor, fontWeight: FontWeight.w600)),
-                                        if (freqInfo.frequency != null)
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 4),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                _FrequencyChip(frequency: freqInfo.frequency!),
-                                                const SizedBox(width: 6),
-                                                Expanded(
-                                                  child: Text(
-                                                    freqInfo.reason ?? '',
-                                                    maxLines: 2,
-                                                    overflow: TextOverflow.ellipsis,
-                                                    style: TextStyle(
-                                                      color: Colors.grey[700],
-                                                      fontSize: 12,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                    trailing: Wrap(
-                                      spacing: 4,
-                                      children: [
-                                        IconButton(
-                                          tooltip: 'ขอเมนูทางเลือก',
-                                          icon: const Icon(Icons.sync_alt, color: Colors.blueGrey),
-                                          onPressed: () => _swapMeal(context, d.date, idx),
-                                        ),
-                                        IconButton(
-                                          tooltip: e.done ? 'ทำแล้ว' : 'ทำแล้ว',
-                                          icon: Icon(
-                                            Icons.check_circle,
-                                            color: e.done ? Colors.green : Colors.redAccent,
-                                          ),
-                                          onPressed: e.done
-                                              ? null
-                                              : () => _markDone(context, d.date, idx, e),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }),
                               ],
                             ),
                           ),
-                        );
-                      },
+                        const Divider(height: 1),
+                        ...List.generate(d.meals.length, (idx) {
+                          final e = d.meals[idx];
+                          final freqInfo = mealPlanProvider.mealFrequencyInfo(
+                            e,
+                            recProvider.ingredients,
+                          );
+                          final nearCount = _nearExpiryCount(context, e.recipe);
+                          final statusText = e.done ? 'ทำแล้ว' : 'ยังไม่ได้ทำ';
+                          final statusColor = e.done
+                              ? Colors.green
+                              : Colors.red;
+                          return ListTile(
+                            onTap: () => _openRecipeDetail(context, e.recipe),
+                            leading: Stack(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: Colors.blue[50],
+                                  child: Text(
+                                    _mealEmoji(idx),
+                                    style: const TextStyle(fontSize: 16),
+                                  ),
+                                ),
+                                if (nearCount > 0)
+                                  Positioned(
+                                    right: -2,
+                                    top: -2,
+                                    child: CircleAvatar(
+                                      radius: 8,
+                                      backgroundColor: Colors.red,
+                                      child: Text(
+                                        '$nearCount',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            title: Text(e.recipe.name),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('มื้อ: ${_mealLabel(idx)}'),
+                                Text(
+                                  statusText,
+                                  style: TextStyle(
+                                    color: statusColor,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                if (freqInfo.frequency != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _FrequencyChip(
+                                          frequency: freqInfo.frequency!,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            freqInfo.reason ?? '',
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: Colors.grey[700],
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            trailing: Wrap(
+                              spacing: 4,
+                              children: [
+                                IconButton(
+                                  tooltip: 'ขอเมนูทางเลือก',
+                                  icon: const Icon(
+                                    Icons.sync_alt,
+                                    color: Colors.blueGrey,
+                                  ),
+                                  onPressed: () =>
+                                      _swapMeal(context, d.date, idx),
+                                ),
+                                IconButton(
+                                  tooltip: e.done ? 'ทำแล้ว' : 'ทำแล้ว',
+                                  icon: Icon(
+                                    Icons.check_circle,
+                                    color: e.done
+                                        ? Colors.green
+                                        : Colors.redAccent,
+                                  ),
+                                  onPressed: e.done
+                                      ? null
+                                      : () =>
+                                            _markDone(context, d.date, idx, e),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
                     ),
+                  ),
+                );
+              },
+            ),
       bottomNavigationBar: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Row(
           children: [
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: _loading ? null : () => context.read<MealPlanProvider>().regenerateUnlocked(context.read<EnhancedRecommendationProvider>()),
+                onPressed: _loading
+                    ? null
+                    : () => context.read<MealPlanProvider>().regenerateUnlocked(
+                        context.read<EnhancedRecommendationProvider>(),
+                      ),
                 icon: const Icon(Icons.refresh),
                 label: const Text('จัดแผนใหม่'),
               ),
@@ -293,7 +348,8 @@ class _MealPlanPageState extends State<MealPlanPage> {
     );
   }
 
-  String _formatDate(DateTime dt) => '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+  String _formatDate(DateTime dt) =>
+      '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
   String _mealLabel(int idx) {
     switch (idx) {
       case 0:
@@ -331,13 +387,18 @@ class _MealPlanPageState extends State<MealPlanPage> {
       builder: (_) => ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text('รวมรายการซื้อของสัปดาห์นี้', style: TextStyle(fontWeight: FontWeight.bold)),
+          const Text(
+            'รวมรายการซื้อของสัปดาห์นี้',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
-          ...items.map((it) => ListTile(
-                leading: const Icon(Icons.shopping_cart_outlined),
-                title: Text('${it.name}'),
-                trailing: Text('${it.quantity} ${it.unit}'),
-              )),
+          ...items.map(
+            (it) => ListTile(
+              leading: const Icon(Icons.shopping_cart_outlined),
+              title: Text('${it.name}'),
+              trailing: Text('${it.quantity} ${it.unit}'),
+            ),
+          ),
         ],
       ),
     );
@@ -354,7 +415,9 @@ class _MealPlanPageState extends State<MealPlanPage> {
 
   int _nearExpiryCount(BuildContext context, RecipeModel recipe) {
     final p = context.read<EnhancedRecommendationProvider>();
-    final near = p.nearExpiryIngredients.map((i) => i.name.trim().toLowerCase()).toSet();
+    final near = p.nearExpiryIngredients
+        .map((i) => i.name.trim().toLowerCase())
+        .toSet();
     int cnt = 0;
     for (final ing in recipe.ingredients) {
       final n = ing.name.trim().toLowerCase();
@@ -363,7 +426,12 @@ class _MealPlanPageState extends State<MealPlanPage> {
     return cnt;
   }
 
-  Future<void> _markDone(BuildContext context, DateTime date, int mealIndex, MealPlanEntry entry) async {
+  Future<void> _markDone(
+    BuildContext context,
+    DateTime date,
+    int mealIndex,
+    MealPlanEntry entry,
+  ) async {
     try {
       final rec = context.read<EnhancedRecommendationProvider>();
       final mp = context.read<MealPlanProvider>();
@@ -377,9 +445,9 @@ class _MealPlanPageState extends State<MealPlanPage> {
         final message = result.shortages.isNotEmpty
             ? 'วัตถุดิบไม่พอสำหรับเมนูนี้ (${result.shortages.first.name})'
             : 'ไม่สามารถอัปเดตสต็อกได้';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
         return;
       }
 
@@ -389,17 +457,14 @@ class _MealPlanPageState extends State<MealPlanPage> {
       final text = result.partial
           ? 'ทำเสร็จแบบบางส่วน อัปเดตสต็อกแล้ว'
           : 'อัปเดตสต็อกเรียบร้อย! พร้อมเสิร์ฟได้เลย';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(text)),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('ทำรายการไม่สำเร็จ: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('ทำรายการไม่สำเร็จ: $e')));
     }
   }
-
 }
 
 Future<void> _swapMeal(
@@ -414,7 +479,9 @@ Future<void> _swapMeal(
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
       content: Text(
-        success ? 'ได้เมนูใหม่สำหรับมื้อนี้แล้ว' : 'ไม่พบเมนูทางเลือกที่เหมาะสม',
+        success
+            ? 'ได้เมนูใหม่สำหรับมื้อนี้แล้ว'
+            : 'ไม่พบเมนูทางเลือกที่เหมาะสม',
       ),
     ),
   );
@@ -515,8 +582,10 @@ class _MealPlanSummaryCard extends StatelessWidget {
       ConsumptionFrequency.weekly: 'สัปดาห์ละครั้ง',
       ConsumptionFrequency.occasional: 'ทานนานๆ ครั้ง',
     };
-    final warningWeekly = (summary.counts[ConsumptionFrequency.weekly] ?? 0) > 4;
-    final warningOccasional = (summary.counts[ConsumptionFrequency.occasional] ?? 0) > 2;
+    final warningWeekly =
+        (summary.counts[ConsumptionFrequency.weekly] ?? 0) > 4;
+    final warningOccasional =
+        (summary.counts[ConsumptionFrequency.occasional] ?? 0) > 2;
 
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 6),
@@ -577,7 +646,10 @@ class _MealPlanSummaryCard extends StatelessWidget {
                 final count = summary.counts[freq] ?? 0;
                 final color = colors[freq]!;
                 return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: color.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(12),
@@ -594,10 +666,7 @@ class _MealPlanSummaryCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        '$count มื้อ',
-                        style: const TextStyle(fontSize: 12),
-                      ),
+                      Text('$count มื้อ', style: const TextStyle(fontSize: 12)),
                     ],
                   ),
                 );
@@ -621,8 +690,11 @@ class _MealPlanSummaryCard extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.warning_amber_rounded,
-                        color: Colors.deepOrange, size: 18),
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      color: Colors.deepOrange,
+                      size: 18,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -648,9 +720,7 @@ class _MealPlanSummaryCard extends StatelessWidget {
       ),
     );
   }
-
 }
-
 
 class _FrequencyChip extends StatelessWidget {
   final ConsumptionFrequency frequency;

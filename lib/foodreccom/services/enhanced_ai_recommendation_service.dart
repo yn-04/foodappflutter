@@ -134,13 +134,11 @@ class EnhancedAIRecommendationService {
     }
 
     // 2) Try SDK fallback
-    if (_useSdk) {
-      try {
-        final res = await _fallbackModel.generateContent([Content.text(prompt)]);
-        final t = res.text?.trim();
-        if (t != null && t.isNotEmpty) return t;
-      } catch (_) {}
-    }
+    try {
+      final res = await _fallbackModel.generateContent([Content.text(prompt)]);
+      final t = res.text?.trim();
+      if (t != null && t.isNotEmpty) return t;
+    } catch (_) {}
 
     // 3) Try REST on v1 and v1beta with best-effort model list
     if (_apiKeys.isEmpty) return null;

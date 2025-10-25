@@ -76,7 +76,8 @@ class NutritionEstimator {
     if (unit.isEmpty) {
       // special cases by ingredient name
       final n = name.toLowerCase();
-      if (n.contains('egg') || n.contains('ไข่')) return amount * 50; // ~1 egg 50g
+      if (n.contains('egg') || n.contains('ไข่'))
+        return amount * 50; // ~1 egg 50g
       return amount * 100; // default guess per piece
     }
 

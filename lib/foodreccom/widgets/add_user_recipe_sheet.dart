@@ -65,14 +65,16 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text('เพิ่มเมนูของฉัน',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text(
+                    'เพิ่มเมนูของฉัน',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _name,
-                    decoration:
-                        const InputDecoration(labelText: 'ชื่อเมนู (จำเป็น)'),
+                    decoration: const InputDecoration(
+                      labelText: 'ชื่อเมนู (จำเป็น)',
+                    ),
                     validator: (v) => (v == null || v.trim().isEmpty)
                         ? 'กรุณากรอกชื่อเมนู'
                         : null,
@@ -80,7 +82,8 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                   TextFormField(
                     controller: _imageUrl,
                     decoration: const InputDecoration(
-                        labelText: 'ลิงก์รูปภาพ (ไม่บังคับ)'),
+                      labelText: 'ลิงก์รูปภาพ (ไม่บังคับ)',
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -88,8 +91,9 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                       Expanded(
                         child: TextFormField(
                           controller: _servingsCtrl,
-                          decoration:
-                              const InputDecoration(labelText: 'เสิร์ฟ (ที่)'),
+                          decoration: const InputDecoration(
+                            labelText: 'เสิร์ฟ (ที่)',
+                          ),
                           keyboardType: TextInputType.number,
                           validator: (v) {
                             final value = int.tryParse(v ?? '');
@@ -106,7 +110,8 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                         child: TextFormField(
                           controller: _cookMinCtrl,
                           decoration: const InputDecoration(
-                              labelText: 'เวลาทำ (นาที)'),
+                            labelText: 'เวลาทำ (นาที)',
+                          ),
                           keyboardType: TextInputType.number,
                           validator: (v) {
                             final value = int.tryParse(v ?? '');
@@ -167,9 +172,7 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
     if (!_formKey.currentState!.validate()) {
       if (missing.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('กรุณากรอก: ${missing.join(', ')}'),
-          ),
+          SnackBar(content: Text('กรุณากรอก: ${missing.join(', ')}')),
         );
       }
       return;
@@ -204,15 +207,17 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
     final recipe = baseRecipe.copyWith(nutrition: estimated);
 
     try {
-      await context.read<EnhancedRecommendationProvider>().addUserRecipe(recipe);
+      await context.read<EnhancedRecommendationProvider>().addUserRecipe(
+        recipe,
+      );
       if (mounted) Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('บันทึกเมนูของฉันเรียบร้อย')),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('บันทึกล้มเหลว: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('บันทึกล้มเหลว: $e')));
     }
   }
 
@@ -229,17 +234,24 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   }
 
   List<RecipeIngredient> _parseIngredients(String text) {
-    final lines = text.split(RegExp(r'\r?\n')).map((e) => e.trim()).where((e) => e.isNotEmpty);
+    final lines = text
+        .split(RegExp(r'\r?\n'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty);
     return lines.map((l) {
       // very simple split: first token as name until two last tokens amount+unit if numeric exists
       final parts = l.split(RegExp(r'\s+'));
       if (parts.length >= 2) {
-        final amount = double.tryParse(parts[parts.length - 2]) ??
-            double.tryParse(parts.last) ?? 1.0;
+        final amount =
+            double.tryParse(parts[parts.length - 2]) ??
+            double.tryParse(parts.last) ??
+            1.0;
         final unit = amount == (double.tryParse(parts.last) ?? -1)
             ? ''
             : parts.last;
-        final name = parts.sublist(0, parts.length - (unit.isEmpty ? 1 : 2)).join(' ');
+        final name = parts
+            .sublist(0, parts.length - (unit.isEmpty ? 1 : 2))
+            .join(' ');
         return RecipeIngredient(name: name, amount: amount, unit: unit);
       }
       return RecipeIngredient(name: l, amount: 1.0, unit: '');
@@ -247,8 +259,14 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   }
 
   List<CookingStep> _parseSteps(String text) {
-    final lines = text.split(RegExp(r'\r?\n')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final lines = text
+        .split(RegExp(r'\r?\n'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
     var i = 1;
-    return lines.map((l) => CookingStep(stepNumber: i++, instruction: l)).toList();
+    return lines
+        .map((l) => CookingStep(stepNumber: i++, instruction: l))
+        .toList();
   }
 }

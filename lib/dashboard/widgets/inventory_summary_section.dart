@@ -1,4 +1,4 @@
-//lib/dashboard/widgets/inventory_summary_section.dart
+﻿//lib/dashboard/widgets/inventory_summary_section.dart
 import 'package:flutter/material.dart';
 import 'package:my_app/rawmaterial/constants/categories.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';

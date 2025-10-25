@@ -41,20 +41,15 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
         ? 1
         : widget.recipe.servings;
     _maxSelectableServings = math.max(10, baseServings);
-    final provider =
-        context.read<EnhancedRecommendationProvider>();
-    final override =
-        provider.getServingsOverride(widget.recipe.id);
+    final provider = context.read<EnhancedRecommendationProvider>();
+    final override = provider.getServingsOverride(widget.recipe.id);
     if (override != null && override > 0) {
       _selectedServings = override;
     } else {
       _selectedServings = 1;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        provider.setServingsOverride(
-          widget.recipe.id,
-          _selectedServings,
-        );
+        provider.setServingsOverride(widget.recipe.id, _selectedServings);
       });
     }
   }
@@ -97,10 +92,7 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
                           });
                           context
                               .read<EnhancedRecommendationProvider>()
-                              .setServingsOverride(
-                                widget.recipe.id,
-                                value,
-                              );
+                              .setServingsOverride(widget.recipe.id, value);
                         },
                       ),
                       // Missing ingredients block (highlight)
