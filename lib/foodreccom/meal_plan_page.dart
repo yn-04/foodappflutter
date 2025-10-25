@@ -20,7 +20,6 @@ class MealPlanPage extends StatefulWidget {
 class _MealPlanPageState extends State<MealPlanPage> {
   bool _loading = true;
   String? _error;
-  final Set<String> _swappingKeys = <String>{};
   final CookingService _cookingService = CookingService();
 
   @override
@@ -69,41 +68,7 @@ class _MealPlanPageState extends State<MealPlanPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('📅 Meal Plan (7 วัน)'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.library_books_outlined),
-            tooltip: 'ดูรายการแผนทั้งหมด',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const MealPlanListPage()),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loading ? null : _generate,
-          ),
-          IconButton(
-            icon: const Icon(Icons.save_alt),
-            tooltip: 'บันทึกแผน',
-            onPressed: () async {
-              final id = await context.read<MealPlanProvider>().saveCurrentPlan();
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(id != null ? 'บันทึกแผนสำเร็จ ($id)' : 'ยังไม่มีแผนให้บันทึก')),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.history),
-            tooltip: 'โหลดแผนล่าสุด',
-            onPressed: () async {
-              await context.read<MealPlanProvider>().loadLatestPlan();
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('โหลดแผนล่าสุดแล้ว')),
-              );
-            },
-          ),
-        ],
+        actions: const [],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -222,9 +187,6 @@ class _MealPlanPageState extends State<MealPlanPage> {
                                   final nearCount = _nearExpiryCount(context, e.recipe);
                                   final statusText = e.done ? 'ทำแล้ว' : 'ยังไม่ได้ทำ';
                                   final statusColor = e.done ? Colors.green : Colors.red;
-                                  final swapKey =
-                                      '${d.date.toIso8601String()}_${idx.toString()}';
-                                  final swapping = _swappingKeys.contains(swapKey);
                                   return ListTile(
                                     onTap: () => _openRecipeDetail(context, e.recipe),
                                     leading: Stack(
@@ -283,21 +245,18 @@ class _MealPlanPageState extends State<MealPlanPage> {
                                       children: [
                                         IconButton(
                                           tooltip: 'ขอเมนูทางเลือก',
-                                          icon: swapping
-                                              ? const SizedBox(
-                                                  width: 20,
-                                                  height: 20,
-                                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                                )
-                                              : const Icon(Icons.sync_alt, color: Colors.blueGrey),
-                                          onPressed: swapping
-                                              ? null
-                                              : () => _swapMeal(context, d.date, idx, swapKey),
+                                          icon: const Icon(Icons.sync_alt, color: Colors.blueGrey),
+                                          onPressed: () => _swapMeal(context, d.date, idx),
                                         ),
                                         IconButton(
-                                          tooltip: 'ทำแล้ว',
-                                          icon: const Icon(Icons.check_circle, color: Colors.green),
-                                          onPressed: e.done ? null : () => _markDone(context, d.date, idx, e),
+                                          tooltip: e.done ? 'ทำแล้ว' : 'ทำแล้ว',
+                                          icon: Icon(
+                                            Icons.check_circle,
+                                            color: e.done ? Colors.green : Colors.redAccent,
+                                          ),
+                                          onPressed: e.done
+                                              ? null
+                                              : () => _markDone(context, d.date, idx, e),
                                         ),
                                       ],
                                     ),
@@ -441,34 +400,24 @@ class _MealPlanPageState extends State<MealPlanPage> {
     }
   }
 
-  Future<void> _swapMeal(
-    BuildContext context,
-    DateTime date,
-    int mealIndex,
-    String key,
-  ) async {
-    if (_swappingKeys.contains(key) || !mounted) return;
-    setState(() => _swappingKeys.add(key));
-    bool success = false;
-    try {
-      success = await context
-          .read<MealPlanProvider>()
-          .swapMeal(date, mealIndex, context.read<EnhancedRecommendationProvider>());
-    } catch (e) {
-      success = false;
-    } finally {
-      if (mounted) {
-        setState(() => _swappingKeys.remove(key));
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(success
-                ? 'เปลี่ยนเมนูเรียบร้อย'
-                : 'ไม่พบเมนูทางเลือกที่เหมาะสม'),
-          ),
-        );
-      }
-    }
-  }
+}
+
+Future<void> _swapMeal(
+  BuildContext context,
+  DateTime date,
+  int mealIndex,
+) async {
+  final mp = context.read<MealPlanProvider>();
+  final rec = context.read<EnhancedRecommendationProvider>();
+  final success = await mp.swapMeal(date, mealIndex, rec);
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        success ? 'ได้เมนูใหม่สำหรับมื้อนี้แล้ว' : 'ไม่พบเมนูทางเลือกที่เหมาะสม',
+      ),
+    ),
+  );
 }
 
 class _WeeklyNutritionRow extends StatelessWidget {

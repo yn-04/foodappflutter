@@ -268,13 +268,6 @@ class _RecommendationPageState extends State<RecommendationPage> {
                           color: Colors.deepPurple,
                         ),
                         title: Text(recipe.name),
-                        subtitle: recipe.reason.isNotEmpty
-                            ? Text(
-                                recipe.reason,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              )
-                            : null,
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () {
                           Navigator.of(sheetCtx).pop();
@@ -386,8 +379,11 @@ class _RecommendationPageState extends State<RecommendationPage> {
     );
   }
 
-  void _showFilterSheet(BuildContext context) {
+  Future<void> _showFilterSheet(BuildContext context) async {
     final provider = context.read<EnhancedRecommendationProvider>();
+    if (provider.ingredients.isEmpty) {
+      await provider.loadIngredients();
+    }
     final cuisines = const [
       {'th': 'ไทย', 'en': 'thai'},
       {'th': 'จีน', 'en': 'chinese'},
@@ -410,6 +406,8 @@ class _RecommendationPageState extends State<RecommendationPage> {
       'Ovo-Vegetarian',
       'Ketogenic',
       'Paleo',
+      'Gluten-Free',
+      'Dairy-Free',
       'Low-Fat',
       'High-Protein',
       'Low-Carb',
@@ -457,13 +455,15 @@ class _RecommendationPageState extends State<RecommendationPage> {
               'Paleo',
               'High-Protein',
             },
-            'Vegetarian': {'Vegan', 'Paleo'},
-            'Lacto-Vegetarian': {'Vegan', 'Ovo-Vegetarian'},
+            'Vegetarian': {'Vegan', 'Paleo', 'Dairy-Free'},
+            'Lacto-Vegetarian': {'Vegan', 'Ovo-Vegetarian', 'Dairy-Free'},
             'Ovo-Vegetarian': {'Vegan', 'Lacto-Vegetarian'},
             'Ketogenic': {'Vegan', 'Low-Fat'},
-            'Paleo': {'Vegan', 'Vegetarian', 'Low-Fat'},
+            'Paleo': {'Vegan', 'Vegetarian', 'Low-Fat', 'Gluten-Free'},
             'High-Protein': {'Vegan'},
             'Low-Fat': {'Ketogenic', 'Paleo'},
+            'Gluten-Free': {'Paleo'},
+            'Dairy-Free': {'Lacto-Vegetarian', 'Vegetarian'},
           };
           const conflictReasons = <String, String>{
             'Vegan|Vegetarian':
@@ -482,10 +482,14 @@ class _RecommendationPageState extends State<RecommendationPage> {
                 'เลือก Vegetarian อยู่แล้ว หากต้องการงดผลิตภัณฑ์สัตว์ทั้งหมดให้เลือก Vegan แทน',
             'Vegetarian|Paleo':
                 'Paleo เน้นเนื้อสัตว์เป็นหลัก จึงไม่เข้ากับ Vegetarian',
+            'Vegetarian|Dairy-Free':
+                'Vegetarian มักใช้ผลิตภัณฑ์นมทดแทนโปรตีน หากงดนมทั้งหมดให้เลือกแผน Vegan แทน',
             'Lacto-Vegetarian|Vegan':
                 'Lacto-Vegetarian ยังทานนมได้ ส่วน Vegan งดนม จึงต้องเลือกอย่างใดอย่างหนึ่ง',
             'Lacto-Vegetarian|Ovo-Vegetarian':
                 'Lacto- และ Ovo-Vegetarian เป็นตัวเลือกเฉพาะทาง ควรเลือกแบบใดแบบหนึ่ง',
+            'Lacto-Vegetarian|Dairy-Free':
+                'สูตร Lacto-Vegetarian เน้นผลิตภัณฑ์นม การเลือก Dairy-Free พร้อมกันจึงขัดกัน',
             'Ovo-Vegetarian|Vegan':
                 'Ovo-Vegetarian ยังทานไข่ได้ แต่ Vegan งดไข่ เลือกพร้อมกันไม่ได้',
             'Ovo-Vegetarian|Lacto-Vegetarian':
@@ -500,6 +504,8 @@ class _RecommendationPageState extends State<RecommendationPage> {
                 'Paleo งดธัญพืชและพืชหลายชนิดจึงไม่เข้ากับ Vegetarian',
             'Paleo|Low-Fat':
                 'Paleo ใช้ไขมันจากสัตว์เป็นหลัก ซึ่งไม่ตรงกับ Low-Fat',
+            'Paleo|Gluten-Free':
+                'Paleo กำจัดธัญพืชกลูเตนอยู่แล้ว ระบบจะคัดให้ตาม Paleo โดยไม่ต้องเลือก Gluten-Free เพิ่ม',
             'High-Protein|Vegan':
                 'High-Protein ในระบบนี้ออกแบบมาสำหรับโปรตีนจากสัตว์ จึงไม่เข้ากับ Vegan',
             'Low-Fat|Ketogenic':
@@ -518,6 +524,14 @@ class _RecommendationPageState extends State<RecommendationPage> {
                 'การกินแบบ Vegan พร้อมลดไขมันอาจทำให้ได้รับไขมันดีไม่เพียงพอ ระบบจะเน้นเมนูที่ยังมีไขมันจากพืชที่จำเป็นให้',
             comboKey('High-Protein', 'Low-Fat'):
                 'การเพิ่มโปรตีนพร้อมควบคุมไขมันจะจำกัดแหล่งโปรตีน ระบบจะเลือกเมนูที่สมดุลระหว่างโปรตีนสูงและไขมันต่ำให้มากที่สุด',
+            comboKey('Vegan', 'Gluten-Free'):
+                'การกินแบบ Vegan และปราศจากกลูเตนพร้อมกันทำให้ตัวเลือกวัตถุดิบแคบมาก ระบบจะแนะนำเมนูที่ยังคงครบหมู่และหาวัตถุดิบได้จริง',
+            comboKey('Vegetarian', 'Gluten-Free'):
+                'มังสวิรัติที่ไม่ใช้กลูเตนต้องระวังธัญพืชทดแทน ระบบจะช่วยคัดเมนูที่ใช้แหล่งคาร์บปลอดกลูเตนแต่ยังครบสารอาหาร',
+            comboKey('Vegan', 'Dairy-Free'):
+                'Vegan งดผลิตภัณฑ์สัตว์อยู่แล้ว การเลือก Dairy-Free เพิ่มหมายถึงต้องเสริมแคลเซียมและโปรตีนจากพืชให้พอ ระบบจะแนะนำเมนูที่ตอบโจทย์นี้',
+            comboKey('Vegetarian', 'Dairy-Free'):
+                'มังสวิรัติที่งดนมอาจขาดโปรตีนและแคลเซียม ระบบจะเลือกเมนูที่ใช้ถั่วและผลิตภัณฑ์เสริมให้แทน',
           };
           final praiseCombos = <String, String>{
             comboKey('Low-Fat', 'Low-Carb'):
@@ -526,6 +540,8 @@ class _RecommendationPageState extends State<RecommendationPage> {
                 'มังสวิรัติแบบไขมันต่ำช่วยลดความเสี่ยงโรคหัวใจและสนับสนุนระบบหลอดเลือด',
             comboKey('Ketogenic', 'High-Protein'):
                 'คีโตที่เสริมโปรตีนช่วยรักษามวลกล้ามเนื้อ เหมาะกับผู้ที่ออกกำลังกายสม่ำเสมอ',
+            comboKey('Gluten-Free', 'Dairy-Free'):
+                'เมนูที่ปลอดทั้งกลูเตนและนมเหมาะกับผู้ที่แพ้สองกลุ่มนี้ ระบบจะยังคัดเมนูที่สมดุลสารอาหารให้ครบถ้วน',
           };
 
           List<String> applyDietConflicts(String diet) {
@@ -679,40 +695,45 @@ class _RecommendationPageState extends State<RecommendationPage> {
                       ),
                     ],
                     const SizedBox(height: 8),
-                    Builder(builder: (_) {
-                      // สร้างรายการวัตถุดิบไม่ซ้ำชื่อ (case-insensitive)
-                      final seen = <String>{};
-                      final uniqueNames = <String>[];
-                      for (final ing in provider.ingredients) {
-                        if (ing.isExpired) continue;
-                        final key = ing.name.trim().toLowerCase();
-                        if (key.isEmpty) continue;
-                        if (seen.add(key)) uniqueNames.add(ing.name.trim());
-                      }
-                      // จำกัดจำนวนเพื่อความกระชับ (เดิม 20)
-                      final display = uniqueNames.take(20).toList();
-                      return Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: display.map((name) {
-                          final checked = manualNames.contains(name);
-                          return FilterChip(
-                            label: Text(name),
-                            selected: checked,
-                            onSelected: (v) {
-                              setState(() {
-                                if (v) {
-                                  manualNames.add(name);
-                                } else {
-                                  manualNames.remove(name);
-                                }
-                                activePreset = null;
-                              });
-                            },
+                    Consumer<EnhancedRecommendationProvider>(
+                      builder: (_, provider, __) {
+                        final ingredientNames =
+                            provider.availableIngredientNames;
+                        if (ingredientNames.isEmpty) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Text(
+                              'ยังไม่มีวัตถุดิบพร้อมใช้งาน',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
                           );
-                        }).toList(),
-                      );
-                    }),
+                        }
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: ingredientNames.map((name) {
+                            final checked = manualNames.contains(name);
+                            return FilterChip(
+                              label: Text(name),
+                              selected: checked,
+                              onSelected: (v) {
+                                setState(() {
+                                  if (v) {
+                                    manualNames.add(name);
+                                  } else {
+                                    manualNames.remove(name);
+                                  }
+                                  activePreset = null;
+                                });
+                              },
+                            );
+                          }).toList(),
+                        );
+                      },
+                    ),
                     if (manualNames.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       'รายการที่เลือกไว้'.asText(
@@ -762,7 +783,7 @@ class _RecommendationPageState extends State<RecommendationPage> {
                       );
                     }),
                     const SizedBox(height: 8),
-                    'โภชนาการ (ไม่บังคับ)'.asText(
+                    'ข้อจำกัดด้านอาหาร (ไม่บังคับ)'.asText(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
                     ),
@@ -826,7 +847,7 @@ class _RecommendationPageState extends State<RecommendationPage> {
                     if (selectedDiet.contains('High-Protein') ||
                         selectedDiet.contains('Low-Carb') ||
                         selectedDiet.contains('Low-Fat'))
-                      'เกณฑ์โภชนาการที่เลือก (ต่อหนึ่งเสิร์ฟ)'.asText(
+                      'ข้อจำกัดที่เลือก (ต่อหนึ่งเสิร์ฟ)'.asText(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                       ),
