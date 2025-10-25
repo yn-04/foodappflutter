@@ -14,7 +14,6 @@ class AddUserRecipeSheet extends StatefulWidget {
 class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
-  final _desc = TextEditingController();
   final _ingredients = TextEditingController();
   final _steps = TextEditingController();
   final _imageUrl = TextEditingController();
@@ -26,7 +25,6 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   @override
   void dispose() {
     _name.dispose();
-    _desc.dispose();
     _ingredients.dispose();
     _steps.dispose();
     _imageUrl.dispose();
@@ -47,8 +45,8 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
           padding: EdgeInsets.only(
             left: 16,
             right: 16,
-            top: 12,
-            bottom: bottomInset,
+            top: 28,
+            bottom: bottomInset > 16 ? bottomInset : 16,
           ),
           child: Form(
             key: _formKey,
@@ -66,7 +64,7 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 20),
                   const Text('เพิ่มเมนูของฉัน',
                       style:
                           TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -78,11 +76,6 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                     validator: (v) => (v == null || v.trim().isEmpty)
                         ? 'กรุณากรอกชื่อเมนู'
                         : null,
-                  ),
-                  TextFormField(
-                    controller: _desc,
-                    decoration:
-                        const InputDecoration(labelText: 'คำอธิบาย (สั้นๆ)'),
                   ),
                   TextFormField(
                     controller: _imageUrl,
@@ -188,9 +181,9 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
     final baseRecipe = RecipeModel(
       id: 'user_${DateTime.now().millisecondsSinceEpoch}',
       name: _name.text.trim(),
-      description: _desc.text.trim(),
+      description: '',
       matchScore: 90,
-      reason: 'เมนูที่ผู้ใช้สร้าง',
+      reason: '',
       ingredients: ingredients,
       missingIngredients: const [],
       steps: steps,
@@ -242,14 +235,14 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
       final parts = l.split(RegExp(r'\s+'));
       if (parts.length >= 2) {
         final amount = double.tryParse(parts[parts.length - 2]) ??
-            double.tryParse(parts.last) ?? 1;
+            double.tryParse(parts.last) ?? 1.0;
         final unit = amount == (double.tryParse(parts.last) ?? -1)
             ? ''
             : parts.last;
         final name = parts.sublist(0, parts.length - (unit.isEmpty ? 1 : 2)).join(' ');
         return RecipeIngredient(name: name, amount: amount, unit: unit);
       }
-      return RecipeIngredient(name: l, amount: 1, unit: '');
+      return RecipeIngredient(name: l, amount: 1.0, unit: '');
     }).toList();
   }
 

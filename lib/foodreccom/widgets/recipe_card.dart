@@ -1,8 +1,10 @@
 //lib/foodreccom/widgets/recipe_card.dart
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/recipe/recipe.dart';
 import '../utils/recipe_image_helper.dart';
 import '../constants/nutrition_thresholds.dart';
+import '../providers/enhanced_recommendation_provider.dart';
 
 class RecipeCard extends StatelessWidget {
   final RecipeModel recipe;
@@ -20,11 +22,14 @@ class RecipeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<EnhancedRecommendationProvider>();
+    final displayServings = provider.getServingsOverride(recipe.id) ?? 1;
     final reasonText = _visibleReason(recipe.reason);
     final _FrequencyDisplay? frequencyDisplay = _deriveRecipeFrequency(recipe);
-    final EdgeInsetsGeometry cardPadding =
-        EdgeInsets.all(compact ? 12.0 : 14.0);
-    final double? compactImageHeight = compact ? 140 : null;
+    final EdgeInsetsGeometry cardPadding = EdgeInsets.all(
+      compact ? 12.0 : 14.0,
+    );
+    final double? compactImageHeight = compact ? 280 : null;
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 3,
@@ -36,8 +41,9 @@ class RecipeCard extends StatelessWidget {
           padding: cardPadding,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment:
-                compact ? MainAxisAlignment.center : MainAxisAlignment.start,
+            mainAxisAlignment: compact
+                ? MainAxisAlignment.center
+                : MainAxisAlignment.start,
             children: [
               if (recipe.displayImageUrl.isNotEmpty) ...[
                 ClipRRect(
@@ -49,7 +55,7 @@ class RecipeCard extends StatelessWidget {
                           child: _buildRecipeImage(),
                         )
                       : AspectRatio(
-                          aspectRatio: 16 / 9,
+                          aspectRatio: 4 / 3,
                           child: _buildRecipeImage(),
                         ),
                 ),
@@ -151,7 +157,7 @@ class RecipeCard extends StatelessWidget {
                     Icon(Icons.people, size: 16, color: Colors.grey[600]),
                     const SizedBox(width: 4),
                     Text(
-                      '${recipe.servings} คน',
+                      '$displayServings คน',
                       style: TextStyle(color: Colors.grey[600], fontSize: 12),
                     ),
                   ],
@@ -244,7 +250,6 @@ class RecipeCard extends StatelessWidget {
                   ],
                 ),
               ],
-
             ],
           ),
         ),
@@ -354,8 +359,5 @@ class _FrequencyDisplay {
   final String label;
   final MaterialColor color;
 
-  const _FrequencyDisplay({
-    required this.label,
-    required this.color,
-  });
+  const _FrequencyDisplay({required this.label, required this.color});
 }
