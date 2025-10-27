@@ -4,11 +4,17 @@ import 'dart:math' as math;
 import 'package:my_app/common/measurement_constants.dart';
 import 'package:my_app/common/smart_unit_converter.dart' as piece_converter;
 import '../constants/unit_conversions.dart';
-import '../services/unit_conversion_service.dart'; // การเรียก Spoonacular (ถ้ามี)
+import '../services/unit_conversion_service.dart'; // การเรียก Spoonacular (แผน A.2)
+// ✅ [ใหม่] Import แผน B (Gemini)
+import '../services/ai_unit_conversion_service.dart';
 import 'ingredient_translator.dart';
 
 class SmartUnitConverter {
-  // ฟังก์ชัน toCanonicalQuantity เดิม
+  // ✅ [ใหม่] สร้าง Instance ของ Service ทั้งสอง
+  static final _spoonacularService = UnitConversionService();
+  static final _aiService = AiUnitConversionService();
+
+  // ฟังก์ชัน toCanonicalQuantity เดิม (ยังคงอยู่เผื่อการใช้งานอื่น)
   static CanonicalQuantity toCanonicalQuantity(
     double amount,
     String unit,
@@ -29,18 +35,23 @@ class SmartUnitConverter {
     return CanonicalQuantity(amount, 'gram');
   }
 
-  /// ฟังก์ชันใหม่: แปลงหน่วยจากสูตรอาหารให้อยู่ในหน่วยของคลัง (กรัม หรือ มิลลิลิตร)
-  /// โดยใช้ทั้งการคำนวณเบื้องต้นและเรียก API
+  /// ⭐️ [อัปเกรด] ฟังก์ชันหลักที่ใช้ตรรกะแบบไฮบริด (Hybrid Logic) ⭐️
   static Future<CanonicalQuantity?> convertRecipeUnitToInventoryUnit({
     required String ingredientName,
     required double recipeAmount,
     required String recipeUnit,
   }) async {
-    final conversionService = UnitConversionService();
     final lowerRecipeUnit = recipeUnit.trim().toLowerCase();
     final lowerIngredientName = ingredientName.trim().toLowerCase();
 
-    // 🥚 หน่วยแบบชิ้น – ใช้ rule จาก common smart converter (รองรับไข่/ฟอง)
+    // 0. ตรวจสอบเงื่อนไขที่ควรข้าม
+    if (_shouldSkipDynamicConversion(lowerIngredientName)) {
+      return null;
+    }
+
+    // === แผน A.1: "กฎ" ภายในแอป (เร็วที่สุด) ===
+
+    // 🥚 1. กฎสำหรับ "ชิ้น" (ไข่/ฟอง, ฯลฯ)
     final pieceRule = piece_converter.SmartUnitConverter.pieceRuleFor(
       lowerIngredientName,
       lowerRecipeUnit,
@@ -48,7 +59,6 @@ class SmartUnitConverter {
 
     if (pieceRule != null) {
       if (pieceRule.displayUnit.trim() == 'ฟอง') {
-        // แปลงเป็นจำนวนฟองตรงๆ (ไม่ต้องเรียก API)
         return CanonicalQuantity(recipeAmount, 'ฟอง');
       }
       final grams = piece_converter.SmartUnitConverter.gramsFromPiece(
@@ -60,9 +70,7 @@ class SmartUnitConverter {
         return CanonicalQuantity(grams, 'gram');
       }
     }
-
     if (piece_converter.SmartUnitConverter.isPieceUnit(lowerRecipeUnit)) {
-      // ถ้าเป็นหน่วยชิ้นแต่ไม่เจอ rule ให้ fallback เป็นกรัมตามค่าเฉลี่ย
       final grams = piece_converter.SmartUnitConverter.gramsFromPiece(
         recipeAmount,
         lowerRecipeUnit,
@@ -71,11 +79,10 @@ class SmartUnitConverter {
       if (grams != null && grams > 0) {
         return CanonicalQuantity(grams, 'gram');
       }
-      // หากยังไม่ได้ ให้ถือว่าเป็นชิ้น โดยเทียบกับ 1 ชิ้น = 1 หน่วย
       return CanonicalQuantity(recipeAmount, 'piece');
     }
 
-    // หน่วยที่มี mapping แบบกำหนดเอง (เช่น ช้อนแกง, กำมือ)
+    // 📜 2. กฎสำหรับ "หน่วยตวงไทย" (ช้อนแกง, กำมือ, ฯลฯ)
     final manualRule = _manualUnitRules[lowerRecipeUnit];
     if (manualRule != null) {
       return CanonicalQuantity(
@@ -84,7 +91,7 @@ class SmartUnitConverter {
       );
     }
 
-    // กรณีหน่วยพื้นฐานที่แปลงได้โดยตรง (Weight to Weight, Volume to Volume)
+    // ⚖️ 3. กฎสำหรับ "หน่วยมาตรฐาน" (g -> g, ml -> ml)
     if (weightUnits.containsKey(lowerRecipeUnit)) {
       final grams = recipeAmount * weightUnits[lowerRecipeUnit]!;
       return CanonicalQuantity(grams, 'gram');
@@ -94,10 +101,12 @@ class SmartUnitConverter {
       return CanonicalQuantity(milliliters, 'milliliter');
     }
 
-    // กรณีหน่วยแบบ serving หรือคำอื่นๆ ที่ Spoonacular ใช้ แต่ไม่อยู่ในตาราง
+    // === แผน A.2: "Spoonacular API" (แผนสำรองที่ 1) ===
+
+    // 🌐 4. กฎสำหรับหน่วย 'serving' (ต้องใช้ API)
     if (_servingLikeUnits.contains(lowerRecipeUnit)) {
-      // พยายามใช้ API แปลงเป็นกรัมก่อน
-      final converted = await conversionService.convertAmount(
+      final converted = await _safeConvert(
+        service: _spoonacularService,
         ingredientName: ingredientName,
         sourceAmount: recipeAmount,
         sourceUnit: recipeUnit,
@@ -108,14 +117,9 @@ class SmartUnitConverter {
       }
     }
 
-    if (_shouldSkipDynamicConversion(lowerIngredientName)) {
-      return null;
-    }
-
-    // กรณีที่ต้องแปลงข้ามประเภท (เช่น cup -> gram) ต้องใช้ API
-    // ลองพยายามแปลงเป็น 'gram' ก่อน (ถ้ามี network key)
+    // 🌐 5. ลองแปลงข้ามประเภท (เช่น cup -> gram) ด้วย Spoonacular
     double? convertedAmount = await _safeConvert(
-      service: conversionService,
+      service: _spoonacularService,
       ingredientName: ingredientName,
       sourceAmount: recipeAmount,
       sourceUnit: recipeUnit,
@@ -126,9 +130,8 @@ class SmartUnitConverter {
       return CanonicalQuantity(convertedAmount, 'gram');
     }
 
-    // ถ้าแปลงเป็น gram ไม่ได้ ลองแปลงเป็น 'ml'
     convertedAmount = await _safeConvert(
-      service: conversionService,
+      service: _spoonacularService,
       ingredientName: ingredientName,
       sourceAmount: recipeAmount,
       sourceUnit: recipeUnit,
@@ -139,6 +142,26 @@ class SmartUnitConverter {
       return CanonicalQuantity(convertedAmount, 'milliliter');
     }
 
+    // === ✅ [ใหม่] แผน B: "Gemini AI" (แผนสำรองสุดท้าย) ===
+    print('⚠️ "กฎ" และ "Spoonacular" แปลงไม่ได้. ลองใช้ AI (Fallback)...');
+
+    // 🤖 6. เรียก AI (Gemini)
+    final aiResult = await _aiService.convertWithAi(
+      ingredientName: ingredientName,
+      recipeAmount: recipeAmount,
+      recipeUnit: recipeUnit,
+    );
+
+    if (aiResult != null) {
+      return aiResult; // AI ช่วยแปลงได้สำเร็จ
+    }
+
+    // === ล้มเหลวทั้งหมด ===
+    print(
+      '❌ "กฎ", "Spoonacular" และ "AI" ล้มเหลวทั้งหมดสำหรับ: $ingredientName ($recipeUnit)',
+    );
+
+    // 7. ใช้ Fallback ตัวเก่าตัวสุดท้าย (เผื่อไว้)
     final fallback = toCanonicalQuantity(
       recipeAmount,
       recipeUnit,
@@ -147,9 +170,12 @@ class SmartUnitConverter {
     if (fallback.amount > 0) {
       return fallback;
     }
-    return null; // ไม่สามารถแปลงหน่วยได้ (กรณีปริมาณ 0)
+
+    return null; // ไม่สามารถแปลงหน่วยได้จริงๆ
   }
 
+  // (ฟังก์ชันที่เหลือเหมือนเดิมทั้งหมด)
+  // ...
   // ฟังก์ชัน convertCanonicalToUnit เดิม
   static double convertCanonicalToUnit({
     required String canonicalUnit,
@@ -184,6 +210,8 @@ class SmartUnitConverter {
   }
 }
 
+// ⭐️ [สำคัญ] นี่คือ Class ที่ CookingService ต้องใช้
+// (เราย้ายมันมาไว้ที่นี่เพื่อให้ไฟล์อื่น import ได้)
 class CanonicalQuantity {
   final double amount;
   final String unit; // 'gram', 'milliliter', 'piece', 'ฟอง'

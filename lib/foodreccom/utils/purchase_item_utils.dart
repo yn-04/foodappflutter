@@ -465,6 +465,25 @@ List<IngredientNeedStatus> analyzeIngredientStatus(
   return statuses;
 }
 
+double minimumCanonicalRequirementForCooking({
+  required String ingredientName,
+  required String canonicalUnit,
+  required double servings,
+}) {
+  if (servings <= 0) return 0;
+  final normalizedName = normalizeName(ingredientName);
+  final profile = _profileForName(normalizedName);
+  final effectiveUnit = canonicalUnit.trim().isEmpty
+      ? 'gram'
+      : canonicalUnit.trim().toLowerCase();
+  final minimum = _minimumCanonicalRequirement(
+    profile: profile,
+    canonicalUnit: effectiveUnit,
+    servings: servings,
+  );
+  return minimum ?? 0;
+}
+
 double? _minimumCanonicalRequirement({
   required _IngredientProfile? profile,
   required String canonicalUnit,
@@ -481,6 +500,7 @@ double? _minimumCanonicalRequirement({
         return profile!.minMlPerServing! * servings;
       return _defaultMinMlPerServing * servings;
     case 'piece':
+    case 'ฟอง':
       if (profile?.minPiecePerServing != null)
         return profile!.minPiecePerServing! * servings;
       return _defaultMinPiecePerServing * servings;

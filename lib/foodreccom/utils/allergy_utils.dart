@@ -1,7 +1,10 @@
 // lib/foodreccom/utils/allergy_utils.dart
 
 class AllergyExpansion {
-  const AllergyExpansion({required this.all, required this.englishOnly});
+  const AllergyExpansion({
+    required this.all,
+    required this.englishOnly,
+  });
 
   final Set<String> all;
   final Set<String> englishOnly;
@@ -61,10 +64,7 @@ class AllergyUtils {
     final baseGroups = <String, Set<String>>{};
 
     void addGroup(String key, Iterable<String> values) {
-      final normalized = values
-          .map(_normalize)
-          .where((v) => v.isNotEmpty)
-          .toSet();
+      final normalized = values.map(_normalize).where((v) => v.isNotEmpty).toSet();
       if (normalized.isEmpty) return;
       baseGroups[key] = normalized;
       for (final term in normalized) {
@@ -543,7 +543,10 @@ class AllergyUtils {
       'gomasio',
     });
 
-    addGroup('honey', const {'น้ำผึ้ง', 'honey'});
+    addGroup('honey', const {
+      'น้ำผึ้ง',
+      'honey',
+    });
 
     addGroup('yeast', const {
       'ยีสต์',
@@ -638,14 +641,9 @@ class AllergyUtils {
       'balsamic vinegar',
     });
 
-    void extendWithSelfAndGroups(
-      Iterable<String> rawTerms,
-      Iterable<String> groups,
-    ) {
-      final normalizedTerms = rawTerms
-          .map(_normalize)
-          .where((t) => t.isNotEmpty)
-          .toSet();
+    void extendWithSelfAndGroups(Iterable<String> rawTerms, Iterable<String> groups) {
+      final normalizedTerms =
+          rawTerms.map(_normalize).where((t) => t.isNotEmpty).toSet();
       if (normalizedTerms.isEmpty) return;
       final union = <String>{...normalizedTerms};
       for (final key in groups) {
@@ -692,10 +690,7 @@ String describeAllergyCoverage(Iterable<String> rawAllergies) {
         .map((value) => value.trim())
         .where((value) => value.isNotEmpty);
     for (final token in tokens) {
-      final normalized = token
-          .replaceAll(RegExp(r'\s+'), ' ')
-          .trim()
-          .toLowerCase();
+      final normalized = token.replaceAll(RegExp(r'\s+'), ' ').trim().toLowerCase();
       if (!seen.add(normalized)) continue;
       final expansion = AllergyUtils.expandAllergens([token]);
       final synonyms = expansion.all.toList()..sort();
