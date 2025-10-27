@@ -5,6 +5,8 @@ import '../models/hybrid_models.dart';
 import '../models/ingredient_model.dart';
 import '../models/recipe/recipe_model.dart';
 import '../utils/allergy_utils.dart';
+import '../utils/ingredient_translator.dart';
+import '../utils/ingredient_utils.dart';
 import 'enhanced_ai_recommendation_service.dart';
 import 'rapidapi_recipe_service.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
@@ -418,6 +420,12 @@ ${allergyJson}
         }
         return true;
       }).toList();
+
+      result.externalRecipes = _prioritizeRecipesBySelectedCoverage(
+        result.externalRecipes,
+        selectedIngredients,
+      );
+
       result.combinedRecommendations = [...result.externalRecipes];
 
       // Log current API usage summary to help monitor quotas
@@ -441,6 +449,216 @@ ${allergyJson}
     }
 
     return result;
+  }
+
+  List<RecipeModel> _prioritizeRecipesBySelectedCoverage(
+    List<RecipeModel> recipes,
+    List<IngredientModel> selectedIngredients,
+  ) {
+    if (recipes.isEmpty || selectedIngredients.isEmpty) {
+      return recipes;
+    }
+
+    final profiles = _buildSelectedProfiles(selectedIngredients);
+    if (profiles.isEmpty) return recipes;
+
+    final scored = <_CoverageScoredRecipe>[];
+    for (final recipe in recipes) {
+      final info = _calculateCoverage(recipe, profiles);
+      final coveragePercent = (info.coverageRatio * 100).round();
+
+      var adjustedScore = coveragePercent;
+      if (adjustedScore < recipe.matchScore) {
+        adjustedScore = recipe.matchScore;
+      }
+      adjustedScore -= info.missingCount * 5;
+      adjustedScore = adjustedScore.clamp(0, 100);
+      final boundedScore = adjustedScore.toInt();
+
+      final updatedRecipe = recipe.copyWith(
+        matchScore: boundedScore,
+        matchRatio: (boundedScore / 100).clamp(0.0, 1.0),
+        reason: _mergeCoverageReason(recipe.reason, info),
+      );
+
+      scored.add(
+        _CoverageScoredRecipe(
+          recipe: updatedRecipe,
+          matchedCount: info.matchedCount,
+          missingCount: info.missingCount,
+          coveragePercent: coveragePercent,
+        ),
+      );
+    }
+
+    scored.sort((a, b) {
+      final missingCompare = a.missingCount.compareTo(b.missingCount);
+      if (missingCompare != 0) return missingCompare;
+      final matchedCompare = b.matchedCount.compareTo(a.matchedCount);
+      if (matchedCompare != 0) return matchedCompare;
+      final percentCompare = b.coveragePercent.compareTo(a.coveragePercent);
+      if (percentCompare != 0) return percentCompare;
+      return b.recipe.matchScore.compareTo(a.recipe.matchScore);
+    });
+
+    return scored.map((entry) => entry.recipe).toList();
+  }
+
+  List<_SelectedIngredientProfile> _buildSelectedProfiles(
+    List<IngredientModel> selectedIngredients,
+  ) {
+    final profiles = <_SelectedIngredientProfile>[];
+    final seen = <String>{};
+    for (final ingredient in selectedIngredients) {
+      final original = ingredient.name.trim();
+      if (original.isEmpty) continue;
+      final normalized = _normalizeName(original);
+      if (normalized.isEmpty || !seen.add(normalized)) continue;
+
+      final variants = _expandVariants(normalized);
+      final translated = _normalizeName(
+        IngredientTranslator.translate(original),
+      );
+      if (translated.isNotEmpty) {
+        variants.addAll(_expandVariants(translated));
+      }
+
+      profiles.add(
+        _SelectedIngredientProfile(originalName: original, variants: variants),
+      );
+    }
+    return profiles;
+  }
+
+  _CoverageInfo _calculateCoverage(
+    RecipeModel recipe,
+    List<_SelectedIngredientProfile> profiles,
+  ) {
+    final matched = <String>[];
+    final missing = <String>[];
+
+    for (final profile in profiles) {
+      final hasMatch = recipe.ingredients.any(
+        (ingredient) => _matchesProfile(ingredient.name, profile),
+      );
+      if (hasMatch) {
+        matched.add(profile.originalName);
+      } else {
+        missing.add(profile.originalName);
+      }
+    }
+
+    return _CoverageInfo(
+      totalSelected: profiles.length,
+      matchedNames: matched,
+      missingNames: missing,
+    );
+  }
+
+  bool _matchesProfile(
+    String recipeIngredientName,
+    _SelectedIngredientProfile profile,
+  ) {
+    final variants = _expandVariants(_normalizeName(recipeIngredientName));
+    final translated = _normalizeName(
+      IngredientTranslator.translate(recipeIngredientName),
+    );
+    if (translated.isNotEmpty) {
+      variants.addAll(_expandVariants(translated));
+    }
+
+    for (final recipeVariant in variants) {
+      for (final profileVariant in profile.variants) {
+        if (_namesRoughlyMatch(recipeVariant, profileVariant)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  bool _namesRoughlyMatch(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return false;
+    if (a == b) return true;
+    if (a.contains(b) || b.contains(a)) return true;
+    if (ingredientsMatch(a, b)) return true;
+    if (ingredientsMatch(b, a)) return true;
+    return false;
+  }
+
+  Set<String> _expandVariants(String value) {
+    final base = value.trim();
+    if (base.isEmpty) return <String>{};
+
+    final variants = <String>{base};
+    final spaceNormalized = base.replaceAll(RegExp(r'[_-]+'), ' ');
+    final collapsed = spaceNormalized.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final noSpace = collapsed.replaceAll(' ', '');
+
+    variants.add(spaceNormalized.trim());
+    variants.add(collapsed);
+    if (noSpace.isNotEmpty) {
+      variants.add(noSpace);
+    }
+
+    variants.add(_stripPlural(base));
+    variants.add(_stripPlural(collapsed));
+    if (noSpace.isNotEmpty) {
+      variants.add(_stripPlural(noSpace));
+    }
+
+    variants.removeWhere((element) => element.trim().isEmpty);
+    return variants;
+  }
+
+  String _stripPlural(String value) {
+    if (value.endsWith('ies') && value.length > 3) {
+      return value.substring(0, value.length - 3) + 'y';
+    }
+    if (value.endsWith('es') && value.length > 2) {
+      return value.substring(0, value.length - 2);
+    }
+    if (value.endsWith('s') && value.length > 1) {
+      return value.substring(0, value.length - 1);
+    }
+    return value;
+  }
+
+  String _mergeCoverageReason(String originalReason, _CoverageInfo info) {
+    if (info.totalSelected <= 0) return originalReason;
+
+    final buffer = StringBuffer()
+      ..write('ใช้วัตถุดิบที่เลือก ${info.matchedCount}/${info.totalSelected}');
+
+    if (info.missingCount == 0) {
+      buffer.write(' • ครบทุกอย่างที่เลือก');
+    } else {
+      if (info.matchedNames.isNotEmpty) {
+        buffer.write(' • ใช้ ${_summarizeNames(info.matchedNames)}');
+      }
+      if (info.missingNames.isNotEmpty) {
+        buffer.write(' • ยังขาด ${_summarizeNames(info.missingNames)}');
+      }
+    }
+
+    final trimmed = originalReason.trim();
+    if (trimmed.isNotEmpty &&
+        !trimmed.toLowerCase().contains('ใช้วัตถุดิบที่เลือก')) {
+      buffer.write(' | $trimmed');
+    }
+
+    return buffer.toString();
+  }
+
+  String _summarizeNames(List<String> names) {
+    if (names.isEmpty) return '';
+    if (names.length <= 3) {
+      return names.join(', ');
+    }
+    final head = names.take(3).join(', ');
+    final remaining = names.length - 3;
+    return '$head +$remaining รายการ';
   }
 
   /// Helper: parse priority_ingredients JSON
@@ -755,4 +973,46 @@ ${allergyJson}
       return excludeIngredients.join(', ');
     }
   }
+}
+
+class _SelectedIngredientProfile {
+  final String originalName;
+  final Set<String> variants;
+
+  _SelectedIngredientProfile({
+    required this.originalName,
+    required this.variants,
+  });
+}
+
+class _CoverageInfo {
+  final int totalSelected;
+  final List<String> matchedNames;
+  final List<String> missingNames;
+
+  _CoverageInfo({
+    required this.totalSelected,
+    required this.matchedNames,
+    required this.missingNames,
+  });
+
+  int get matchedCount => matchedNames.length;
+  int get missingCount =>
+      totalSelected > matchedCount ? totalSelected - matchedCount : 0;
+  double get coverageRatio =>
+      totalSelected == 0 ? 0 : matchedCount / totalSelected;
+}
+
+class _CoverageScoredRecipe {
+  final RecipeModel recipe;
+  final int matchedCount;
+  final int missingCount;
+  final int coveragePercent;
+
+  _CoverageScoredRecipe({
+    required this.recipe,
+    required this.matchedCount,
+    required this.missingCount,
+    required this.coveragePercent,
+  });
 }

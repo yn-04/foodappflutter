@@ -11,12 +11,11 @@ class UnitConversionService {
   final String _apiKey;
 
   UnitConversionService({String? apiKey})
-    : _apiKey =
-          (apiKey ??
-                  (dotenv.isInitialized
-                      ? (dotenv.env['SPOONACULAR_API_KEY'] ?? '')
-                      : ''))
-              .trim();
+      : _apiKey = (apiKey ??
+                (dotenv.isInitialized
+                    ? (dotenv.env['SPOONACULAR_API_KEY'] ?? '')
+                    : ''))
+            .trim();
 
   bool get _hasValidKey =>
       _apiKey.isNotEmpty && _apiKey != 'YOUR_SPOONACULAR_API_KEY';
@@ -37,13 +36,17 @@ class UnitConversionService {
       return null;
     }
 
-    final url = Uri.https('api.spoonacular.com', '/recipes/convert', {
-      'ingredientName': ingredientName,
-      'sourceAmount': sourceAmount.toString(),
-      'sourceUnit': sourceUnit,
-      'targetUnit': targetUnit,
-      'apiKey': _apiKey,
-    });
+    final url = Uri.https(
+      'api.spoonacular.com',
+      '/recipes/convert',
+      {
+        'ingredientName': ingredientName,
+        'sourceAmount': sourceAmount.toString(),
+        'sourceUnit': sourceUnit,
+        'targetUnit': targetUnit,
+        'apiKey': _apiKey,
+      },
+    );
 
     try {
       final response = await http.get(url);

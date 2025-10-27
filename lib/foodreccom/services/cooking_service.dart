@@ -14,7 +14,8 @@ import '../models/recipe/nutrition_info.dart';
 import '../models/recipe/used_ingredient.dart';
 import '../models/recipe/cooking_step.dart';
 import '../utils/purchase_item_utils.dart' as qty;
-import '../utils/smart_unit_converter.dart'; // 🚀 Import ตัวแปลงหน่วยตัวใหม่
+// 🚀 Import ตัวแปลงหน่วย (ซึ่งตอนนี้เป็น "ไฮบริด" แล้ว)
+import '../utils/smart_unit_converter.dart';
 import '../utils/ingredient_translator.dart';
 
 class IngredientShortage {
@@ -49,7 +50,7 @@ class CookingService {
   final _firestore = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
 
-  // ✅ ตรวจสอบก่อนทำอาหาร (เหมือนเดิม)
+  // ✅ ตรวจสอบก่อนทำอาหาร (โค้ดเดิมของคุณ)
   Future<IngredientCheckResult> previewCooking(
     RecipeModel recipe,
     int servingsToMake, {
@@ -62,7 +63,7 @@ class CookingService {
     );
   }
 
-  // ✅ เริ่มทำอาหาร (ปรับปรุงให้รองรับ async)
+  // ✅ เริ่มทำอาหาร (โค้ดเดิมของคุณ)
   Future<CookingResult> startCooking(
     RecipeModel recipe,
     int servingsToMake, {
@@ -118,7 +119,7 @@ class CookingService {
     }
   }
 
-  // ⭐️ [ปรับปรุง] ตรวจสอบวัตถุดิบใน stock (ใช้ SmartUnitConverter ใหม่)
+  // ⭐️ [โค้ดเดิมของคุณ] ตรวจสอบวัตถุดิบ
   Future<IngredientCheckResult> _checkIngredientAvailability(
     RecipeModel recipe,
     int servingsToMake, {
@@ -139,7 +140,7 @@ class CookingService {
           baseServings,
         );
 
-        // ✅ [ใหม่] แปลงหน่วยสูตรอาหาร -> หน่วย Canonical (gram/ml) ผ่าน API
+        // ✅ [จุดสำคัญ] เรียก "ไฮบริดคอนเวอร์เตอร์" (ซึ่งจะคืนค่า CanonicalQuantity? หรือ null)
         final requiredCanonical =
             await SmartUnitConverter.convertRecipeUnitToInventoryUnit(
               ingredientName: ing.name,
@@ -148,7 +149,9 @@ class CookingService {
             );
 
         if (requiredCanonical == null) {
-          print('⚠️ ไม่สามารถแปลงหน่วยสำหรับ ${ing.name} (${ing.unit}) ได้');
+          print(
+            '⚠️ (CookingService) ไม่สามารถแปลงหน่วยสำหรับ ${ing.name} (${ing.unit}) ได้ (ข้ามการตรวจสอบ)',
+          );
           return; // ข้ามวัตถุดิบนี้ไปถ้าแปลงหน่วยไม่ได้
         }
 
@@ -165,11 +168,12 @@ class CookingService {
             ing.name,
             quantity,
             unit,
-            requiredCanonical.unit,
+            requiredCanonical.unit, // <-- ใช้ .unit จาก CanonicalQuantity
           );
         }
 
         if (availableCanonicalAmount < requiredCanonical.amount) {
+          // <-- ใช้ .amount จาก CanonicalQuantity
           shortages.add(
             IngredientShortage(
               name: ing.name,
@@ -188,7 +192,7 @@ class CookingService {
     );
   }
 
-  // ⭐️ [ปรับปรุง] ลดวัตถุดิบใน stock (ใช้ SmartUnitConverter ใหม่)
+  // ⭐️ [โค้ดเดิมของคุณ] ลดวัตถุดิบใน stock
   Future<List<UsedIngredient>> _reduceIngredientStock(
     RecipeModel recipe,
     int servingsToMake, {
@@ -199,37 +203,75 @@ class CookingService {
     if (user == null) return [];
 
     final usedIngredients = <UsedIngredient>[];
+    final manualMap = (manualRequiredAmounts == null ||
+            manualRequiredAmounts.isEmpty)
+        ? null
+        : manualRequiredAmounts.map(
+            (key, value) => MapEntry(qty.normalizeName(key), value),
+          );
+    final effectiveServings =
+        servingsToMake <= 0 ? 1.0 : servingsToMake.toDouble();
 
     for (final ing in recipe.ingredients) {
       final baseServings = recipe.servings == 0 ? 1 : recipe.servings;
-      final requiredAmount = _scaledAmount(
+      final scaledAmount = _scaledAmount(
         ing.numericAmount,
         servingsToMake,
         baseServings,
       );
 
-      // ✅ [ใหม่] แปลงหน่วยสูตรอาหาร -> หน่วย Canonical (gram/ml) ผ่าน API
+      final normalizedIngredientName = qty.normalizeName(ing.name);
+      final manualRaw = manualMap?[normalizedIngredientName];
+      double? manualAmount;
+      if (manualRaw != null && manualRaw.isFinite) {
+        manualAmount = manualRaw < 0 ? 0 : manualRaw;
+      }
+
+      final effectiveRecipeAmount = manualAmount ?? scaledAmount;
+      if (effectiveRecipeAmount <= 0) {
+        continue;
+      }
+
+      // ✅ [จุดสำคัญ] เรียก "ไฮบริดคอนเวอร์เตอร์" (ซึ่งจะคืนค่า CanonicalQuantity? หรือ null)
       final requiredCanonical =
           await SmartUnitConverter.convertRecipeUnitToInventoryUnit(
             ingredientName: ing.name,
-            recipeAmount: requiredAmount,
+            recipeAmount: effectiveRecipeAmount,
             recipeUnit: ing.unit,
           );
 
       if (requiredCanonical == null) {
         print(
-          '⚠️ ไม่สามารถแปลงหน่วยสำหรับ ${ing.name} (${ing.unit}) เพื่อตัดสต็อกได้',
+          '⚠️ (CookingService) ไม่สามารถแปลงหน่วยสำหรับ ${ing.name} (${ing.unit}) เพื่อตัดสต็อกได้ (ข้าม)',
         );
         continue; // ข้ามไปถ้าแปลงหน่วยไม่ได้
       }
 
+      double canonicalTarget = requiredCanonical.amount;
+      if (manualAmount == null) {
+        final minimumCanonical = qty.minimumCanonicalRequirementForCooking(
+          ingredientName: ing.name,
+          canonicalUnit: requiredCanonical.unit,
+          servings: effectiveServings,
+        );
+        if (minimumCanonical > canonicalTarget) {
+          canonicalTarget = minimumCanonical;
+        }
+      }
+
+      if (canonicalTarget <= 0) {
+        continue;
+      }
+
       // ดึงรายการวัตถุดิบทั้งหมดที่ชื่อตรงกัน (รวมกรณีชื่อคล้าย)
       final inventoryDocs = await _findInventoryDocs(user.uid, ing.name);
-      double amountRemaining = requiredCanonical.amount;
+      final sortedInventoryDocs =
+          _orderInventoryByExpiry(inventoryDocs); // ใช้ของที่ใกล้หมดก่อน
+      double amountRemaining = canonicalTarget; // <-- ปริมาณที่ต้องการตัดตามเกณฑ์ขั้นต่ำ
       double consumedCanonical = 0;
       String? usedCategory;
 
-      for (final doc in inventoryDocs) {
+      for (final doc in sortedInventoryDocs) {
         if (amountRemaining <= 0) break;
 
         final data = doc.data();
@@ -240,7 +282,7 @@ class CookingService {
           ing.name,
           currentQty,
           currentUnit,
-          requiredCanonical.unit,
+          requiredCanonical.unit, // <-- ใช้ .unit
         );
 
         if (availableCanonical <= 0) continue;
@@ -253,7 +295,7 @@ class CookingService {
           ing.name,
           remainingCanonical,
           currentUnit,
-          requiredCanonical.unit,
+          requiredCanonical.unit, // <-- ใช้ .unit
         );
 
         await doc.reference.update({
@@ -268,7 +310,9 @@ class CookingService {
       }
 
       if (consumedCanonical > 0) {
-        final usedUnit = _mapCanonicalUnitToDisplayUnit(requiredCanonical.unit);
+        final usedUnit = _mapCanonicalUnitToDisplayUnit(
+          requiredCanonical.unit,
+        ); // <-- ใช้ .unit
         usedIngredients.add(
           UsedIngredient(
             name: ing.name,
@@ -284,7 +328,7 @@ class CookingService {
   }
 
   // ------------------------------
-  // 🔹 Helper Functions (ปรับปรุงเล็กน้อย)
+  // 🔹 Helper Functions (โค้ดเดิมของคุณ)
   // ------------------------------
 
   // ฟังก์ชัน Helper เพื่อ map ชื่อหน่วย canonical ให้ตรงกับใน UnitConverter ของคลัง
@@ -582,6 +626,84 @@ class CookingService {
 
   double? _densityForIngredient(String ingredientName) {
     return SmartUnitConverter.densityForIngredient(ingredientName) ?? 1.0;
+  }
+
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _orderInventoryByExpiry(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    if (docs.length <= 1) return docs;
+    final sorted = List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(docs);
+    sorted.sort((a, b) {
+      final expiryA = _extractExpiryDate(a);
+      final expiryB = _extractExpiryDate(b);
+      if (expiryA == null && expiryB == null) {
+        final createdA = _extractCreatedDate(a);
+        final createdB = _extractCreatedDate(b);
+        if (createdA == null && createdB == null) {
+          return a.id.compareTo(b.id);
+        }
+        if (createdA == null) return 1;
+        if (createdB == null) return -1;
+        final createdComparison = createdA.compareTo(createdB);
+        if (createdComparison != 0) return createdComparison;
+        return a.id.compareTo(b.id);
+      }
+      if (expiryA == null) return 1;
+      if (expiryB == null) return -1;
+      final expiryComparison = expiryA.compareTo(expiryB);
+      if (expiryComparison != 0) return expiryComparison;
+      final createdA = _extractCreatedDate(a);
+      final createdB = _extractCreatedDate(b);
+      if (createdA == null && createdB == null) {
+        return a.id.compareTo(b.id);
+      }
+      if (createdA == null) return 1;
+      if (createdB == null) return -1;
+      final createdComparison = createdA.compareTo(createdB);
+      if (createdComparison != 0) return createdComparison;
+      return a.id.compareTo(b.id);
+    });
+    return sorted;
+  }
+
+  DateTime? _extractExpiryDate(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data();
+    return _parseFirestoreDate(data['expiry_date']);
+  }
+
+  DateTime? _extractCreatedDate(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data();
+    final candidates = [
+      data['created_at'],
+      data['created_at_local'],
+      data['added_at'],
+      data['added_date'],
+      data['added_at_local'],
+      data['updated_at'],
+    ];
+    for (final value in candidates) {
+      final parsed = _parseFirestoreDate(value);
+      if (parsed != null) return parsed;
+    }
+    return null;
+  }
+
+  DateTime? _parseFirestoreDate(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) {
+      return value.toDate().toLocal();
+    }
+    if (value is String) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return null;
+      final parsed = DateTime.tryParse(trimmed);
+      if (parsed != null) return parsed.isUtc ? parsed.toLocal() : parsed;
+    }
+    return null;
   }
 
   Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _findInventoryDocs(
