@@ -8,6 +8,7 @@ class RecipeModel {
   final String name;
   final String description;
   final int matchScore;
+  final double matchRatio;
   final String reason;
   final List<RecipeIngredient> ingredients;
   final List<String> missingIngredients;
@@ -28,6 +29,7 @@ class RecipeModel {
     required this.name,
     required this.description,
     required this.matchScore,
+    this.matchRatio = 0.0,
     required this.reason,
     required this.ingredients,
     required this.missingIngredients,
@@ -46,11 +48,27 @@ class RecipeModel {
 
   /// ✅ Parse จาก AI
   factory RecipeModel.fromAI(Map<String, dynamic> json) {
+    num _numOrZero(dynamic value) {
+      if (value is num) return value;
+      if (value is String) {
+        return num.tryParse(value) ?? 0;
+      }
+      return 0;
+    }
+
+    final rawScore = _numOrZero(json['matchScore'] ?? json['match_score']);
+    final rawRatio = _numOrZero(json['matchRatio'] ?? json['match_ratio']);
+    final inferredRatio = rawRatio > 0
+        ? rawRatio.toDouble()
+        : (rawScore.toDouble() / 100);
+    final normalizedRatio = inferredRatio.clamp(0.0, 1.0);
+
     return RecipeModel(
       id: (json['id'] ?? DateTime.now().millisecondsSinceEpoch).toString(),
       name: json['name'] ?? json['menu_name'] ?? 'ไม่ระบุชื่อ',
       description: json['description'] ?? '',
       matchScore: (json['matchScore'] ?? json['match_score'] ?? 0).round(),
+      matchRatio: normalizedRatio,
       reason: json['reason'] ?? '',
       ingredients: (json['ingredients'] as List? ?? []).map((i) {
         if (i is String) {
@@ -86,11 +104,14 @@ class RecipeModel {
 
   /// ✅ Parse จาก RapidAPI (spoonacular)
   factory RecipeModel.fromAPI(Map<String, dynamic> json) {
-    final cuisines =
-        (json['cuisines'] as List? ?? []).whereType<String>().toList();
+    final cuisines = (json['cuisines'] as List? ?? [])
+        .whereType<String>()
+        .toList();
     final diets = (json['diets'] as List? ?? []).whereType<String>().toList();
-    final dishTypes =
-        (json['dishTypes'] as List? ?? []).whereType<String>().toList();
+    final dishTypes = (json['dishTypes'] as List? ?? [])
+        .whereType<String>()
+        .toList();
+    double _clampRatio(double value) => value.clamp(0.0, 1.0);
     double _nutrientAmount(String key) {
       final nutrients = (json['nutrition']?['nutrients'] as List?) ?? [];
       for (final item in nutrients) {
@@ -105,8 +126,9 @@ class RecipeModel {
     }
 
     final servings = (json['servings'] ?? 1);
-    final servingsCount =
-        (servings is num && servings > 0) ? servings.toDouble() : 1.0;
+    final servingsCount = (servings is num && servings > 0)
+        ? servings.toDouble()
+        : 1.0;
 
     final nutrition = json['nutrition'] != null
         ? NutritionInfo(
@@ -130,6 +152,7 @@ class RecipeModel {
       name: json['title'] ?? json['name'] ?? 'ไม่ระบุชื่อ',
       description: json['summary'] ?? json['description'] ?? '',
       matchScore: 70,
+      matchRatio: _clampRatio(70 / 100),
       reason: 'Imported from RapidAPI',
       ingredients: (json['extendedIngredients'] as List? ?? []).map((i) {
         return RecipeIngredient(
@@ -165,11 +188,25 @@ class RecipeModel {
 
   /// ✅ Parse Generic JSON (offline/fallback)
   factory RecipeModel.fromJson(Map<String, dynamic> json) {
+    num _numOrZero(dynamic value) {
+      if (value is num) return value;
+      if (value is String) return num.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    final rawScore = _numOrZero(json['matchScore'] ?? json['match_score']);
+    final rawRatio = _numOrZero(json['matchRatio'] ?? json['match_ratio']);
+    final inferredRatio = rawRatio > 0
+        ? rawRatio.toDouble()
+        : rawScore.toDouble() / 100;
+    final normalizedRatio = inferredRatio.clamp(0.0, 1.0);
+
     return RecipeModel(
       id: json['id'] ?? '',
       name: json['name'] ?? '',
       description: json['description'] ?? '',
       matchScore: (json['matchScore'] ?? json['match_score'] ?? 0).round(),
+      matchRatio: normalizedRatio,
       reason: json['reason'] ?? '',
       ingredients: (json['ingredients'] as List? ?? []).map((i) {
         if (i is Map<String, dynamic>) return RecipeIngredient.fromJson(i);
@@ -202,6 +239,7 @@ class RecipeModel {
     'name': name,
     'description': description,
     'match_score': matchScore,
+    'match_ratio': matchRatio,
     'reason': reason,
     'ingredients': ingredients.map((i) => i.toJson()).toList(),
     'missing_ingredients': missingIngredients,
@@ -222,9 +260,22 @@ class RecipeModel {
 
   int get totalTime => cookingTime + prepTime;
 
+  double get matchScorePercent =>
+      matchRatio > 0 ? (matchRatio * 100).clamp(0, 100) : matchScore.toDouble();
+
+  String get matchScoreLabel {
+    final percent = matchScorePercent;
+    if (percent == percent.roundToDouble()) {
+      return percent.toStringAsFixed(0);
+    }
+    final decimals = percent < 10 ? 2 : 1;
+    return percent.toStringAsFixed(decimals);
+  }
+
   Color get scoreColor {
-    if (matchScore >= 80) return Colors.green;
-    if (matchScore >= 60) return Colors.orange;
+    final percent = matchScorePercent;
+    if (percent >= 80) return Colors.green;
+    if (percent >= 60) return Colors.orange;
     return Colors.red;
   }
 
@@ -232,8 +283,9 @@ class RecipeModel {
     final normalized = description.replaceAll(RegExp(r'\s+'), ' ').trim();
     String base = '';
     if (normalized.isNotEmpty) {
-      final sentences =
-          normalized.split(RegExp(r'(?<=[.!?。！？])\s+')).where((s) => s.trim().isNotEmpty);
+      final sentences = normalized
+          .split(RegExp(r'(?<=[.!?。！？])\s+'))
+          .where((s) => s.trim().isNotEmpty);
       if (sentences.isNotEmpty) {
         base = sentences.first.trim();
       } else {
@@ -310,6 +362,7 @@ extension RecipeCopy on RecipeModel {
     String? name,
     String? description,
     int? matchScore,
+    double? matchRatio,
     String? reason,
     List<RecipeIngredient>? ingredients,
     List<String>? missingIngredients,
@@ -330,6 +383,7 @@ extension RecipeCopy on RecipeModel {
       name: name ?? this.name,
       description: description ?? this.description,
       matchScore: matchScore ?? this.matchScore,
+      matchRatio: matchRatio ?? this.matchRatio,
       reason: reason ?? this.reason,
       ingredients: ingredients ?? this.ingredients,
       missingIngredients: missingIngredients ?? this.missingIngredients,
