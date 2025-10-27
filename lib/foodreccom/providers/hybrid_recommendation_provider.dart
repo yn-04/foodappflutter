@@ -97,6 +97,17 @@ class HybridRecommendationProvider extends ChangeNotifier {
   List<RecipeModel> get budgetFriendlyRecipes =>
       allRecommendations.where((r) => r.tags.contains('ประหยัด')).toList();
 
+  List<RecipeModel> get readyToCookRecipes => allRecommendations.where((r) {
+    final ratio = r.matchRatio > 0 ? r.matchRatio : r.matchScore / 100;
+    return ratio >= 0.999;
+  }).toList();
+
+  List<RecipeModel> get almostReadyRecipes => allRecommendations.where((r) {
+    final ratio = r.matchRatio > 0 ? r.matchRatio : r.matchScore / 100;
+    if (ratio >= 0.999 || ratio == 0) return false;
+    return r.missingIngredients.length <= 2;
+  }).toList();
+
   // -------- Load Data --------
   Future<void> loadIngredients() async {
     if (_isLoadingIngredients) return;
@@ -196,20 +207,13 @@ class HybridRecommendationProvider extends ChangeNotifier {
 
       // ✅ คำนวณ "วัตถุดิบที่ขาด" สำหรับแต่ละเมนูที่แนะนำ เทียบกับสต็อกผู้ใช้
       if (_hybridResult != null) {
-        List<RecipeModel> updateMissing(List<RecipeModel> recipes) {
-          return recipes.map((r) {
-            final missing = _computeMissingIngredients(r);
-            return r.copyWith(missingIngredients: missing);
-          }).toList();
-        }
-
-        _hybridResult!.externalRecipes = updateMissing(
+        _hybridResult!.externalRecipes = _applyMatchScores(
           _hybridResult!.externalRecipes,
         );
-        _hybridResult!.combinedRecommendations = updateMissing(
+        _hybridResult!.combinedRecommendations = _applyMatchScores(
           _hybridResult!.combinedRecommendations,
         );
-        _hybridResult!.aiRecommendations = updateMissing(
+        _hybridResult!.aiRecommendations = _applyMatchScores(
           _hybridResult!.aiRecommendations,
         );
       }
@@ -358,6 +362,121 @@ class HybridRecommendationProvider extends ChangeNotifier {
   }
 
   // ใช้ logic จาก utils/ingredient_utils + cross-language (TH↔EN)
+  List<RecipeModel> _applyMatchScores(List<RecipeModel> recipes) {
+    if (recipes.isEmpty) return [];
+
+    final scored = <_RecipeMatchScore>[];
+
+    for (final recipe in recipes) {
+      final missing = _computeMissingIngredients(recipe);
+      final totalUnique = _countUniqueIngredients(recipe.ingredients);
+      final missingUnique = missing
+          .map(_norm)
+          .where((value) => value.isNotEmpty)
+          .toSet()
+          .length;
+      final matchedCount = (totalUnique - missingUnique).clamp(0, totalUnique);
+      final rawRatio = totalUnique == 0
+          ? 0.0
+          : matchedCount / (totalUnique == 0 ? 1 : totalUnique);
+      final normalizedRatio = rawRatio.isFinite
+          ? rawRatio.clamp(0.0, 1.0)
+          : 0.0;
+
+      final rawPercent = normalizedRatio * 100;
+      final roundedPercent = rawPercent.round();
+      final boundedScore = roundedPercent < 0
+          ? 0
+          : (roundedPercent > 100 ? 100 : roundedPercent);
+
+      final matchSummary = _buildMatchSummary(
+        matched: matchedCount,
+        total: totalUnique,
+        percent: rawPercent,
+        missing: missing,
+      );
+      final updatedReason = _mergeMatchReason(recipe.reason, matchSummary);
+
+      final updatedRecipe = recipe.copyWith(
+        missingIngredients: missing,
+        matchScore: boundedScore,
+        matchRatio: normalizedRatio,
+        reason: updatedReason,
+      );
+
+      scored.add(
+        _RecipeMatchScore(
+          recipe: updatedRecipe,
+          ratio: normalizedRatio,
+          matchedCount: matchedCount,
+          missingCount: missingUnique,
+        ),
+      );
+    }
+
+    scored.sort((a, b) {
+      final ratioCompare = b.ratio.compareTo(a.ratio);
+      if (ratioCompare != 0) return ratioCompare;
+      final missingCompare = a.missingCount.compareTo(b.missingCount);
+      if (missingCompare != 0) return missingCompare;
+      final matchedCompare = b.matchedCount.compareTo(a.matchedCount);
+      if (matchedCompare != 0) return matchedCompare;
+      return a.recipe.name.toLowerCase().compareTo(b.recipe.name.toLowerCase());
+    });
+
+    return scored.map((entry) => entry.recipe).toList();
+  }
+
+  int _countUniqueIngredients(List<RecipeIngredient> ingredients) {
+    final unique = <String>{};
+    for (final ingredient in ingredients) {
+      final key = _norm(ingredient.name);
+      if (key.isNotEmpty) unique.add(key);
+    }
+    return unique.length;
+  }
+
+  String _buildMatchSummary({
+    required int matched,
+    required int total,
+    required double percent,
+    required List<String> missing,
+  }) {
+    final effectiveTotal = total <= 0 ? (matched == 0 ? 1 : matched) : total;
+    final safePercent = percent.isFinite ? percent.clamp(0, 100) : 0.0;
+    final displayPercent = safePercent == safePercent.roundToDouble()
+        ? safePercent.toStringAsFixed(0)
+        : (safePercent < 10
+              ? safePercent.toStringAsFixed(2)
+              : safePercent.toStringAsFixed(1));
+
+    final buffer = StringBuffer(
+      '🎯 Match Score: $matched/$effectiveTotal • $displayPercent%',
+    );
+
+    if (missing.isEmpty) {
+      buffer.write(' • พร้อมทำทันที');
+    } else {
+      final preview = missing.take(2).join(', ');
+      final remaining = missing.length - 2;
+      buffer.write(' • ขาด: $preview');
+      if (remaining > 0) {
+        buffer.write(' +$remaining');
+      }
+    }
+
+    return buffer.toString();
+  }
+
+  String _mergeMatchReason(String existing, String summary) {
+    final trimmed = existing.trim();
+    if (trimmed.contains('🎯 Match Score')) {
+      return trimmed;
+    }
+    if (trimmed.isEmpty) return summary;
+    return '$summary\n$trimmed';
+  }
+
   List<String> _computeMissingIngredients(RecipeModel recipe) {
     final thaiInv = _ingredients.map((i) => _norm(i.name)).toList();
     final engInv = IngredientTranslator.translateList(
@@ -619,4 +738,18 @@ class HybridRecommendationProvider extends ChangeNotifier {
     if (n.contains('ขวด') || n.contains('กระป๋อง')) return 'ชิ้น';
     return 'กรัม';
   }
+}
+
+class _RecipeMatchScore {
+  final RecipeModel recipe;
+  final double ratio;
+  final int matchedCount;
+  final int missingCount;
+
+  _RecipeMatchScore({
+    required this.recipe,
+    required this.ratio,
+    required this.matchedCount,
+    required this.missingCount,
+  });
 }

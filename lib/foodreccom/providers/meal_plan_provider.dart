@@ -19,7 +19,7 @@ import '../models/dri_targets.dart';
 import '../models/recipe/nutrition_info.dart';
 import '../services/enhanced_ai_recommendation_service.dart';
 import '../services/api_usage_service.dart';
-import '../utils/app_logger.dart';
+import 'package:my_app/utils/app_logger.dart';
 
 class MealFrequencyInfo {
   final ConsumptionFrequency? frequency;
@@ -79,13 +79,10 @@ class MealPlanProvider extends ChangeNotifier {
     final key = DateTime(date.year, date.month, date.day);
     return _dailyInsights[key];
   }
-
   List<DailyNutritionSummary> get dailySummaries => _dailySummaries;
   bool get isGeneratingInsights => _insightBusy;
 
-  Future<void> generateWeeklyPlan(
-    EnhancedRecommendationProvider recProvider,
-  ) async {
+  Future<void> generateWeeklyPlan(EnhancedRecommendationProvider recProvider) async {
     // Ensure ingredients and candidates available
     if (recProvider.ingredients.isEmpty) {
       await recProvider.loadIngredients();
@@ -132,9 +129,7 @@ class MealPlanProvider extends ChangeNotifier {
     unawaited(_generateWeeklyNutritionInsight());
   }
 
-  Future<void> regenerateUnlocked(
-    EnhancedRecommendationProvider recProvider,
-  ) async {
+  Future<void> regenerateUnlocked(EnhancedRecommendationProvider recProvider) async {
     if (_plan == null) {
       await generateWeeklyPlan(recProvider);
       return;
@@ -146,8 +141,7 @@ class MealPlanProvider extends ChangeNotifier {
   // Consolidated shopping list across the week (simple sum of missing per recipe)
   List<PurchaseItem> consolidatedShoppingList(List<IngredientModel> inventory) {
     if (_plan == null) return [];
-    final map =
-        <String, CanonicalQuantity>{}; // canonical name -> canonical amount
+    final map = <String, CanonicalQuantity>{}; // canonical name -> canonical amount
     final aliasLookup = <String, String>{}; // alias -> canonical name
     final displayNames = <String, String>{}; // canonical name -> display label
 
@@ -178,17 +172,18 @@ class MealPlanProvider extends ChangeNotifier {
         normalizeName(IngredientTranslator.translate(inv.name)),
       }..removeWhere((value) => value.isEmpty);
 
-      final canonicalKey = _resolveCanonicalKey(candidates, aliasLookup, map);
+      final canonicalKey = _resolveCanonicalKey(
+        candidates,
+        aliasLookup,
+        map,
+      );
       if (canonicalKey == null) continue;
 
       final need = map[canonicalKey];
       if (need == null) continue;
 
-      final haveCanonical = toCanonicalQuantity(
-        inv.quantity.toDouble(),
-        inv.unit,
-        inv.name,
-      );
+      final haveCanonical =
+          toCanonicalQuantity(inv.quantity.toDouble(), inv.unit, inv.name);
       final availableAmount = _convertCanonicalAmount(
         source: haveCanonical,
         targetCanonicalUnit: need.unit,
@@ -249,10 +244,7 @@ class MealPlanProvider extends ChangeNotifier {
         .collection('users')
         .doc(user.uid)
         .collection('meal_plans');
-    final snap = await col
-        .orderBy('created_at', descending: true)
-        .limit(1)
-        .get();
+    final snap = await col.orderBy('created_at', descending: true).limit(1).get();
     if (snap.docs.isEmpty) return;
     final data = snap.docs.first.data();
     final planJson = (data['plan'] as Map<String, dynamic>);
@@ -367,24 +359,12 @@ class MealPlanProvider extends ChangeNotifier {
       final totals = summary.totals;
       final dri = _driTargets;
       if (dri != null) {
-        builder.add(
-          _compareSingle('พลังงาน', totals.calories, dri.energyKcal, 'kcal'),
-        );
-        builder.add(
-          _compareSingle('โปรตีน', totals.protein, dri.proteinG, 'g'),
-        );
-        builder.add(
-          _compareRange('คาร์บ', totals.carbs, dri.carbMinG, dri.carbMaxG, 'g'),
-        );
-        builder.add(
-          _compareRange('ไขมัน', totals.fat, dri.fatMinG, dri.fatMaxG, 'g'),
-        );
-        builder.add(
-          _compareSingle('ไฟเบอร์', totals.fiber, _estimatedFiberTarget(), 'g'),
-        );
-        builder.add(
-          _compareMax('โซเดียม', totals.sodium, dri.sodiumMaxMg, 'mg'),
-        );
+        builder.add(_compareSingle('พลังงาน', totals.calories, dri.energyKcal, 'kcal'));
+        builder.add(_compareSingle('โปรตีน', totals.protein, dri.proteinG, 'g'));
+        builder.add(_compareRange('คาร์บ', totals.carbs, dri.carbMinG, dri.carbMaxG, 'g'));
+        builder.add(_compareRange('ไขมัน', totals.fat, dri.fatMinG, dri.fatMaxG, 'g'));
+        builder.add(_compareSingle('ไฟเบอร์', totals.fiber, _estimatedFiberTarget(), 'g'));
+        builder.add(_compareMax('โซเดียม', totals.sodium, dri.sodiumMaxMg, 'mg'));
       } else {
         builder.add('พลังงานรวม ${totals.calories.toStringAsFixed(0)} kcal');
         builder.add('โปรตีน ${totals.protein.toStringAsFixed(0)} g');
@@ -445,36 +425,24 @@ class MealPlanProvider extends ChangeNotifier {
     }
 
     if (totals.carbs < targetCarbMin) {
-      suggestions.add(
-        'เติมคาร์บอีก ${nf1.format((targetCarbMin - totals.carbs).abs())} g',
-      );
+      suggestions.add('เติมคาร์บอีก ${nf1.format((targetCarbMin - totals.carbs).abs())} g');
     } else if (totals.carbs > targetCarbMax) {
-      suggestions.add(
-        'ลดคาร์บลง ${nf1.format((totals.carbs - targetCarbMax).abs())} g',
-      );
+      suggestions.add('ลดคาร์บลง ${nf1.format((totals.carbs - targetCarbMax).abs())} g');
     }
 
     if (totals.fat < targetFatMin) {
-      suggestions.add(
-        'เพิ่มไขมันดีอีก ${nf1.format((targetFatMin - totals.fat).abs())} g',
-      );
+      suggestions.add('เพิ่มไขมันดีอีก ${nf1.format((targetFatMin - totals.fat).abs())} g');
     } else if (totals.fat > targetFatMax) {
-      suggestions.add(
-        'ลดไขมันลง ${nf1.format((totals.fat - targetFatMax).abs())} g',
-      );
+      suggestions.add('ลดไขมันลง ${nf1.format((totals.fat - targetFatMax).abs())} g');
     }
 
     final fiberDiff = totals.fiber - targetFiber;
     if (fiberDiff < -5) {
-      suggestions.add(
-        'เพิ่มผักผลไม้เพื่อไฟเบอร์อีก ${nf1.format(fiberDiff.abs())} g',
-      );
+      suggestions.add('เพิ่มผักผลไม้เพื่อไฟเบอร์อีก ${nf1.format(fiberDiff.abs())} g');
     }
 
     if (totals.sodium > targetSodium) {
-      suggestions.add(
-        'ลดโซเดียมลง ${nf0.format((totals.sodium - targetSodium).abs())} mg',
-      );
+      suggestions.add('ลดโซเดียมลง ${nf0.format((totals.sodium - targetSodium).abs())} mg');
     }
 
     if (suggestions.isNotEmpty) {
@@ -483,18 +451,11 @@ class MealPlanProvider extends ChangeNotifier {
       buffer.write(' โภชนาการหลักอยู่ในช่วงพอดีแทบทุกหมวด เยี่ยมเลย!');
     }
 
-    buffer.write(
-      ' (เฉลี่ยวันละ ${nf0.format(totals.calories / dayCount)} kcal)',
-    );
+    buffer.write(' (เฉลี่ยวันละ ${nf0.format(totals.calories / dayCount)} kcal)');
     return buffer.toString();
   }
 
-  String _compareSingle(
-    String label,
-    double actual,
-    double target,
-    String unit,
-  ) {
+  String _compareSingle(String label, double actual, double target, String unit) {
     final diff = actual - target;
     if (diff.abs() < 1) return '$label อยู่ในเป้า';
     final symbol = diff > 0 ? '+' : '-';
@@ -595,7 +556,7 @@ class MealPlanProvider extends ChangeNotifier {
         _dailyInsights = parsed;
       }
     } catch (e, st) {
-      logDebug('Smart Insight daily error: $e', stackTrace: st);
+      logError('Smart Insight daily error: $e', stackTrace: st);
       try {
         await ApiUsageService.setGeminiCooldown(const Duration(seconds: 30));
       } catch (_) {}
@@ -677,7 +638,7 @@ class MealPlanProvider extends ChangeNotifier {
         return;
       }
     } catch (e, st) {
-      logDebug('Smart Insight weekly error: $e', stackTrace: st);
+      logError('Smart Insight weekly error: $e', stackTrace: st);
       try {
         await ApiUsageService.setGeminiCooldown(const Duration(seconds: 30));
       } catch (_) {}
@@ -811,7 +772,9 @@ class MealPlanProvider extends ChangeNotifier {
     return counts;
   }
 
-  MealPlanFrequencySummary frequencySummary(List<IngredientModel> inventory) {
+  MealPlanFrequencySummary frequencySummary(
+    List<IngredientModel> inventory,
+  ) {
     if (_plan == null) {
       return const MealPlanFrequencySummary(
         counts: {},
@@ -846,7 +809,8 @@ class MealPlanProvider extends ChangeNotifier {
     EnhancedRecommendationProvider recProvider,
   ) async {
     if (_plan == null) return false;
-    int dayIdx = _plan!.days.indexWhere((d) => _isSameDay(d.date, date));
+    int dayIdx =
+        _plan!.days.indexWhere((d) => _isSameDay(d.date, date));
     if (dayIdx == -1) return false;
 
     if (recProvider.recommendations.isEmpty) {
@@ -888,11 +852,8 @@ class MealPlanProvider extends ChangeNotifier {
 
     final days = [..._plan!.days];
     final meals = [...days[dayIdx].meals];
-    meals[mealIndex] = currentEntry.copyWith(
-      recipe: replacement,
-      done: false,
-      pinned: false,
-    );
+    meals[mealIndex] =
+        currentEntry.copyWith(recipe: replacement, done: false, pinned: false);
     days[dayIdx] = days[dayIdx].copyWith(meals: meals);
     _plan = MealPlan(days: days, generatedAt: _plan!.generatedAt);
     _dailySummaries = _buildDailySummaries();
@@ -1003,10 +964,8 @@ class MealPlanProvider extends ChangeNotifier {
     required String ingredientName,
   }) {
     if (source.unit == targetCanonicalUnit) return source.amount;
-    final targetUnitDisplay = displayUnitForCanonical(
-      targetCanonicalUnit,
-      ingredientName,
-    );
+    final targetUnitDisplay =
+        displayUnitForCanonical(targetCanonicalUnit, ingredientName);
     final convertedAmount = convertCanonicalToUnit(
       canonicalUnit: source.unit,
       canonicalAmount: source.amount,
@@ -1023,10 +982,7 @@ class MealPlanProvider extends ChangeNotifier {
   }
 
   // ----- Estimation helpers for external plans (from JSON) -----
-  double estimateTotalCostForPlanJson(
-    Map<String, dynamic> planJson,
-    List<IngredientModel> inventory,
-  ) {
+  double estimateTotalCostForPlanJson(Map<String, dynamic> planJson, List<IngredientModel> inventory) {
     final plan = MealPlan.fromJson(planJson);
     // Build consolidated map
     final map = <String, CanonicalQuantity>{};
@@ -1048,11 +1004,7 @@ class MealPlanProvider extends ChangeNotifier {
     for (final inv in inventory) {
       final key = normalizeName(inv.name);
       if (!map.containsKey(key)) continue;
-      final have = toCanonicalQuantity(
-        inv.quantity.toDouble(),
-        inv.unit,
-        inv.name,
-      );
+      final have = toCanonicalQuantity(inv.quantity.toDouble(), inv.unit, inv.name);
       final need = map[key]!;
       if (have.unit == need.unit) {
         final remain = need.subtract(have);
@@ -1079,10 +1031,8 @@ class MealPlanProvider extends ChangeNotifier {
     if (category == 'เนื้อสัตว์') return canonUnit == 'gram' ? 0.6 : 15;
     if (category == 'ผัก') return canonUnit == 'gram' ? 0.08 : 10;
     if (category == 'ผลไม้') return canonUnit == 'gram' ? 0.1 : 12;
-    if (category == 'ผลิตภัณฑ์จากนม')
-      return canonUnit == 'milliliter' ? 0.04 : 20;
-    if (category == 'ข้าว' || category == 'แป้ง')
-      return canonUnit == 'gram' ? 0.03 : 15;
+    if (category == 'ผลิตภัณฑ์จากนม') return canonUnit == 'milliliter' ? 0.04 : 20;
+    if (category == 'ข้าว' || category == 'แป้ง') return canonUnit == 'gram' ? 0.03 : 15;
     if (category == 'เครื่องเทศ') return canonUnit == 'gram' ? 0.2 : 20;
     if (category == 'เครื่องปรุง') return canonUnit == 'milliliter' ? 0.02 : 15;
     if (category == 'น้ำมัน') return canonUnit == 'milliliter' ? 0.05 : 25;
@@ -1095,9 +1045,7 @@ class MealPlanProvider extends ChangeNotifier {
   void markEntryDone(DateTime date, String recipeId) {
     if (_plan == null) return;
     final days = _plan!.days.map((d) {
-      if (d.date.year == date.year &&
-          d.date.month == date.month &&
-          d.date.day == date.day) {
+      if (d.date.year == date.year && d.date.month == date.month && d.date.day == date.day) {
         final meals = d.meals.map((m) {
           if (m.recipe.id == recipeId) return m.copyWith(done: true);
           return m;
@@ -1114,9 +1062,7 @@ class MealPlanProvider extends ChangeNotifier {
   void markEntryDoneAt(DateTime date, int mealIndex) {
     if (_plan == null) return;
     final days = _plan!.days.map((d) {
-      if (d.date.year == date.year &&
-          d.date.month == date.month &&
-          d.date.day == date.day) {
+      if (d.date.year == date.year && d.date.month == date.month && d.date.day == date.day) {
         if (mealIndex < 0 || mealIndex >= d.meals.length) return d;
         final meals = [...d.meals];
         meals[mealIndex] = meals[mealIndex].copyWith(done: true);
@@ -1151,6 +1097,7 @@ class MealPlanProvider extends ChangeNotifier {
     unawaited(_generateDailyNutritionInsights());
     unawaited(_generateWeeklyNutritionInsight());
   }
+
 }
 
 class DailyNutritionSummary {

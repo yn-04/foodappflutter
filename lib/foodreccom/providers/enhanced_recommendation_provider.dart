@@ -19,8 +19,6 @@ import '../models/filter_options.dart';
 import '../utils/ingredient_utils.dart';
 import '../utils/ingredient_translator.dart';
 import '../utils/allergy_utils.dart';
-import 'package:my_app/foodreccom/services/enhanced_ai_recommendation_service.dart';
-import 'package:my_app/rawmaterial/models/shopping_item.dart';
 
 class EnhancedRecommendationProvider extends ChangeNotifier {
   static const int _minimumRecommendationCount = 12;
@@ -664,7 +662,6 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
       notifyListeners();
       if (_autoRefreshScheduledWhileLoading) {
         _autoRefreshScheduledWhileLoading = false;
-        _scheduleAutoRefresh(delay: const Duration(milliseconds: 200));
       }
     }
   }
@@ -1021,22 +1018,6 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     return parts.isEmpty ? null : parts.join(' • ');
   }
 
-  Future<Map<String, dynamic>?> generateWeeklyMealPlan({
-    required List<ShoppingItem> pantryItems,
-  }) async {
-    if (!_healthLoaded) {
-      await _loadHealthProfile();
-    }
-    final profile = _buildHealthProfileForAI();
-    final notes = _buildDietaryNotesForAI();
-    final service = EnhancedAIRecommendationService();
-    return service.generateWeeklyMealPlan(
-      pantryItems: pantryItems,
-      userProfile: profile.isEmpty ? null : profile,
-      dietaryNotes: notes,
-    );
-  }
-
   bool _containsAllergen(RecipeModel r) {
     if (_allergies.isEmpty) return false;
     final expansion = AllergyUtils.expandAllergens(_allergies);
@@ -1170,18 +1151,9 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
   }) {
     if (_isDisposed) return;
     _autoRefreshDebounce?.cancel();
-    if (_isLoading) {
-      _autoRefreshScheduledWhileLoading = true;
-      return;
-    }
-    _autoRefreshDebounce = Timer(delay, () {
-      _autoRefreshDebounce = null;
-      if (_isLoading) {
-        _autoRefreshScheduledWhileLoading = true;
-        return;
-      }
-      getHybridRecommendations();
-    });
+    _autoRefreshDebounce = null;
+    _autoRefreshScheduledWhileLoading = false;
+    // การแนะนำเมนูอัตโนมัติถูกปิดไว้ ให้ผู้ใช้กดปุ่มรีเฟรชเองเท่านั้น
   }
 
   String _norm(String s) {
