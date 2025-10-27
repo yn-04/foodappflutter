@@ -37,128 +37,149 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final bottomInset = media.viewInsets.bottom;
-    return SafeArea(
-      top: false,
-      child: SizedBox(
-        height: media.size.height,
-        child: Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 28,
-            bottom: bottomInset > 16 ? bottomInset : 16,
-          ),
-          child: Form(
-            key: _formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[400],
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'เพิ่มเมนูของฉัน',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _name,
-                    decoration: const InputDecoration(
-                      labelText: 'ชื่อเมนู (จำเป็น)',
-                    ),
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'กรุณากรอกชื่อเมนู'
-                        : null,
-                  ),
-                  TextFormField(
-                    controller: _imageUrl,
-                    decoration: const InputDecoration(
-                      labelText: 'ลิงก์รูปภาพ (ไม่บังคับ)',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _servingsCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'เสิร์ฟ (ที่)',
-                          ),
-                          keyboardType: TextInputType.number,
-                          validator: (v) {
-                            final value = int.tryParse(v ?? '');
-                            if (value == null || value <= 0) {
-                              return 'กรุณาระบุจำนวนเสิร์ฟ';
-                            }
-                            return null;
-                          },
-                          onChanged: (v) => _servings = int.tryParse(v) ?? 2,
+    final contentPadding = EdgeInsets.only(
+      left: 16,
+      right: 16,
+      top: 16,
+      bottom: bottomInset > 16 ? bottomInset : 16,
+    );
+
+    return PopScope(
+      canPop: true,
+      onPopInvoked: (didPop) {
+        if (!didPop) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        child: Material(
+          color: Colors.white,
+          child: SafeArea(
+            top: true,
+            child: SizedBox(
+              height: media.size.height,
+              child: Padding(
+                padding: contentPadding,
+                child: Form(
+                  key: _formKey,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.arrow_back),
+                              onPressed: () => Navigator.of(context).pop(),
+                            ),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'เพิ่มเมนูของฉัน',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 48),
+                          ],
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _cookMinCtrl,
+                        const Divider(height: 24),
+                        TextFormField(
+                          controller: _name,
                           decoration: const InputDecoration(
-                            labelText: 'เวลาทำ (นาที)',
+                            labelText: 'ชื่อเมนู (จำเป็น)',
                           ),
-                          keyboardType: TextInputType.number,
-                          validator: (v) {
-                            final value = int.tryParse(v ?? '');
-                            if (value == null || value <= 0) {
-                              return 'กรุณาระบุเวลาทำ';
-                            }
-                            return null;
-                          },
-                          onChanged: (v) => _cookMin = int.tryParse(v) ?? 20,
+                          validator: (v) => (v == null || v.trim().isEmpty)
+                              ? 'กรุณากรอกชื่อเมนู'
+                              : null,
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: _ingredients,
-                    maxLines: 5,
-                    decoration: const InputDecoration(
-                      labelText: 'วัตถุดิบ (บรรทัดละ 1 รายการ)',
-                      hintText: 'เช่น\nข้าว 1 ถ้วย\nไข่ 2 ฟอง\nหมูสับ 100 กรัม',
+                        TextFormField(
+                          controller: _imageUrl,
+                          decoration: const InputDecoration(
+                            labelText: 'ลิงก์รูปภาพ (ไม่บังคับ)',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: _servingsCtrl,
+                                decoration: const InputDecoration(
+                                  labelText: 'เสิร์ฟ (ที่)',
+                                ),
+                                keyboardType: TextInputType.number,
+                                validator: (v) {
+                                  final value = int.tryParse(v ?? '');
+                                  if (value == null || value <= 0) {
+                                    return 'กรุณาระบุจำนวนเสิร์ฟ';
+                                  }
+                                  return null;
+                                },
+                                onChanged: (v) => _servings = int.tryParse(v) ?? 2,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TextFormField(
+                                controller: _cookMinCtrl,
+                                decoration: const InputDecoration(
+                                  labelText: 'เวลาทำ (นาที)',
+                                ),
+                                keyboardType: TextInputType.number,
+                                validator: (v) {
+                                  final value = int.tryParse(v ?? '');
+                                  if (value == null || value <= 0) {
+                                    return 'กรุณาระบุเวลาทำ';
+                                  }
+                                  return null;
+                                },
+                                onChanged: (v) => _cookMin = int.tryParse(v) ?? 20,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _ingredients,
+                          maxLines: 5,
+                          decoration: const InputDecoration(
+                            labelText: 'วัตถุดิบ (บรรทัดละ 1 รายการ)',
+                            hintText: 'เช่น\nข้าว 1 ถ้วย\nไข่ 2 ฟอง\nหมูสับ 100 กรัม',
+                          ),
+                          validator: (v) => (v == null || v.trim().isEmpty)
+                              ? 'กรุณาระบุวัตถุดิบ'
+                              : null,
+                        ),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _steps,
+                          maxLines: 6,
+                          decoration: const InputDecoration(
+                            labelText: 'วิธีทำ (บรรทัดละ 1 ขั้นตอน)',
+                          ),
+                          validator: (v) => (v == null || v.trim().isEmpty)
+                              ? 'กรุณาระบุขั้นตอนการทำ'
+                              : null,
+                        ),
+                        const SizedBox(height: 16),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: ElevatedButton.icon(
+                            onPressed: _save,
+                            icon: const Icon(Icons.save),
+                            label: const Text('บันทึก'),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
                     ),
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'กรุณาระบุวัตถุดิบ'
-                        : null,
                   ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: _steps,
-                    maxLines: 6,
-                    decoration: const InputDecoration(
-                      labelText: 'วิธีทำ (บรรทัดละ 1 ขั้นตอน)',
-                    ),
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'กรุณาระบุขั้นตอนการทำ'
-                        : null,
-                  ),
-                  const SizedBox(height: 16),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ElevatedButton.icon(
-                      onPressed: _save,
-                      icon: const Icon(Icons.save),
-                      label: const Text('บันทึก'),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
+                ),
               ),
             ),
           ),
@@ -167,12 +188,15 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
     );
   }
 
+
   Future<void> _save() async {
     final missing = _missingFields();
     if (!_formKey.currentState!.validate()) {
       if (missing.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('กรุณากรอก: ${missing.join(', ')}')),
+          SnackBar(
+            content: Text('กรุณากรอก: ${missing.join(', ')}'),
+          ),
         );
       }
       return;
@@ -207,17 +231,15 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
     final recipe = baseRecipe.copyWith(nutrition: estimated);
 
     try {
-      await context.read<EnhancedRecommendationProvider>().addUserRecipe(
-        recipe,
-      );
+      await context.read<EnhancedRecommendationProvider>().addUserRecipe(recipe);
       if (mounted) Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('บันทึกเมนูของฉันเรียบร้อย')),
       );
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('บันทึกล้มเหลว: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('บันทึกล้มเหลว: $e')),
+      );
     }
   }
 
@@ -234,24 +256,17 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   }
 
   List<RecipeIngredient> _parseIngredients(String text) {
-    final lines = text
-        .split(RegExp(r'\r?\n'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty);
+    final lines = text.split(RegExp(r'\r?\n')).map((e) => e.trim()).where((e) => e.isNotEmpty);
     return lines.map((l) {
       // very simple split: first token as name until two last tokens amount+unit if numeric exists
       final parts = l.split(RegExp(r'\s+'));
       if (parts.length >= 2) {
-        final amount =
-            double.tryParse(parts[parts.length - 2]) ??
-            double.tryParse(parts.last) ??
-            1.0;
+        final amount = double.tryParse(parts[parts.length - 2]) ??
+            double.tryParse(parts.last) ?? 1.0;
         final unit = amount == (double.tryParse(parts.last) ?? -1)
             ? ''
             : parts.last;
-        final name = parts
-            .sublist(0, parts.length - (unit.isEmpty ? 1 : 2))
-            .join(' ');
+        final name = parts.sublist(0, parts.length - (unit.isEmpty ? 1 : 2)).join(' ');
         return RecipeIngredient(name: name, amount: amount, unit: unit);
       }
       return RecipeIngredient(name: l, amount: 1.0, unit: '');
@@ -259,14 +274,8 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   }
 
   List<CookingStep> _parseSteps(String text) {
-    final lines = text
-        .split(RegExp(r'\r?\n'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
+    final lines = text.split(RegExp(r'\r?\n')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
     var i = 1;
-    return lines
-        .map((l) => CookingStep(stepNumber: i++, instruction: l))
-        .toList();
+    return lines.map((l) => CookingStep(stepNumber: i++, instruction: l)).toList();
   }
 }

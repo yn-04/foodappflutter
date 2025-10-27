@@ -55,7 +55,7 @@ class RecipeDetailSheet extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    '${recipe.matchScore}%',
+                    '${recipe.matchScoreLabel}%',
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
