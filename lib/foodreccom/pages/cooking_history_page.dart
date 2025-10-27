@@ -16,7 +16,10 @@ class CookingHistoryPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text(
           'เมนูที่เคยทำ',
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         backgroundColor: Colors.white,
         elevation: 0,
@@ -58,12 +61,10 @@ class CookingHistoryPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    ...items.map(
-                      (item) => _HistoryTile(
-                        history: item,
-                        onTap: () => _showHistoryDetail(context, item),
-                      ),
-                    ),
+                    ...items.map((item) => _HistoryTile(
+                          history: item,
+                          onTap: () => _showHistoryDetail(context, item),
+                        )),
                     const SizedBox(height: 20),
                   ],
                 );
@@ -76,17 +77,15 @@ class CookingHistoryPage extends StatelessWidget {
   }
 
   List<MapEntry<String, List<CookingHistory>>> _groupByDate(
-    List<CookingHistory> history,
-  ) {
+      List<CookingHistory> history) {
     final map = <String, List<CookingHistory>>{};
     for (final item in history) {
       final label = _formatThaiDate(item.cookedAt);
       map.putIfAbsent(label, () => []).add(item);
     }
     final entries = map.entries.toList();
-    entries.sort(
-      (a, b) => b.value.first.cookedAt.compareTo(a.value.first.cookedAt),
-    );
+    entries.sort((a, b) =>
+        b.value.first.cookedAt.compareTo(a.value.first.cookedAt));
     return entries;
   }
 
@@ -132,7 +131,10 @@ class CookingHistoryPage extends StatelessWidget {
         info.sodium.abs() > threshold;
   }
 
-  Widget _nutritionRow({required String label, required double total}) {
+  Widget _nutritionRow({
+    required String label,
+    required double total,
+  }) {
     const threshold = 0.01;
     if (total.abs() <= threshold) return const SizedBox.shrink();
 
@@ -143,10 +145,18 @@ class CookingHistoryPage extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(child: Text(label, style: const TextStyle(fontSize: 14))),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 14),
+            ),
+          ),
           Text(
             valueText,
-            style: const TextStyle(fontSize: 13, color: Colors.black54),
+            style: const TextStyle(
+              fontSize: 13,
+              color: Colors.black54,
+            ),
             textAlign: TextAlign.right,
           ),
         ],
@@ -229,11 +239,8 @@ class CookingHistoryPage extends StatelessWidget {
                         children: [
                           const SizedBox(
                             width: 24,
-                            child: Icon(
-                              Icons.check_circle,
-                              size: 16,
-                              color: Colors.orange,
-                            ),
+                            child: Icon(Icons.check_circle,
+                                size: 16, color: Colors.orange),
                           ),
                           Expanded(
                             child: Text(
@@ -264,11 +271,8 @@ class CookingHistoryPage extends StatelessWidget {
                         children: [
                           const SizedBox(
                             width: 24,
-                            child: Icon(
-                              Icons.kitchen_outlined,
-                              size: 16,
-                              color: Colors.green,
-                            ),
+                            child: Icon(Icons.kitchen_outlined,
+                                size: 16, color: Colors.green),
                           ),
                           Expanded(
                             child: Column(
@@ -322,7 +326,10 @@ class CookingHistoryPage extends StatelessWidget {
                     label: 'คาร์บ (g)',
                     total: totalNutrition.carbs,
                   ),
-                  _nutritionRow(label: 'ไขมัน (g)', total: totalNutrition.fat),
+                  _nutritionRow(
+                    label: 'ไขมัน (g)',
+                    total: totalNutrition.fat,
+                  ),
                   _nutritionRow(
                     label: 'ไฟเบอร์ (g)',
                     total: totalNutrition.fiber,
@@ -453,7 +460,10 @@ class _HistoryTile extends StatelessWidget {
   final CookingHistory history;
   final VoidCallback onTap;
 
-  const _HistoryTile({required this.history, required this.onTap});
+  const _HistoryTile({
+    required this.history,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {

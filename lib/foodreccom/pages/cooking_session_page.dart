@@ -66,46 +66,57 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
     final theme = Theme.of(context);
     final tipsSection = _buildTipsSection(theme);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('เริ่มทำ: ${widget.recipe.name}'),
-        actions: const [],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _completing ? null : _completeCooking,
-        icon: _completing
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
-            : const Icon(Icons.check_circle_outline),
-        label: Text(_completing ? 'กำลังบันทึก...' : 'เสร็จแล้ว'),
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 16),
-              RecipeYoutubeSection(recipe: widget.recipe),
-              const SizedBox(height: 16),
-              tipsSection,
-              if (tipsSection is! SizedBox) const SizedBox(height: 16),
-              if (_equipment.isNotEmpty) ...[
-                _buildEquipmentSection(theme),
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        Navigator.of(context).pop(true);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: BackButton(
+            onPressed: () => Navigator.of(context).pop(true),
+          ),
+          title: Text('เริ่มทำ: ${widget.recipe.name}'),
+          actions: const [],
+        ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _completing ? null : _completeCooking,
+          icon: _completing
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.check_circle_outline),
+          label: Text(_completing ? 'กำลังบันทึก...' : 'เสร็จแล้ว'),
+        ),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 const SizedBox(height: 16),
+                RecipeYoutubeSection(recipe: widget.recipe),
+                const SizedBox(height: 16),
+                tipsSection,
+                if (tipsSection is! SizedBox) const SizedBox(height: 16),
+                if (_equipment.isNotEmpty) ...[
+                  _buildEquipmentSection(theme),
+                  const SizedBox(height: 16),
+                ],
+                _buildIngredientChecklist(theme),
+                const SizedBox(height: 16),
+                _buildStepsSection(theme),
+                const SizedBox(height: 16),
+                _buildNotesSection(theme),
               ],
-              _buildIngredientChecklist(theme),
-              const SizedBox(height: 16),
-              _buildStepsSection(theme),
-              const SizedBox(height: 16),
-              _buildNotesSection(theme),
-            ],
+            ),
           ),
         ),
       ),
