@@ -407,12 +407,15 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                   menuMaxHeight: 320,
                                   items: Categories.list.map((c) {
                                     final icon = Categories.iconFor(c);
-                                    final color = Categories.colorFor(c);
                                     return DropdownMenuItem(
                                       value: c,
                                       child: Row(
                                         children: [
-                                          Icon(icon, size: 18, color: color),
+                                          Icon(
+                                            icon,
+                                            size: 18,
+                                            color: Colors.black87,
+                                          ),
                                           const SizedBox(width: 8),
                                           Expanded(
                                             child: Text(
@@ -428,10 +431,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                   selectedItemBuilder: (context) {
                                     return Categories.list.map((c) {
                                       final icon = Categories.iconFor(c);
-                                      final color = Categories.colorFor(c);
                                       return Row(
                                         children: [
-                                          Icon(icon, size: 18, color: color),
+                                          Icon(
+                                            icon,
+                                            size: 18,
+                                            color: Colors.black87,
+                                          ),
                                           const SizedBox(width: 8),
                                           Flexible(
                                             child: Text(
@@ -793,12 +799,15 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                     menuMaxHeight: 320,
                                     items: Categories.list.map((c) {
                                       final icon = Categories.iconFor(c);
-                                      final color = Categories.colorFor(c);
                                       return DropdownMenuItem(
                                         value: c,
                                         child: Row(
                                           children: [
-                                            Icon(icon, size: 18, color: color),
+                                            Icon(
+                                              icon,
+                                              size: 18,
+                                              color: Colors.black87,
+                                            ),
                                             const SizedBox(width: 8),
                                             Expanded(
                                               child: Text(
@@ -815,10 +824,13 @@ class _ItemDetailPageState extends State<ItemDetailPage> {
                                     selectedItemBuilder: (context) {
                                       return Categories.list.map((c) {
                                         final icon = Categories.iconFor(c);
-                                        final color = Categories.colorFor(c);
                                         return Row(
                                           children: [
-                                            Icon(icon, size: 18, color: color),
+                                            Icon(
+                                              icon,
+                                              size: 18,
+                                              color: Colors.black87,
+                                            ),
                                             const SizedBox(width: 8),
                                             Flexible(
                                               child: Text(
