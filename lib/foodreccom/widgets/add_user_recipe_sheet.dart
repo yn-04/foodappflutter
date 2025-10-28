@@ -120,7 +120,8 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                                   }
                                   return null;
                                 },
-                                onChanged: (v) => _servings = int.tryParse(v) ?? 2,
+                                onChanged: (v) =>
+                                    _servings = int.tryParse(v) ?? 2,
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -138,7 +139,8 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                                   }
                                   return null;
                                 },
-                                onChanged: (v) => _cookMin = int.tryParse(v) ?? 20,
+                                onChanged: (v) =>
+                                    _cookMin = int.tryParse(v) ?? 20,
                               ),
                             ),
                           ],
@@ -149,7 +151,8 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                           maxLines: 5,
                           decoration: const InputDecoration(
                             labelText: 'วัตถุดิบ (บรรทัดละ 1 รายการ)',
-                            hintText: 'เช่น\nข้าว 1 ถ้วย\nไข่ 2 ฟอง\nหมูสับ 100 กรัม',
+                            hintText:
+                                'เช่น\nข้าว 1 ถ้วย\nไข่ 2 ฟอง\nหมูสับ 100 กรัม',
                           ),
                           validator: (v) => (v == null || v.trim().isEmpty)
                               ? 'กรุณาระบุวัตถุดิบ'
@@ -188,15 +191,12 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
     );
   }
 
-
   Future<void> _save() async {
     final missing = _missingFields();
     if (!_formKey.currentState!.validate()) {
       if (missing.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('กรุณากรอก: ${missing.join(', ')}'),
-          ),
+          SnackBar(content: Text('กรุณากรอก: ${missing.join(', ')}')),
         );
       }
       return;
@@ -208,6 +208,7 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
     final baseRecipe = RecipeModel(
       id: 'user_${DateTime.now().millisecondsSinceEpoch}',
       name: _name.text.trim(),
+      originalName: _name.text.trim(),
       description: '',
       matchScore: 90,
       reason: '',
@@ -231,15 +232,17 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
     final recipe = baseRecipe.copyWith(nutrition: estimated);
 
     try {
-      await context.read<EnhancedRecommendationProvider>().addUserRecipe(recipe);
+      await context.read<EnhancedRecommendationProvider>().addUserRecipe(
+        recipe,
+      );
       if (mounted) Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('บันทึกเมนูของฉันเรียบร้อย')),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('บันทึกล้มเหลว: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('บันทึกล้มเหลว: $e')));
     }
   }
 
@@ -256,17 +259,24 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   }
 
   List<RecipeIngredient> _parseIngredients(String text) {
-    final lines = text.split(RegExp(r'\r?\n')).map((e) => e.trim()).where((e) => e.isNotEmpty);
+    final lines = text
+        .split(RegExp(r'\r?\n'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty);
     return lines.map((l) {
       // very simple split: first token as name until two last tokens amount+unit if numeric exists
       final parts = l.split(RegExp(r'\s+'));
       if (parts.length >= 2) {
-        final amount = double.tryParse(parts[parts.length - 2]) ??
-            double.tryParse(parts.last) ?? 1.0;
+        final amount =
+            double.tryParse(parts[parts.length - 2]) ??
+            double.tryParse(parts.last) ??
+            1.0;
         final unit = amount == (double.tryParse(parts.last) ?? -1)
             ? ''
             : parts.last;
-        final name = parts.sublist(0, parts.length - (unit.isEmpty ? 1 : 2)).join(' ');
+        final name = parts
+            .sublist(0, parts.length - (unit.isEmpty ? 1 : 2))
+            .join(' ');
         return RecipeIngredient(name: name, amount: amount, unit: unit);
       }
       return RecipeIngredient(name: l, amount: 1.0, unit: '');
@@ -274,8 +284,14 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
   }
 
   List<CookingStep> _parseSteps(String text) {
-    final lines = text.split(RegExp(r'\r?\n')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final lines = text
+        .split(RegExp(r'\r?\n'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
     var i = 1;
-    return lines.map((l) => CookingStep(stepNumber: i++, instruction: l)).toList();
+    return lines
+        .map((l) => CookingStep(stepNumber: i++, instruction: l))
+        .toList();
   }
 }

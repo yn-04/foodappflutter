@@ -1,6 +1,7 @@
 //lib/foodreccom/widgets/recipe_card.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/recipe/recipe.dart';
 import '../utils/recipe_image_helper.dart';
 import '../constants/nutrition_thresholds.dart';
@@ -30,6 +31,21 @@ class RecipeCard extends StatelessWidget {
       compact ? 12.0 : 14.0,
     );
     final double? compactImageHeight = compact ? 280 : null;
+    final sourceLabel = (recipe.source ?? '').trim();
+    final hasSourceBadge = showSourceBadge && sourceLabel.isNotEmpty;
+    final sourceUrl = recipe.sourceUrl?.trim() ?? '';
+    Uri? sourceUri;
+    if (sourceUrl.isNotEmpty) {
+      sourceUri = Uri.tryParse(sourceUrl);
+      if (sourceUri == null ||
+          sourceUri.scheme.isEmpty ||
+          sourceUri.host.isEmpty) {
+        final normalized = Uri.tryParse('https://$sourceUrl');
+        if (normalized != null && normalized.host.isNotEmpty) {
+          sourceUri = normalized;
+        }
+      }
+    }
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 3,
@@ -132,6 +148,11 @@ class RecipeCard extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
+
+              if (hasSourceBadge) ...[
+                const SizedBox(height: 6),
+                _SourceReferenceChip(label: sourceLabel, uri: sourceUri),
+              ],
 
               const SizedBox(height: 8),
 
@@ -360,4 +381,80 @@ class _FrequencyDisplay {
   final MaterialColor color;
 
   const _FrequencyDisplay({required this.label, required this.color});
+}
+
+class _SourceReferenceChip extends StatelessWidget {
+  final String label;
+  final Uri? uri;
+
+  const _SourceReferenceChip({required this.label, required this.uri});
+
+  @override
+  Widget build(BuildContext context) {
+    final isClickable = uri != null && uri!.host.isNotEmpty;
+    final displayLabel = label.isNotEmpty
+        ? label
+        : (uri != null ? uri!.host : 'แหล่งอ้างอิง');
+    final tooltipMessage = uri?.toString() ?? displayLabel;
+    final textColor = isClickable ? Colors.blue[700] : Colors.blueGrey[700];
+    final iconColor = isClickable ? Colors.blue : Colors.blueGrey[600];
+
+    Future<void> openLink() async {
+      if (!isClickable) return;
+      try {
+        final target = uri!;
+        bool launched = await launchUrl(
+          target,
+          mode: LaunchMode.externalApplication,
+        );
+        if (!launched) {
+          launched = await launchUrl(target, mode: LaunchMode.inAppWebView);
+        }
+        if (!launched) {
+          launched = await launchUrl(target, mode: LaunchMode.platformDefault);
+        }
+        if (!launched) {
+          _showLinkError(context);
+        }
+      } catch (_) {
+        _showLinkError(context);
+      }
+    }
+
+    return InkWell(
+      onTap: isClickable ? () => openLink() : null,
+      borderRadius: BorderRadius.circular(8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(Icons.link, size: 14, color: iconColor),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Tooltip(
+              message: tooltipMessage,
+              child: Text(
+                'อ้างอิง: $displayLabel',
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  decoration: isClickable
+                      ? TextDecoration.underline
+                      : TextDecoration.none,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLinkError(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('ไม่สามารถเปิดลิงก์แหล่งอ้างอิงได้')),
+    );
+  }
 }
