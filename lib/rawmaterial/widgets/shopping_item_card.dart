@@ -56,7 +56,6 @@ class ShoppingItemCard extends StatelessWidget {
     final String displayUnit = Units.safe(groupUnit ?? item.unit);
     final String displayCategory = groupCategory ?? item.category;
     final DateTime? displayExpiry = groupEarliestExpiry ?? item.expiryDate;
-    final Color categoryColor = Categories.colorFor(displayCategory);
 
     int? d;
     if (displayExpiry != null) {
@@ -105,10 +104,10 @@ class ShoppingItemCard extends StatelessWidget {
         child: Row(
           children: [
             CircleAvatar(
-              backgroundColor: categoryColor.withAlpha((255 * 0.16).round()),
+              backgroundColor: Colors.grey[200],
               child: Icon(
                 Categories.iconFor(displayCategory),
-                color: categoryColor,
+                color: Colors.grey[700],
               ),
             ),
             const SizedBox(width: 12),
