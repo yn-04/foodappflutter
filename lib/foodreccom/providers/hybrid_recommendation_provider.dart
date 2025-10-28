@@ -108,6 +108,50 @@ class HybridRecommendationProvider extends ChangeNotifier {
     return r.missingIngredients.length <= 2;
   }).toList();
 
+  List<RecipeModel> get simpleMatchedRecipes {
+    final picks = <RecipeModel>[];
+    final seen = <String>{};
+
+    void addFrom(List<_SimpleRecipeCandidate> source) {
+      for (final entry in source) {
+        if (seen.add(entry.recipe.id)) {
+          picks.add(entry.recipe);
+        }
+        if (picks.length >= 3) break;
+      }
+    }
+
+    addFrom(
+      _collectSimpleCandidates(
+        maxIngredients: 6,
+        maxMissing: 0,
+        minRatio: 0.85,
+      ),
+    );
+
+    if (picks.length < 3) {
+      addFrom(
+        _collectSimpleCandidates(
+          maxIngredients: 8,
+          maxMissing: 1,
+          minRatio: 0.75,
+        ),
+      );
+    }
+
+    if (picks.length < 3) {
+      addFrom(
+        _collectSimpleCandidates(
+          maxIngredients: 12,
+          maxMissing: 2,
+          minRatio: 0.6,
+        ),
+      );
+    }
+
+    return picks.take(3).toList();
+  }
+
   // -------- Load Data --------
   Future<void> loadIngredients() async {
     if (_isLoadingIngredients) return;
@@ -356,9 +400,7 @@ class HybridRecommendationProvider extends ChangeNotifier {
 
   // -------- Helper --------
   bool _ingredientsMatch(String available, String required) {
-    final a = available.toLowerCase();
-    final r = required.toLowerCase();
-    return a.contains(r) || r.contains(a);
+    return ingredientsMatch(available, required);
   }
 
   // ใช้ logic จาก utils/ingredient_utils + cross-language (TH↔EN)
@@ -475,6 +517,55 @@ class HybridRecommendationProvider extends ChangeNotifier {
     }
     if (trimmed.isEmpty) return summary;
     return '$summary\n$trimmed';
+  }
+
+  List<_SimpleRecipeCandidate> _collectSimpleCandidates({
+    required int maxIngredients,
+    required int maxMissing,
+    required double minRatio,
+  }) {
+    final candidates = <_SimpleRecipeCandidate>[];
+
+    for (final recipe in allRecommendations) {
+      final ingredientCount = _countUniqueIngredients(recipe.ingredients);
+      if (ingredientCount == 0 || ingredientCount > maxIngredients) continue;
+
+      final missingCount = recipe.missingIngredients.length;
+      if (missingCount > maxMissing) continue;
+
+      final ratio = recipe.matchRatio > 0
+          ? recipe.matchRatio
+          : recipe.matchScore / 100;
+      if (ratio < minRatio) continue;
+
+      candidates.add(
+        _SimpleRecipeCandidate(
+          recipe: recipe,
+          ingredientCount: ingredientCount,
+          ratio: ratio,
+          missingCount: missingCount,
+        ),
+      );
+    }
+
+    candidates.sort(_compareSimpleCandidates);
+    return candidates;
+  }
+
+  int _compareSimpleCandidates(
+    _SimpleRecipeCandidate a,
+    _SimpleRecipeCandidate b,
+  ) {
+    final missingCompare = a.missingCount.compareTo(b.missingCount);
+    if (missingCompare != 0) return missingCompare;
+
+    final ingredientCompare = a.ingredientCount.compareTo(b.ingredientCount);
+    if (ingredientCompare != 0) return ingredientCompare;
+
+    final ratioCompare = b.ratio.compareTo(a.ratio);
+    if (ratioCompare != 0) return ratioCompare;
+
+    return a.recipe.name.toLowerCase().compareTo(b.recipe.name.toLowerCase());
   }
 
   List<String> _computeMissingIngredients(RecipeModel recipe) {
@@ -738,6 +829,20 @@ class HybridRecommendationProvider extends ChangeNotifier {
     if (n.contains('ขวด') || n.contains('กระป๋อง')) return 'ชิ้น';
     return 'กรัม';
   }
+}
+
+class _SimpleRecipeCandidate {
+  final RecipeModel recipe;
+  final int ingredientCount;
+  final double ratio;
+  final int missingCount;
+
+  _SimpleRecipeCandidate({
+    required this.recipe,
+    required this.ingredientCount,
+    required this.ratio,
+    required this.missingCount,
+  });
 }
 
 class _RecipeMatchScore {

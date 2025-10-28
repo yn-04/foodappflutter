@@ -109,11 +109,15 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
       _recommendations.where(_isUserRecipe).toList();
   List<RecipeModel> get hybridRecommendations =>
       _recommendations.where((r) => !_isUserRecipe(r)).toList();
+  List<RecipeModel> get aiRecommendations =>
+      _recommendations.where(_isAiRecipe).toList();
+  List<RecipeModel> get simpleMatchedRecipes => _selectSimpleMatchedRecipes();
   List<String> get availableIngredientNames {
     final seen = <String>{};
     final names = <String>[];
     for (final item in _ingredients) {
       if (item.isExpired) continue;
+      if (!item.quantity.isFinite || item.quantity < 1) continue;
       final raw = item.name.trim();
       if (raw.isEmpty) continue;
       final key = _norm(raw);
@@ -153,6 +157,20 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     }
     final reason = recipe.reason.trim().toLowerCase();
     if (reason.contains('ผู้ใช้') || reason.contains('user')) {
+      return true;
+    }
+    return false;
+  }
+
+  bool _isAiRecipe(RecipeModel recipe) {
+    if (_isUserRecipe(recipe)) return false;
+    if (recipe.tags.any((tag) => tag.trim().toLowerCase() == 'ai')) {
+      return true;
+    }
+    final source = (recipe.source ?? '').trim().toLowerCase();
+    if (source.contains('ai model')) return true;
+    final reason = recipe.reason.trim().toLowerCase();
+    if (reason.contains('ai') && reason.contains('match score')) {
       return true;
     }
     return false;
@@ -599,9 +617,17 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
 
       _lastHybridResult = result;
 
-      // ✅ รวมสูตรผู้ใช้ + ภายนอก (ผู้ใช้มาก่อน)
+      // ✅ รวมสูตรผู้ใช้ + AI + ภายนอก (ผู้ใช้มาก่อน)
+      final ai = result.aiRecommendations;
       final external = result.externalRecipes;
-      final recipes = [..._userRecipes, ...external];
+      final merged = <RecipeModel>[];
+      final seenIds = <String>{};
+      for (final recipe in [..._userRecipes, ...ai, ...external]) {
+        if (seenIds.add(recipe.id)) {
+          merged.add(recipe);
+        }
+      }
+      final recipes = merged;
 
       if (recipes.isEmpty) {
         debugPrint("⚠️ ไม่มีเมนูจาก RapidAPI → ใช้ fallback");
@@ -609,6 +635,7 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
           RecipeModel(
             id: 'fallback_basic',
             name: 'ข้าวผัดไข่',
+            originalName: 'ข้าวผัดไข่',
             description: 'เมนูง่าย ๆ ใช้วัตถุดิบพื้นฐาน',
             matchScore: 60,
             reason: 'แนะนำ fallback เพราะไม่มีเมนูจาก API',
@@ -634,14 +661,27 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
       } else {
         // แปลเป็นภาษาไทยก่อน เพื่อให้ชื่อวัตถุดิบตรงกับสต็อกผู้ใช้
         final translated = await ThaiRecipeAdapter.translateRecipes(recipes);
-        // คำนวณวัตถุดิบที่ขาด เทียบกับคลังวัตถุดิบผู้ใช้ (ภาษาไทย)
         final safe = translated.where((r) => !_containsAllergen(r)).toList();
-        _recommendations = safe
+        final computed = safe
             .map(
               (r) =>
                   r.copyWith(missingIngredients: _computeMissingIngredients(r)),
             )
             .toList();
+        final computedMap = {for (final recipe in computed) recipe.id: recipe};
+        result.aiRecommendations = result.aiRecommendations.map((recipe) {
+          final updated = computedMap[recipe.id];
+          return updated ?? recipe;
+        }).toList();
+        result.externalRecipes = result.externalRecipes.map((recipe) {
+          final updated = computedMap[recipe.id];
+          return updated ?? recipe;
+        }).toList();
+        result.combinedRecommendations = [
+          ...result.aiRecommendations,
+          ...result.externalRecipes,
+        ];
+        _recommendations = computed;
       }
 
       if (_recommendations.isEmpty) {
@@ -824,6 +864,7 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     return RecipeModel(
       id: id,
       name: name,
+      originalName: name,
       description: description,
       matchScore: 55,
       reason: 'เมนูสำรองเพื่อเติมจำนวนคำแนะนำ',
@@ -1154,6 +1195,82 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     _autoRefreshDebounce = null;
     _autoRefreshScheduledWhileLoading = false;
     // การแนะนำเมนูอัตโนมัติถูกปิดไว้ ให้ผู้ใช้กดปุ่มรีเฟรชเองเท่านั้น
+  }
+
+  List<RecipeModel> _selectSimpleMatchedRecipes() {
+    if (_recommendations.isEmpty) return [];
+
+    const rules = [
+      _SimpleRule(maxIngredients: 6, maxMissing: 0, minRatio: 0.85),
+      _SimpleRule(maxIngredients: 8, maxMissing: 1, minRatio: 0.75),
+      _SimpleRule(maxIngredients: 12, maxMissing: 2, minRatio: 0.6),
+    ];
+
+    final picks = <RecipeModel>[];
+    final seen = <String>{};
+    final base = hybridRecommendations.where((r) => !_isAiRecipe(r)).toList();
+
+    for (final rule in rules) {
+      final candidates = <_SimpleCandidate>[];
+
+      for (final recipe in base) {
+        if (seen.contains(recipe.id)) continue;
+        final ingredientCount = _countUniqueIngredients(recipe);
+        if (ingredientCount == 0 || ingredientCount > rule.maxIngredients) {
+          continue;
+        }
+        final missingCount = recipe.missingIngredients.length;
+        if (missingCount > rule.maxMissing) continue;
+        final ratio = recipe.matchRatio > 0
+            ? recipe.matchRatio
+            : recipe.matchScore / 100;
+        if (ratio < rule.minRatio) continue;
+
+        candidates.add(
+          _SimpleCandidate(
+            recipe: recipe,
+            ingredientCount: ingredientCount,
+            missingCount: missingCount,
+            ratio: ratio,
+          ),
+        );
+      }
+
+      candidates.sort(_compareSimpleCandidates);
+
+      for (final candidate in candidates) {
+        if (seen.add(candidate.recipe.id)) {
+          picks.add(candidate.recipe);
+        }
+        if (picks.length >= 3) break;
+      }
+
+      if (picks.length >= 3) break;
+    }
+
+    return picks.take(3).toList();
+  }
+
+  int _compareSimpleCandidates(_SimpleCandidate a, _SimpleCandidate b) {
+    final missingCompare = a.missingCount.compareTo(b.missingCount);
+    if (missingCompare != 0) return missingCompare;
+
+    final ingredientCompare = a.ingredientCount.compareTo(b.ingredientCount);
+    if (ingredientCompare != 0) return ingredientCompare;
+
+    final ratioCompare = b.ratio.compareTo(a.ratio);
+    if (ratioCompare != 0) return ratioCompare;
+
+    return a.recipe.name.toLowerCase().compareTo(b.recipe.name.toLowerCase());
+  }
+
+  int _countUniqueIngredients(RecipeModel recipe) {
+    final unique = <String>{};
+    for (final ingredient in recipe.ingredients) {
+      final key = _norm(ingredient.name);
+      if (key.isNotEmpty) unique.add(key);
+    }
+    return unique.length;
   }
 
   String _norm(String s) {
@@ -1612,4 +1729,30 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     if (n.contains('ขวด') || n.contains('กระป๋อง')) return 'ชิ้น';
     return 'กรัม';
   }
+}
+
+class _SimpleRule {
+  final int maxIngredients;
+  final int maxMissing;
+  final double minRatio;
+
+  const _SimpleRule({
+    required this.maxIngredients,
+    required this.maxMissing,
+    required this.minRatio,
+  });
+}
+
+class _SimpleCandidate {
+  final RecipeModel recipe;
+  final int ingredientCount;
+  final int missingCount;
+  final double ratio;
+
+  const _SimpleCandidate({
+    required this.recipe,
+    required this.ingredientCount,
+    required this.missingCount,
+    required this.ratio,
+  });
 }
