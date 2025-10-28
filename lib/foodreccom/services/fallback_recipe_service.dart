@@ -25,6 +25,7 @@ class FallbackRecipeService {
       return RecipeModel(
         id: 'hybrid_fallback_${ing.name}',
         name: menus[ing.hashCode % menus.length],
+        originalName: menus[ing.hashCode % menus.length],
         description: 'เมนูที่ใช้ ${ing.name} เป็นหลัก',
         matchScore: ing.priorityScore,
         reason: 'Smart fallback recipe',

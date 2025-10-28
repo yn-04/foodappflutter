@@ -25,8 +25,12 @@ class ApiKeyChecker {
   Future<List<String>> checkKeys() async {
     _validKeys.clear();
     for (var key in _apiKeys) {
-      final primary = (dotenv.env['GEMINI_PRIMARY_MODEL'] ?? 'gemini-1.5-flash-8b').trim();
-      final model = GenerativeModel(model: primary.isEmpty ? 'gemini-1.5-flash-8b' : primary, apiKey: key);
+      final primary =
+          (dotenv.env['GEMINI_PRIMARY_MODEL'] ?? 'gemini-1.5-flash-8b').trim();
+      final model = GenerativeModel(
+        model: primary.isEmpty ? 'gemini-1.5-flash-8b' : primary,
+        apiKey: key,
+      );
       try {
         final response = await model
             .generateContent([Content.text("ping")])
@@ -142,7 +146,9 @@ class AIRecommendationService {
     bool forceRefresh = false, // ✅ เพิ่ม parameter นี้
   }) async {
     bool _geminiEnabled() {
-      final v = (dotenv.env['AI_GEMINI_ENABLED'] ?? 'true').trim().toLowerCase();
+      final v = (dotenv.env['AI_GEMINI_ENABLED'] ?? 'true')
+          .trim()
+          .toLowerCase();
       return !(v == 'false' || v == '0' || v == 'off');
     }
 
@@ -320,6 +326,7 @@ ${available.map((i) => '- ${i.name}: ${i.quantity} ${i.unit}').join('\n')}
         RecipeModel(
           id: 'fallback_basic',
           name: 'ข้าวผัดไข่',
+          originalName: 'ข้าวผัดไข่',
           description: 'เมนูง่าย ใช้วัตถุดิบพื้นฐาน',
           matchScore: 60,
           reason: 'เมนู fallback พื้นฐาน',
@@ -351,6 +358,7 @@ ${available.map((i) => '- ${i.name}: ${i.quantity} ${i.unit}').join('\n')}
       return RecipeModel(
         id: 'fallback_${i.name}',
         name: 'เมนูจาก${i.name}',
+        originalName: 'เมนูจาก${i.name}',
         description: 'ใช้ ${i.name} เป็นวัตถุดิบหลัก',
         matchScore: i.priorityScore,
         reason: 'เมนู fallback',

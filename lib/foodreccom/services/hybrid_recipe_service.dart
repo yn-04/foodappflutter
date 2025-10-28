@@ -7,8 +7,10 @@ import '../models/recipe/recipe_model.dart';
 import '../utils/allergy_utils.dart';
 import '../utils/ingredient_translator.dart';
 import '../utils/ingredient_utils.dart';
+import 'nutrition_estimator.dart';
 import 'enhanced_ai_recommendation_service.dart';
 import 'rapidapi_recipe_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:my_app/rawmaterial/constants/categories.dart';
@@ -412,7 +414,43 @@ ${allergyJson}
       }
       result.externalFetchTime = DateTime.now();
 
-      // ✅ 3) รวมผลลัพธ์ (ใช้ RapidAPI เท่านั้น แต่ผ่าน AI filter)
+      // ✅ 3) ขอเมนูจาก AI (เพิ่มความหลากหลาย + อ้างอิงเว็บไซต์ที่เชื่อถือได้)
+      if (selectedIngredients.isNotEmpty) {
+        try {
+          result.aiRecommendations = await _generateAiRecipes(
+            selectedIngredients: selectedIngredients,
+            inventory: eligibleIngredients,
+            allergyNames: allergySet.toList(),
+            cuisineFilters: cuisineFilters,
+            dietGoals: dietGoals,
+            minCalories: minCalories,
+            maxCalories: maxCalories,
+            minProtein: minProtein,
+            maxCarbs: maxCarbs,
+            maxFat: maxFat,
+          );
+          result.aiGenerationTime = DateTime.now();
+        } catch (e, st) {
+          print('⚠️ AI recommendation failed: $e');
+          debugPrintStack(stackTrace: st);
+          result.aiRecommendations = [];
+        }
+      }
+
+      result.aiRecommendations = result.aiRecommendations.where((recipe) {
+        if (_isDessertRecipe(recipe)) {
+          print('🍮 ข้ามเมนูของหวาน (AI): ${recipe.name}');
+          return false;
+        }
+        return true;
+      }).toList();
+
+      // ✅ 4) รวมผลลัพธ์พร้อมคำนวณ Match Score
+      result.aiRecommendations = _prioritizeRecipesBySelectedCoverage(
+        result.aiRecommendations,
+        selectedIngredients,
+      );
+
       result.externalRecipes = result.externalRecipes.where((recipe) {
         if (_isDessertRecipe(recipe)) {
           print('🍮 ข้ามเมนูของหวาน: ${recipe.name}');
@@ -426,15 +464,18 @@ ${allergyJson}
         selectedIngredients,
       );
 
-      result.combinedRecommendations = [...result.externalRecipes];
+      result.combinedRecommendations = _dedupeRecipes([
+        ...result.aiRecommendations,
+        ...result.externalRecipes,
+      ]);
 
       // Log current API usage summary to help monitor quotas
       final usage = await ApiUsageService.summary();
       print('📊 $usage');
 
-      // ✅ 4) วิเคราะห์ผลลัพธ์
+      // ✅ 5) วิเคราะห์ผลลัพธ์
       result.hybridAnalysis = HybridAnalysis.analyze(
-        aiRecipes: [], // เราใช้ AI แค่ช่วยคัดกรอง ไม่ generate เมนู
+        aiRecipes: result.aiRecommendations,
         externalRecipes: result.externalRecipes,
         urgentIngredientsCount: ingredients
             .where((i) => i.isUrgentExpiry)
@@ -449,6 +490,296 @@ ${allergyJson}
     }
 
     return result;
+  }
+
+  Future<List<RecipeModel>> _generateAiRecipes({
+    required List<IngredientModel> selectedIngredients,
+    required List<IngredientModel> inventory,
+    required List<String> allergyNames,
+    required List<String> cuisineFilters,
+    required Set<String> dietGoals,
+    int? minCalories,
+    int? maxCalories,
+    int? minProtein,
+    int? maxCarbs,
+    int? maxFat,
+  }) async {
+    if (!_isAiGenerationEnabled()) {
+      print('ℹ️ AI generation disabled → ใช้ fallback');
+      return _fallbackAiRecommendations();
+    }
+    if (selectedIngredients.isEmpty) return [];
+
+    final hostToSource = <String, String>{};
+    for (final site in _trustedReferenceSites) {
+      final url = site['url']!;
+      final host = Uri.parse(url).host.replaceFirst('www.', '').toLowerCase();
+      hostToSource[host] = site['name']!;
+    }
+
+    final ingredientLines = selectedIngredients
+        .map((ingredient) {
+          final qty = ingredient.quantity % 1 == 0
+              ? ingredient.quantity.toStringAsFixed(0)
+              : ingredient.quantity.toStringAsFixed(1);
+          final unit = ingredient.unit.trim().isEmpty
+              ? ''
+              : ' ${ingredient.unit}';
+          final expiry = ingredient.expiryDate != null
+              ? ' (หมดอายุใน ${ingredient.daysToExpiry} วัน)'
+              : '';
+          return '- ${ingredient.name}$unit x $qty$expiry';
+        })
+        .join('\n');
+
+    final nearExpiry = inventory
+        .where((i) => i.isUrgentExpiry || i.isNearExpiry)
+        .map((i) => i.name)
+        .toList();
+
+    final allergyLine = allergyNames.isEmpty
+        ? 'ไม่มี'
+        : allergyNames.join(', ');
+    final cuisineLine = cuisineFilters.isEmpty
+        ? 'เน้นอาหารไทยหรือ Asian comfort food'
+        : cuisineFilters.join(', ');
+    final dietLine = dietGoals.isEmpty ? 'ไม่มี' : dietGoals.join(', ');
+
+    final nutritionParts = <String>[];
+    if (minCalories != null || maxCalories != null) {
+      final min = minCalories != null ? '≥$minCalories' : '';
+      final max = maxCalories != null ? '≤$maxCalories' : '';
+      nutritionParts.add('แคลอรี่ $min $max'.trim());
+    }
+    if (minProtein != null) {
+      nutritionParts.add('โปรตีน ≥$minProtein g');
+    }
+    if (maxCarbs != null) {
+      nutritionParts.add('คาร์บ ≤$maxCarbs g');
+    }
+    if (maxFat != null) {
+      nutritionParts.add('ไขมัน ≤$maxFat g');
+    }
+    final nutritionLine = nutritionParts.isEmpty
+        ? 'ไม่กำหนด'
+        : nutritionParts.join(', ');
+
+    final prompt =
+        '''
+คุณคือเชฟอาหารไทยและนักโภชนาการมืออาชีพ ช่วยแนะนำ 5 เมนูที่ทำได้จริงจากคลังวัตถุดิบด้านล่างนี้
+
+วัตถุดิบหลักที่ควรใช้:
+$ingredientLines
+
+วัตถุดิบใกล้หมดอายุ: ${nearExpiry.isEmpty ? 'ไม่มี' : nearExpiry.join(', ')}
+ข้อจำกัดภูมิแพ้: $allergyLine
+ข้อจำกัดโภชนาการ: $nutritionLine
+ลักษณะอาหารที่ต้องการ: $cuisineLine
+เป้าหมายด้านไลฟ์สไตล์/อาหาร: $dietLine
+
+กฎสำคัญ:
+1. ใช้วัตถุดิบจากรายการผู้ใช้ให้มากที่สุด หลีกเลี่ยงของที่ไม่มี
+2. อนุญาตเฉพาะของครัวพื้นฐาน (น้ำปลา น้ำตาล น้ำมัน พริก กระเทียม ซีอิ๊ว) หากจำเป็น
+3. คำนวณ match_ratio = (จำนวนวัตถุดิบที่ผู้ใช้มี) / (จำนวนวัตถุดิบทั้งหมดของเมนู) และ match_score = match_ratio * 100
+4. ให้เหตุผลว่าทำไมเมนูนี้เหมาะ พร้อมสรุปว่าขาดอะไรบ้าง (ถ้ามี)
+5. อ้างอิงเว็บไซต์ที่น่าเชื่อถือจากรายการนี้เท่านั้น:
+${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").join('\n')}
+6. source_url ต้องเป็นลิงก์หน้าเมนูนั้นโดยตรง (เช่น https://www.wongnai.com/recipes/ชื่อเมนู) ห้ามใช้หน้ารวม/หน้าหลัก/หน้าค้นหา
+7. หลีกเลี่ยงเมนูของหวานหรือทอดมัน ๆ
+8. ตอบกลับเป็น JSON เดียวที่มีคีย์ "recipes" เท่านั้น ไม่มีคำอธิบายอื่น
+
+โครงสร้าง JSON ที่ต้องส่งกลับ:
+{
+  "recipes": [
+    {
+      "id": "unique_string",
+      "name": "ชื่อเมนู",
+      "description": "คำอธิบายสั้น ๆ",
+      "reason": "เหตุผลว่าทำไมเมนูนี้เหมาะกับวัตถุดิบ",
+      "category": "หมวดหมู่อาหาร",
+      "tags": ["thai", "ai", ...],
+      "match_score": 0-100,
+      "match_ratio": 0-1,
+      "ingredients": [
+        {"name": "ชื่อวัตถุดิบ", "amount": 120, "unit": "กรัม"}
+      ],
+      "missing_ingredients": [],
+      "steps": [
+        "เตรียม...", "ปรุง..."
+      ],
+      "cooking_time": 15,
+      "prep_time": 10,
+      "servings": 2,
+      "source": "ชื่อเว็บไซต์จากรายการที่อนุญาต",
+      "source_url": "ลิงก์หน้าเมนูบนเว็บไซต์นั้น"
+    }
+  ]
+}
+''';
+
+    try {
+      final response = await _aiService.generateTextSmart(prompt);
+      final parsed = _parseAiRecipeResponse(response);
+      final filtered = _filterAiRecipesByTrustedSources(parsed, hostToSource);
+      if (filtered.isNotEmpty) {
+        final enriched = _applyNutritionEstimates(filtered);
+        return _ensureFiveRecommendations(enriched);
+      }
+    } catch (e, st) {
+      print('⚠️ generateTextSmart error: $e');
+      debugPrintStack(stackTrace: st);
+    }
+
+    return _fallbackAiRecommendations();
+  }
+
+  List<RecipeModel> _filterAiRecipesByTrustedSources(
+    List<RecipeModel> recipes,
+    Map<String, String> hostToSource,
+  ) {
+    final filtered = <RecipeModel>[];
+    for (final recipe in recipes) {
+      final rawUrl = recipe.sourceUrl ?? '';
+      if (rawUrl.isEmpty) continue;
+      Uri? uri = Uri.tryParse(rawUrl);
+      if (uri == null || uri.host.isEmpty) {
+        uri = Uri.tryParse('https://$rawUrl');
+      }
+      if (uri == null || uri.host.isEmpty) continue;
+      final baseHost = uri.host.replaceFirst('www.', '').toLowerCase();
+      MapEntry<String, String>? matched;
+      for (final entry in hostToSource.entries) {
+        if (baseHost.contains(entry.key)) {
+          matched = entry;
+          break;
+        }
+      }
+      if (matched == null) continue;
+
+      final invalidPaths = {
+        '',
+        '/',
+        '/recipes',
+        '/recipes/',
+        '/menu.php',
+        '/menu.php/',
+      };
+
+      if (invalidPaths.contains(uri.path.toLowerCase())) {
+        final knownUrl = _knownRecipeLinks[_normalizeName(recipe.name)];
+        if (knownUrl == null) {
+          continue;
+        }
+        uri = Uri.tryParse(knownUrl);
+        if (uri == null || uri.host.isEmpty) continue;
+      }
+
+      final tags = {...recipe.tags, 'ai', 'trusted'};
+      filtered.add(
+        recipe.copyWith(
+          source: matched.value,
+          sourceUrl: uri.toString(),
+          tags: tags.toList(),
+        ),
+      );
+    }
+    return _dedupeRecipes(filtered).take(5).toList();
+  }
+
+  List<RecipeModel> _ensureFiveRecommendations(List<RecipeModel> current) {
+    if (current.length >= 5) {
+      return _applyNutritionEstimates(current.take(5).toList());
+    }
+    final merged = [...current];
+    final existing = merged.map((r) => _normalizeName(r.name)).toSet();
+    for (final recipe in _fallbackAiRecommendations()) {
+      if (merged.length >= 5) break;
+      final key = _normalizeName(recipe.name);
+      if (existing.add(key)) {
+        merged.add(recipe);
+      }
+    }
+    return _applyNutritionEstimates(merged.take(5).toList());
+  }
+
+  List<RecipeModel> _parseAiRecipeResponse(String? responseText) {
+    if (responseText == null || responseText.trim().isEmpty) return [];
+    try {
+      final clean = responseText
+          .replaceAll('```json', '')
+          .replaceAll('```', '')
+          .trim();
+      final decoded = jsonDecode(clean);
+      final recipesJson = decoded is Map<String, dynamic>
+          ? decoded['recipes']
+          : decoded;
+      if (recipesJson is! List) return [];
+      final list = <RecipeModel>[];
+      for (final item in recipesJson) {
+        if (item is! Map<String, dynamic>) continue;
+        final tags = <String>{
+          ...((item['tags'] as List?)?.map((e) => e.toString()) ?? const []),
+          'ai',
+        }.toList();
+        final recipe = RecipeModel.fromAI({...item, 'tags': tags});
+        list.add(recipe);
+      }
+      return list;
+    } catch (e) {
+      print('⚠️ Parse AI recipe response error: $e');
+      return [];
+    }
+  }
+
+  List<RecipeModel> _fallbackAiRecommendations() {
+    final recipes = _fallbackAiRecipeMaps.map(RecipeModel.fromAI).toList();
+    return _applyNutritionEstimates(recipes);
+  }
+
+  List<RecipeModel> _dedupeRecipes(List<RecipeModel> recipes) {
+    final seen = <String>{};
+    final output = <RecipeModel>[];
+    for (final recipe in recipes) {
+      final key = _normalizeName(recipe.name);
+      if (key.isEmpty) continue;
+      if (seen.add(key)) {
+        output.add(recipe);
+      }
+    }
+    return output;
+  }
+
+  List<RecipeModel> _applyNutritionEstimates(List<RecipeModel> recipes) {
+    return recipes.map((recipe) {
+      final info = recipe.nutrition;
+      final hasData =
+          info.calories > 0 ||
+          info.protein > 0 ||
+          info.carbs > 0 ||
+          info.fat > 0 ||
+          info.fiber > 0 ||
+          info.sodium > 0;
+      if (hasData) return recipe;
+
+      final estimated = NutritionEstimator.estimateForRecipe(recipe);
+      final hasEstimate =
+          estimated.calories > 0 ||
+          estimated.protein > 0 ||
+          estimated.carbs > 0 ||
+          estimated.fat > 0 ||
+          estimated.fiber > 0 ||
+          estimated.sodium > 0;
+      if (!hasEstimate) return recipe;
+
+      return recipe.copyWith(nutrition: estimated);
+    }).toList();
+  }
+
+  bool _isAiGenerationEnabled() {
+    final flag = (dotenv.env['AI_GEMINI_ENABLED'] ?? 'true')
+        .trim()
+        .toLowerCase();
+    return !(flag == 'false' || flag == '0' || flag == 'off' || flag == 'no');
   }
 
   List<RecipeModel> _prioritizeRecipesBySelectedCoverage(
@@ -907,6 +1238,208 @@ ${allergyJson}
     }
     return false;
   }
+
+  static const List<Map<String, String>> _trustedReferenceSites = [
+    {'name': 'Wongnai', 'url': 'https://www.wongnai.com/recipes'},
+    {'name': 'Maeban', 'url': 'https://www.maeban.co.th/menu.php'},
+    {'name': 'Cookpad Thailand', 'url': 'https://cookpad.com/th'},
+    {'name': 'Krua.co', 'url': 'https://krua.co/recipes/'},
+    {
+      'name': 'Phol Food Mafia',
+      'url': 'https://www.pholfoodmafia.com/recipes/',
+    },
+  ];
+
+  static const Map<String, String> _knownRecipeLinks = {
+    'ผัดกะเพราไก่ไข่ดาว':
+        'https://www.wongnai.com/recipes/stir-fried-minced-chicken-with-holy-basil-and-fried-egg',
+    'ต้มยำกุ้งน้ำใส': 'https://krua.co/recipe/tom-yam-goong-clear-soup/',
+    'แกงเขียวหวานไก่': 'https://www.maeban.co.th/menu_detail.php?bl=1&id=563',
+    'ไข่เจียวหมูสับฟูกรอบ':
+        'https://cookpad.com/th/recipes/5292085-ไข่เจียวหมูสับฟูกรอบ',
+    'ยำเห็ดรวมสมุนไพร':
+        'https://www.pholfoodmafia.com/recipe/spicy-mushroom-salad/',
+  };
+
+  static const List<Map<String, dynamic>> _fallbackAiRecipeMaps = [
+    {
+      'id': 'ai_wongnai_pad_kra_prao',
+      'name': 'ผัดกะเพราไก่ไข่ดาว',
+      'description':
+          'ผัดกะเพราไก่รสจัดจ้าน เสิร์ฟพร้อมไข่ดาวกรอบและข้าวสวยร้อน',
+      'reason':
+          'ใช้ไก่ กระเทียม พริก และไข่ที่มีอยู่แล้ว ปรุงเสร็จในเวลาไม่นาน เหมาะสำหรับมือใหม่',
+      'category': 'อาหารจานเดียว',
+      'tags': ['thai', 'ai', 'quick', 'stir-fry'],
+      'match_score': 92,
+      'match_ratio': 0.92,
+      'ingredients': [
+        {'name': 'อกไก่สับ', 'amount': 250, 'unit': 'กรัม'},
+        {'name': 'ใบกะเพรา', 'amount': 40, 'unit': 'กรัม'},
+        {'name': 'กระเทียมสับ', 'amount': 3, 'unit': 'กลีบ'},
+        {'name': 'พริกจินดาแดงสับ', 'amount': 4, 'unit': 'เม็ด'},
+        {'name': 'น้ำปลา', 'amount': 1.5, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ซีอิ๊วขาว', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำตาลทราย', 'amount': 0.5, 'unit': 'ช้อนชา'},
+        {'name': 'น้ำมันพืช', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ไข่ไก่', 'amount': 2, 'unit': 'ฟอง'},
+      ],
+      'steps': [
+        'โขลกหรือสับกระเทียมและพริกให้พอหยาบ ตั้งกระทะใส่น้ำมัน เจียวให้หอม',
+        'ใส่อกไก่สับลงผัดจนสุก ปรุงรสด้วยน้ำปลา ซีอิ๊วขาว และน้ำตาลทราย ชิมรส',
+        'ปิดไฟแล้วใส่ใบกะเพราผัดคลุกให้เข้ากัน',
+        'ทอดไข่ดาวในน้ำมันร้อนจนขอบกรอบ',
+        'ตักเสิร์ฟผัดกะเพรา คู่กับข้าวสวยและไข่ดาว',
+      ],
+      'cooking_time': 12,
+      'prep_time': 8,
+      'servings': 2,
+      'source': 'Wongnai',
+      'source_url':
+          'https://www.wongnai.com/recipes/stir-fried-minced-chicken-with-holy-basil-and-fried-egg',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_kruaco_tom_yum_goong',
+      'name': 'ต้มยำกุ้งน้ำใส',
+      'description':
+          'ซุปต้มยำกุ้งน้ำใสหอมสมุนไพร เผ็ดเปรี้ยวร้อนแรงตามแบบฉบับไทย',
+      'reason':
+          'ใช้กุ้งสด เห็ด และสมุนไพรไทยที่เก็บในครัวอยู่แล้ว เหมาะกับผู้ที่ต้องการเมนูซดร้อน',
+      'category': 'ซุป',
+      'tags': ['thai', 'ai', 'soup', 'seafood'],
+      'match_score': 88,
+      'match_ratio': 0.88,
+      'ingredients': [
+        {'name': 'กุ้งขนาดกลาง', 'amount': 6, 'unit': 'ตัว'},
+        {'name': 'เห็ดฟางหรือเห็ดนางรม', 'amount': 120, 'unit': 'กรัม'},
+        {'name': 'ตะไคร้หั่นท่อน', 'amount': 2, 'unit': 'ต้น'},
+        {'name': 'ใบมะกรูดฉีก', 'amount': 4, 'unit': 'ใบ'},
+        {'name': 'ข่าแก่หั่นแว่น', 'amount': 4, 'unit': 'แว่น'},
+        {'name': 'พริกขี้หนูสวนบุบ', 'amount': 6, 'unit': 'เม็ด'},
+        {'name': 'น้ำปลา', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำมะนาว', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำซุปกระดูก', 'amount': 600, 'unit': 'มิลลิลิตร'},
+        {'name': 'ผักชีลาวหรือผักชีไทยซอย', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+      ],
+      'steps': [
+        'ตั้งหม้อใส่น้ำซุป ตะไคร้ ข่า และใบมะกรูด ต้มจนหอม',
+        'ใส่เห็ดและกุ้ง ต้มจนกุ้งเริ่มสุก ปรุงรสด้วยน้ำปลา',
+        'ปิดไฟก่อนใส่น้ำมะนาวและพริกขี้หนูบุบ เพื่อรักษากลิ่นหอม',
+        'โรยผักชีซอยก่อนเสิร์ฟ พร้อมข้าวสวยหรือทานเปล่า ๆ',
+      ],
+      'cooking_time': 18,
+      'prep_time': 10,
+      'servings': 2,
+      'source': 'Krua.co',
+      'source_url': 'https://krua.co/recipe/tom-yam-goong-clear-soup/',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_maeban_green_curry',
+      'name': 'แกงเขียวหวานไก่',
+      'description':
+          'แกงเขียวหวานไก่หอมกะทิ ใส่มะเขือพวงและโหระพา เสิร์ฟกับข้าวหรือเส้นขนมจีน',
+      'reason':
+          'ใช้สะโพกไก่ กะทิ น้ำพริกแกง และผักสวนครัวที่มีอยู่ เตรียมล่วงหน้าได้สำหรับหลายมื้อ',
+      'category': 'แกงกะทิ',
+      'tags': ['thai', 'ai', 'curry'],
+      'match_score': 86,
+      'match_ratio': 0.86,
+      'ingredients': [
+        {'name': 'สะโพกไก่หั่นชิ้น', 'amount': 300, 'unit': 'กรัม'},
+        {'name': 'น้ำพริกแกงเขียวหวาน', 'amount': 70, 'unit': 'กรัม'},
+        {'name': 'หัวกะทิ', 'amount': 250, 'unit': 'มิลลิลิตร'},
+        {'name': 'หางกะทิหรือ น้ำซุป', 'amount': 300, 'unit': 'มิลลิลิตร'},
+        {'name': 'มะเขือพวง', 'amount': 50, 'unit': 'กรัม'},
+        {'name': 'ใบโหระพา', 'amount': 30, 'unit': 'กรัม'},
+        {'name': 'น้ำปลา', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำตาลปี๊บ', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ใบมะกรูด', 'amount': 3, 'unit': 'ใบ'},
+      ],
+      'steps': [
+        'ผัดน้ำพริกแกงเขียวหวานกับหัวกะทิให้แตกมัน',
+        'ใส่ไก่ผัดจนตึงตัว เติมหางกะทิ เคี่ยวจนไก่นุ่ม',
+        'ปรุงรสด้วยน้ำปลาและน้ำตาลปี๊บ ใส่มะเขือพวงเคี่ยวต่อพอสุก',
+        'ปิดไฟ โรยใบโหระพาและใบมะกรูดฉีก เสิร์ฟคู่ข้าวสวยหรือเส้นขนมจีน',
+      ],
+      'cooking_time': 25,
+      'prep_time': 15,
+      'servings': 4,
+      'source': 'Maeban',
+      'source_url': 'https://www.maeban.co.th/menu_detail.php?bl=1&id=563',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_cookpad_pork_omelette',
+      'name': 'ไข่เจียวหมูสับฟูกรอบ',
+      'description': 'ไข่เจียวหมูสับเนื้อแน่นฟูกรอบ ทำง่าย ใช้วัตถุดิบพื้นฐาน',
+      'reason':
+          'ใช้ไข่ หมูสับ และเครื่องปรุงทั่วไป เหมาะสำหรับมื้อเร่งด่วนหรือเด็ก ๆ',
+      'category': 'อาหารจานเดียว',
+      'tags': ['thai', 'ai', 'omelette', 'quick'],
+      'match_score': 94,
+      'match_ratio': 0.94,
+      'ingredients': [
+        {'name': 'ไข่ไก่', 'amount': 3, 'unit': 'ฟอง'},
+        {'name': 'หมูสับ', 'amount': 120, 'unit': 'กรัม'},
+        {'name': 'ซอสปรุงรส', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำปลา', 'amount': 0.5, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำมันพืช', 'amount': 1.5, 'unit': 'ถ้วยตวง'},
+        {'name': 'หอมใหญ่ซอย', 'amount': 30, 'unit': 'กรัม'},
+      ],
+      'steps': [
+        'ตีไข่ในชาม ใส่หมูสับ หอมใหญ่ และปรุงรสด้วยซอสปรุงรส น้ำปลา',
+        'ตีให้ฟูเพื่อให้ไข่ขึ้นฟอง',
+        'ตั้งน้ำมันให้ร้อนจัด เทไข่ลงทอดกลับสองด้านจนเหลืองกรอบ',
+        'ตักพักน้ำมัน เสิร์ฟคู่ซอสพริกและข้าวสวย',
+      ],
+      'cooking_time': 10,
+      'prep_time': 5,
+      'servings': 2,
+      'source': 'Cookpad Thailand',
+      'source_url':
+          'https://cookpad.com/th/recipes/5292085-ไข่เจียวหมูสับฟูกรอบ',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_pholfood_mafia_spicy_mushroom_salad',
+      'name': 'ยำเห็ดรวมสมุนไพร',
+      'description':
+          'ยำเห็ดรวมรสจัดจ้าน หอมสมุนไพร เหมาะสำหรับมื้อเบา ๆ หรือทานคู่กับข้าว',
+      'reason':
+          'ใช้เห็ด ผักสด และน้ำปรุงยำที่มีอยู่ เสริมสมุนไพรเพื่อเพิ่มรสชาติและกลิ่นหอม',
+      'category': 'ยำ',
+      'tags': ['thai', 'ai', 'salad', 'healthy'],
+      'match_score': 84,
+      'match_ratio': 0.84,
+      'ingredients': [
+        {'name': 'เห็ดออรินจิหั่นชิ้น', 'amount': 80, 'unit': 'กรัม'},
+        {'name': 'เห็ดเข็มทอง', 'amount': 70, 'unit': 'กรัม'},
+        {'name': 'เห็ดนางรม', 'amount': 70, 'unit': 'กรัม'},
+        {'name': 'หอมแดงซอย', 'amount': 2, 'unit': 'หัว'},
+        {'name': 'ตะไคร้ซอย', 'amount': 1, 'unit': 'ต้น'},
+        {'name': 'พริกขี้หนูซอย', 'amount': 5, 'unit': 'เม็ด'},
+        {'name': 'น้ำปลา', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำมะนาว', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำตาลปี๊บ', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'ใบสะระแหน่', 'amount': 10, 'unit': 'ใบ'},
+      ],
+      'steps': [
+        'ลวกเห็ดต่าง ๆ ในน้ำเดือดให้สุก พักให้สะเด็ดน้ำ',
+        'ผสมน้ำปลา น้ำมะนาว น้ำตาลปี๊บ คนให้น้ำตาลละลาย',
+        'คลุกเห็ดกับน้ำยำ ใส่หอมแดง ตะไคร้ และพริกขี้หนู คลุกให้เข้ากัน',
+        'โรยใบสะระแหน่ก่อนเสิร์ฟ เพิ่มความหอมสดชื่น',
+      ],
+      'cooking_time': 12,
+      'prep_time': 8,
+      'servings': 2,
+      'source': 'Phol Food Mafia',
+      'source_url':
+          'https://www.pholfoodmafia.com/recipe/spicy-mushroom-salad/',
+      'missing_ingredients': [],
+    },
+  ];
 
   static const Set<String> _dessertCategoryKeywords = {
     'ขนม',
