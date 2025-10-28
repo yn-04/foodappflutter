@@ -72,6 +72,12 @@ class SmartUnitConverter {
       unitSynonyms: ['chilies', 'chiles', 'เมล็ด'],
     ),
     const PieceUnitInfo(
+      keywords: ['พริกแห้ง', 'dried chili'],
+      displayUnit: 'เม็ด',
+      gramsPerUnit: 2.5,
+      unitSynonyms: ['dried chilies', 'dried chiles'],
+    ),
+    const PieceUnitInfo(
       keywords: ['แครอท', 'carrot'],
       displayUnit: 'หัว',
       gramsPerUnit: 130,
@@ -90,16 +96,70 @@ class SmartUnitConverter {
       unitSynonyms: ['apples', 'ผล'],
     ),
     const PieceUnitInfo(
+      keywords: ['มันฝรั่ง', 'potato'],
+      displayUnit: 'หัว',
+      gramsPerUnit: 170,
+      unitSynonyms: ['potatoes'],
+    ),
+    const PieceUnitInfo(
       keywords: ['กุ้ง', 'shrimp', 'prawn'],
       displayUnit: 'ตัว',
-      gramsPerUnit: 15,
+      gramsPerUnit: 23,
       unitSynonyms: ['shrimps', 'prawns'],
+    ),
+    const PieceUnitInfo(
+      keywords: ['ปลาหมึก', 'squid', 'หมึก'],
+      displayUnit: 'ตัว',
+      gramsPerUnit: 180,
+      unitSynonyms: ['squids'],
+    ),
+    const PieceUnitInfo(
+      keywords: ['ปลา', 'fish', 'ปลากะพง', 'ปลาทู', 'ปลาดอลลี่', 'ปลานิล'],
+      displayUnit: 'ตัว',
+      gramsPerUnit: 300,
+      unitSynonyms: ['fish', 'fishes', 'whole fish'],
+    ),
+    const PieceUnitInfo(
+      keywords: ['อกไก่', 'chicken breast'],
+      displayUnit: 'ชิ้น',
+      gramsPerUnit: 165,
+      unitSynonyms: ['breast', 'breasts'],
+    ),
+    const PieceUnitInfo(
+      keywords: ['น่องไก่', 'chicken thigh', 'drumstick'],
+      displayUnit: 'ชิ้น',
+      gramsPerUnit: 130,
+      unitSynonyms: ['thigh', 'thighs', 'drumstick', 'drumsticks'],
+    ),
+    const PieceUnitInfo(
+      keywords: ['ปีกไก่', 'chicken wing'],
+      displayUnit: 'ชิ้น',
+      gramsPerUnit: 55,
+      unitSynonyms: ['wing', 'wings'],
     ),
     const PieceUnitInfo(
       keywords: ['เห็ด', 'mushroom'],
       displayUnit: 'ดอก',
       gramsPerUnit: 20,
       unitSynonyms: ['mushrooms'],
+    ),
+    const PieceUnitInfo(
+      keywords: ['เห็ดฟาง', 'straw mushroom'],
+      displayUnit: 'ดอก',
+      gramsPerUnit: 15,
+      unitSynonyms: ['straw mushrooms'],
+    ),
+    const PieceUnitInfo(
+      keywords: ['เห็ดเข็มทอง', 'enoki'],
+      displayUnit: 'กำ',
+      gramsPerUnit: 100,
+      unitSynonyms: ['bundle', 'bunch'],
+    ),
+    const PieceUnitInfo(
+      keywords: ['โหระพา', 'basil', 'holy basil', 'ใบกะเพรา', 'กะเพรา', 'thai basil'],
+      displayUnit: 'กำ',
+      gramsPerUnit: 25,
+      unitSynonyms: ['bunch', 'bunches', 'sprig', 'sprigs'],
     ),
   ];
 
@@ -130,10 +190,17 @@ class SmartUnitConverter {
     'ดอก',
     'ตัว',
     'ฟอง',
+    'กำ',
+    'กำมือ',
+    'กำๆ',
     'slice',
     'slices',
     'egg',
     'eggs',
+    'bundle',
+    'bunch',
+    'sprig',
+    'sprigs',
   };
 
   static String _normalize(String value) => value.trim().toLowerCase();
@@ -150,8 +217,7 @@ class SmartUnitConverter {
       if (rule.matchesUnit(lowerUnit)) return rule;
     }
     final byName = _ruleForName(lowerName);
-    final isGenericPiece =
-        lowerUnit.isEmpty || _genericPieceUnits.contains(lowerUnit);
+    final isGenericPiece = lowerUnit.isEmpty || _genericPieceUnits.contains(lowerUnit);
     if (!isGenericPiece) {
       // ไม่ใช่หน่วยแบบชิ้น ให้ปล่อยให้ logic ฝั่งกรัม/มล จัดการต่อ
       return null;
