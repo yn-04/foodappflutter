@@ -17,6 +17,7 @@ class CookingSessionPage extends StatefulWidget {
   final List<IngredientShortage> shortages;
   final bool partial;
   final Map<String, double>? manualRequiredAmounts;
+  final List<ManualCustomIngredient>? manualCustomIngredients;
 
   const CookingSessionPage({
     super.key,
@@ -26,6 +27,7 @@ class CookingSessionPage extends StatefulWidget {
     this.shortages = const [],
     this.partial = false,
     this.manualRequiredAmounts,
+    this.manualCustomIngredients,
   });
 
   @override
@@ -48,6 +50,7 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
       widget.inventory,
       servings: widget.servings,
       manualRequiredAmounts: widget.manualRequiredAmounts,
+      manualCustomIngredients: widget.manualCustomIngredients,
     );
     _equipment = _inferEquipment(widget.recipe);
   }
@@ -75,9 +78,7 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
       child: Scaffold(
         appBar: AppBar(
           automaticallyImplyLeading: false,
-          leading: BackButton(
-            onPressed: () => Navigator.of(context).pop(true),
-          ),
+          leading: BackButton(onPressed: () => Navigator.of(context).pop(true)),
           title: Text('เริ่มทำ: ${widget.recipe.name}'),
           actions: const [],
         ),
