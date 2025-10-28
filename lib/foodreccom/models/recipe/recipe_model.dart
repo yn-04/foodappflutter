@@ -6,6 +6,7 @@ import 'nutrition_info.dart';
 class RecipeModel {
   final String id;
   final String name;
+  final String originalTitle;
   final String description;
   final int matchScore;
   final double matchRatio;
@@ -27,6 +28,7 @@ class RecipeModel {
   RecipeModel({
     required this.id,
     required this.name,
+    String? originalName,
     required this.description,
     required this.matchScore,
     this.matchRatio = 0.0,
@@ -44,7 +46,7 @@ class RecipeModel {
     this.tags = const [],
     this.source,
     this.sourceUrl,
-  });
+  }) : originalTitle = (originalName ?? name).trim();
 
   /// ✅ Parse จาก AI
   factory RecipeModel.fromAI(Map<String, dynamic> json) {
@@ -63,9 +65,15 @@ class RecipeModel {
         : (rawScore.toDouble() / 100);
     final normalizedRatio = inferredRatio.clamp(0.0, 1.0);
 
+    final rawName = (json['name'] ?? json['menu_name'] ?? 'ไม่ระบุชื่อ')
+        .toString();
+    final original = (json['originalTitle'] ?? json['original_name'] ?? rawName)
+        .toString();
+
     return RecipeModel(
       id: (json['id'] ?? DateTime.now().millisecondsSinceEpoch).toString(),
-      name: json['name'] ?? json['menu_name'] ?? 'ไม่ระบุชื่อ',
+      name: rawName,
+      originalName: original,
       description: json['description'] ?? '',
       matchScore: (json['matchScore'] ?? json['match_score'] ?? 0).round(),
       matchRatio: normalizedRatio,
@@ -147,9 +155,13 @@ class RecipeModel {
       ...dishTypes.map((e) => e.toLowerCase()),
     }..removeWhere((e) => e.trim().isEmpty);
 
+    final rawTitle = (json['title'] ?? json['name'] ?? 'ไม่ระบุชื่อ')
+        .toString();
+
     return RecipeModel(
       id: json['id'].toString(),
-      name: json['title'] ?? json['name'] ?? 'ไม่ระบุชื่อ',
+      name: rawTitle,
+      originalName: rawTitle,
       description: json['summary'] ?? json['description'] ?? '',
       matchScore: 70,
       matchRatio: _clampRatio(70 / 100),
@@ -201,9 +213,19 @@ class RecipeModel {
         : rawScore.toDouble() / 100;
     final normalizedRatio = inferredRatio.clamp(0.0, 1.0);
 
+    final rawName = (json['name'] ?? json['menu_name'] ?? json['title'] ?? '')
+        .toString();
+    final original =
+        (json['originalTitle'] ??
+                json['original_name'] ??
+                json['title'] ??
+                rawName)
+            .toString();
+
     return RecipeModel(
       id: json['id'] ?? '',
-      name: json['name'] ?? '',
+      name: rawName,
+      originalName: original,
       description: json['description'] ?? '',
       matchScore: (json['matchScore'] ?? json['match_score'] ?? 0).round(),
       matchRatio: normalizedRatio,
@@ -237,6 +259,7 @@ class RecipeModel {
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
+    'original_name': originalTitle,
     'description': description,
     'match_score': matchScore,
     'match_ratio': matchRatio,
@@ -360,6 +383,7 @@ extension RecipeCopy on RecipeModel {
   RecipeModel copyWith({
     String? id,
     String? name,
+    String? originalTitle,
     String? description,
     int? matchScore,
     double? matchRatio,
@@ -381,6 +405,7 @@ extension RecipeCopy on RecipeModel {
     return RecipeModel(
       id: id ?? this.id,
       name: name ?? this.name,
+      originalName: originalTitle ?? this.originalTitle,
       description: description ?? this.description,
       matchScore: matchScore ?? this.matchScore,
       matchRatio: matchRatio ?? this.matchRatio,
