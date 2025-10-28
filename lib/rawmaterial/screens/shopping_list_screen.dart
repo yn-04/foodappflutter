@@ -1253,15 +1253,6 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                           ? Icons
                                 .apps // หรือ Icons.dashboard_customize_outlined
                           : Categories.iconFor(c);
-                      final Color accent = c == _ALL
-                          ? Colors.indigoAccent
-                          : Categories.colorFor(c);
-                      final Color fillColor = accent.withAlpha(
-                        (255 * (isSelected ? 0.22 : 0.1)).round(),
-                      );
-                      final Color borderColor = accent.withAlpha(
-                        (255 * (isSelected ? 0.7 : 0.25)).round(),
-                      );
 
                       return GestureDetector(
                         onTap: () => setState(() => selectedCategory = c),
@@ -1276,14 +1267,24 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                             vertical: 8,
                           ),
                           decoration: BoxDecoration(
-                            color: fillColor,
+                            color: isSelected
+                                ? Colors.yellow[700]
+                                : Colors.grey[200],
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: borderColor, width: 1.2),
+                            // (ถ้าอยากมีเส้นขอบจาง ๆ ให้เปิด block นี้)
+                            // border: Border.all(
+                            //   color: isSelected ? Colors.yellow[700]! : Colors.grey[300]!,
+                            // ),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(icon, size: 18, color: accent),
+                              Icon(
+                                icon,
+                                size: 18,
+                                // ✅ ไอคอนสีดำเสมอ
+                                color: Colors.black,
+                              ),
                               const SizedBox(width: 8),
                               Text(
                                 c,
