@@ -15,6 +15,7 @@ class RecipeYoutubeSection extends StatefulWidget {
 class _RecipeYoutubeSectionState extends State<RecipeYoutubeSection> {
   String? _videoId;
   bool _loading = true;
+  String? _lastQuery;
 
   @override
   void initState() {
@@ -23,13 +24,46 @@ class _RecipeYoutubeSectionState extends State<RecipeYoutubeSection> {
   }
 
   Future<void> _fetch() async {
-    final name = widget.recipe.name.trim();
-    final q = name.isEmpty ? 'recipe' : name;
-    final id = await YoutubeSearchService.fetchFirstVideoId(q);
+    final thaiName = widget.recipe.name.trim();
+    final englishName = widget.recipe.originalTitle.trim();
+
+    String normalizeKey(String value) => value.trim().toLowerCase();
+    final seen = <String>{};
+    final queries = <String>[];
+
+    void addQuery(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return;
+      final key = normalizeKey(trimmed);
+      if (seen.add(key)) queries.add(trimmed);
+    }
+
+    final hasThai = thaiName.isNotEmpty;
+    final hasEnglish = englishName.isNotEmpty;
+    if (hasThai &&
+        hasEnglish &&
+        normalizeKey(thaiName) != normalizeKey(englishName)) {
+      addQuery('$thaiName $englishName');
+      addQuery('$englishName $thaiName');
+    }
+    if (hasEnglish) addQuery(englishName);
+    if (hasThai) addQuery(thaiName);
+    addQuery('recipe');
+
+    String? id;
+    String? usedQuery;
+    for (final query in queries) {
+      id = await YoutubeSearchService.fetchFirstVideoId(query);
+      if (id != null) {
+        usedQuery = query;
+        break;
+      }
+    }
     if (!mounted) return;
     setState(() {
       _videoId = id;
       _loading = false;
+      _lastQuery = usedQuery ?? queries.first;
     });
   }
 
@@ -40,7 +74,7 @@ class _RecipeYoutubeSectionState extends State<RecipeYoutubeSection> {
     }
     final hasVideo = _videoId != null && _videoId!.isNotEmpty;
     final thumb = hasVideo
-        ? 'https://i.ytimg.com/vi/${_videoId}/hqdefault.jpg'
+        ? 'https://i.ytimg.com/vi/$_videoId/hqdefault.jpg'
         : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -60,10 +94,7 @@ class _RecipeYoutubeSectionState extends State<RecipeYoutubeSection> {
                   borderRadius: BorderRadius.circular(12),
                   child: AspectRatio(
                     aspectRatio: 16 / 9,
-                    child: Image.network(
-                      thumb!,
-                      fit: BoxFit.cover,
-                    ),
+                    child: Image.network(thumb!, fit: BoxFit.cover),
                   ),
                 ),
                 Container(
@@ -72,7 +103,11 @@ class _RecipeYoutubeSectionState extends State<RecipeYoutubeSection> {
                     borderRadius: BorderRadius.circular(40),
                   ),
                   padding: const EdgeInsets.all(10),
-                  child: const Icon(Icons.play_arrow, size: 48, color: Colors.white),
+                  child: const Icon(
+                    Icons.play_arrow,
+                    size: 48,
+                    color: Colors.white,
+                  ),
                 ),
               ],
             ),
@@ -108,9 +143,13 @@ class _RecipeYoutubeSectionState extends State<RecipeYoutubeSection> {
   }
 
   Future<void> _openSearch() async {
-    final name = widget.recipe.name.trim();
-    final q = name.isEmpty ? 'recipe' : name;
-    final url = 'https://www.youtube.com/results?search_query=${Uri.encodeComponent(q)}';
+    final defaultBase = widget.recipe.originalTitle.trim().isNotEmpty
+        ? widget.recipe.originalTitle.trim()
+        : widget.recipe.name.trim();
+    final base = (_lastQuery ?? defaultBase).trim();
+    final q = base.isEmpty ? 'recipe' : base;
+    final url =
+        'https://www.youtube.com/results?search_query=${Uri.encodeComponent(q)}';
     if (await _openFlexible(url)) return;
     _showSnack('ไม่พบแอป/เบราว์เซอร์สำหรับเปิดลิงก์ YouTube');
   }
@@ -120,7 +159,8 @@ class _RecipeYoutubeSectionState extends State<RecipeYoutubeSection> {
     // Try external app/browser
     if (await canLaunchUrl(uri)) {
       try {
-        if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return true;
+        if (await launchUrl(uri, mode: LaunchMode.externalApplication))
+          return true;
       } catch (_) {}
     }
     // Try platform default
@@ -132,7 +172,9 @@ class _RecipeYoutubeSectionState extends State<RecipeYoutubeSection> {
       if (await launchUrl(uri, mode: LaunchMode.inAppBrowserView)) return true;
     } catch (_) {}
     // Copy to clipboard as last resort
-    try { await Clipboard.setData(ClipboardData(text: url)); } catch (_) {}
+    try {
+      await Clipboard.setData(ClipboardData(text: url));
+    } catch (_) {}
     return false;
   }
 
@@ -158,7 +200,10 @@ class _RecipeYoutubeSectionState extends State<RecipeYoutubeSection> {
             Expanded(
               child: Text(
                 'ไม่พบวิดีโอโดยตรง • แตะเพื่อค้นหาใน YouTube',
-                style: TextStyle(color: Colors.red[800], fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  color: Colors.red[800],
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
             const Icon(Icons.open_in_new, color: Colors.red),

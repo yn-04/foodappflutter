@@ -14,20 +14,24 @@ class MissingIngredientsSection extends StatefulWidget {
   final int? servings;
   final VoidCallback? onAddToShoppingList;
   final Map<String, double>? manualRequiredAmounts;
+  final List<ManualCustomIngredient>? manualCustomIngredients;
   const MissingIngredientsSection({
     super.key,
     required this.recipe,
     this.servings,
     this.onAddToShoppingList,
     this.manualRequiredAmounts,
+    this.manualCustomIngredients,
   });
 
   @override
-  State<MissingIngredientsSection> createState() => _MissingIngredientsSectionState();
+  State<MissingIngredientsSection> createState() =>
+      _MissingIngredientsSectionState();
 }
 
 class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
-  String _storeType = 'ซูเปอร์มาร์เก็ต'; // 'ตลาดสด' | 'ซูเปอร์มาร์เก็ต' | 'โชห่วย'
+  String _storeType =
+      'ซูเปอร์มาร์เก็ต'; // 'ตลาดสด' | 'ซูเปอร์มาร์เก็ต' | 'โชห่วย'
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +42,7 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
       inv,
       servings: widget.servings,
       manualRequiredAmounts: widget.manualRequiredAmounts,
+      manualCustomIngredients: widget.manualCustomIngredients,
     );
     final displayItems = computed
         .where((item) => item.missingAmount > 0.01)
@@ -91,7 +96,9 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
                     );
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('เพิ่มเข้ารายการซื้อของ $added รายการ')),
+                        SnackBar(
+                          content: Text('เพิ่มเข้ารายการซื้อของ $added รายการ'),
+                        ),
                       );
                     }
                   } catch (e) {
@@ -125,7 +132,11 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
             (e) => ChoiceChip(
               label: Row(
                 mainAxisSize: MainAxisSize.min,
-                children: [Icon(e.$2, size: 16), const SizedBox(width: 6), Text(e.$1)],
+                children: [
+                  Icon(e.$2, size: 16),
+                  const SizedBox(width: 6),
+                  Text(e.$1),
+                ],
               ),
               selected: _storeType == e.$1,
               onSelected: (_) => setState(() => _storeType = e.$1),
@@ -154,7 +165,11 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
         children: [
           Row(
             children: [
-              Icon(Icons.shopping_cart_outlined, size: 16, color: Colors.orange[600]),
+              Icon(
+                Icons.shopping_cart_outlined,
+                size: 16,
+                color: Colors.orange[600],
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -166,12 +181,18 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
               const SizedBox(width: 8),
               Text(
                 unitText,
-                style: TextStyle(color: Colors.orange[900], fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: Colors.orange[900],
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(width: 8),
               Text(
                 priceText,
-                style: TextStyle(color: Colors.orange[900], fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: Colors.orange[900],
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ],
           ),
@@ -227,7 +248,10 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
       final cat = item.category ?? guessCategory(item.name);
       grouped.putIfAbsent(cat, () => []).add(item);
     }
-    final total = grouped.values.fold<double>(0.0, (s, list) => s + _groupCost(list));
+    final total = grouped.values.fold<double>(
+      0.0,
+      (s, list) => s + _groupCost(list),
+    );
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -240,14 +264,27 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
         children: [
           Row(
             children: [
-              const Icon(Icons.account_balance_wallet_outlined, color: Colors.blueGrey),
+              const Icon(
+                Icons.account_balance_wallet_outlined,
+                color: Colors.blueGrey,
+              ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text('ประมาณการค่าใช้จ่ายรวม',
-                    style: TextStyle(fontWeight: FontWeight.w700, color: Colors.blueGrey[800])),
+                child: Text(
+                  'ประมาณการค่าใช้จ่ายรวม',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: Colors.blueGrey[800],
+                  ),
+                ),
               ),
-              Text('฿${total.toStringAsFixed(0)}',
-                  style: TextStyle(fontWeight: FontWeight.w800, color: Colors.blueGrey[900])),
+              Text(
+                '฿${total.toStringAsFixed(0)}',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: Colors.blueGrey[900],
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -258,7 +295,7 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
               icon: const Icon(Icons.alt_route),
               label: const Text('วางแผนเส้นทางซื้อของ'),
             ),
-          )
+          ),
         ],
       ),
     );
@@ -269,8 +306,10 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
     if (category == 'เนื้อสัตว์') return canonUnit == 'gram' ? 0.6 : 15;
     if (category == 'ผัก') return canonUnit == 'gram' ? 0.08 : 10;
     if (category == 'ผลไม้') return canonUnit == 'gram' ? 0.1 : 12;
-    if (category == 'ผลิตภัณฑ์จากนม') return canonUnit == 'milliliter' ? 0.04 : 20;
-    if (category == 'ข้าว' || category == 'แป้ง') return canonUnit == 'gram' ? 0.03 : 15;
+    if (category == 'ผลิตภัณฑ์จากนม')
+      return canonUnit == 'milliliter' ? 0.04 : 20;
+    if (category == 'ข้าว' || category == 'แป้ง')
+      return canonUnit == 'gram' ? 0.03 : 15;
     if (category == 'เครื่องเทศ') return canonUnit == 'gram' ? 0.2 : 20;
     if (category == 'เครื่องปรุง') return canonUnit == 'milliliter' ? 0.02 : 15;
     if (category == 'น้ำมัน') return canonUnit == 'milliliter' ? 0.05 : 25;
@@ -319,7 +358,8 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
   (String, String) _selectedStoreForCategory(String category) {
     // If user selects a store type explicitly, use it for maps
     if (_storeType == 'ตลาดสด') return ('ตลาดสด', 'ตลาดสด ใกล้ฉัน');
-    if (_storeType == 'ซูเปอร์มาร์เก็ต') return ('ซูเปอร์มาร์เก็ต', 'ซูเปอร์มาร์เก็ต ใกล้ฉัน');
+    if (_storeType == 'ซูเปอร์มาร์เก็ต')
+      return ('ซูเปอร์มาร์เก็ต', 'ซูเปอร์มาร์เก็ต ใกล้ฉัน');
     if (_storeType == 'โชห่วย') return ('มินิมาร์ท', 'มินิมาร์ท ใกล้ฉัน');
     return _storeForCategory(category);
   }
@@ -337,24 +377,38 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
       if (await _openFlexible(uri)) return;
     }
     // Last resort: show a hint
-    _showSnack(context, 'ไม่พบแอปสำหรับเปิดแผนที่ กรุณาติดตั้ง Google Maps หรือเบราว์เซอร์');
+    _showSnack(
+      context,
+      'ไม่พบแอปสำหรับเปิดแผนที่ กรุณาติดตั้ง Google Maps หรือเบราว์เซอร์',
+    );
   }
 
-  Future<void> _openMultiStopRoute(Map<String, List<PurchaseItem>> grouped) async {
+  Future<void> _openMultiStopRoute(
+    Map<String, List<PurchaseItem>> grouped,
+  ) async {
     final cats = grouped.keys.toSet();
     final queue = <String>[];
     void addIfHas(String c) {
       if (cats.contains(c)) queue.add(_storeForCategory(c).$2);
     }
+
     addIfHas('ผัก');
     addIfHas('ผลไม้');
     addIfHas('เนื้อสัตว์');
-    const superCats = ['ผลิตภัณฑ์จากนม','เครื่องปรุง','แป้ง','ข้าว','น้ำมัน','ของแช่แข็ง','เครื่องดื่ม'];
+    const superCats = [
+      'ผลิตภัณฑ์จากนม',
+      'เครื่องปรุง',
+      'แป้ง',
+      'ข้าว',
+      'น้ำมัน',
+      'ของแช่แข็ง',
+      'เครื่องดื่ม',
+    ];
     if (cats.any(superCats.contains)) {
       queue.add(_storeForCategory('ซูเปอร์มาร์เก็ต').$2);
     }
     for (final c in cats) {
-      if (!['ผัก','ผลไม้','เนื้อสัตว์', ...superCats].contains(c)) {
+      if (!['ผัก', 'ผลไม้', 'เนื้อสัตว์', ...superCats].contains(c)) {
         queue.add(_storeForCategory(c).$2);
       }
     }
@@ -387,7 +441,8 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
     // Try external app/browser
     try {
       if (await canLaunchUrl(uri)) {
-        if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return true;
+        if (await launchUrl(uri, mode: LaunchMode.externalApplication))
+          return true;
       }
     } catch (_) {}
     // Try platform default
@@ -404,7 +459,6 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
   void _showSnack(BuildContext context, String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
-
 }
 
 class _FrequencyBadge extends StatelessWidget {

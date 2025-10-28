@@ -16,6 +16,7 @@ import 'missing_ingredients.dart';
 import 'frequency_notice.dart';
 import '../../pages/cooking_session_page.dart';
 import '../../providers/enhanced_recommendation_provider.dart';
+import '../../utils/purchase_item_utils.dart';
 
 class EnhancedRecipeDetailSheet extends StatefulWidget {
   final RecipeModel recipe;
@@ -31,7 +32,8 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
   final CookingService _cookingService = CookingService();
   int _selectedServings = 2;
   bool _isStartingCook = false;
-  Map<String, double> _manualIngredientAmounts = const {};
+  ManualIngredientSelection _manualIngredientAdjustments =
+      const ManualIngredientSelection();
   late final int _maxSelectableServings;
 
   @override
@@ -41,20 +43,15 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
         ? 1
         : widget.recipe.servings;
     _maxSelectableServings = math.max(10, baseServings);
-    final provider =
-        context.read<EnhancedRecommendationProvider>();
-    final override =
-        provider.getServingsOverride(widget.recipe.id);
+    final provider = context.read<EnhancedRecommendationProvider>();
+    final override = provider.getServingsOverride(widget.recipe.id);
     if (override != null && override > 0) {
       _selectedServings = override;
     } else {
       _selectedServings = 1;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        provider.setServingsOverride(
-          widget.recipe.id,
-          _selectedServings,
-        );
+        provider.setServingsOverride(widget.recipe.id, _selectedServings);
       });
     }
   }
@@ -93,31 +90,35 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
                         onChanged: (value) {
                           setState(() {
                             _selectedServings = value;
-                            _manualIngredientAmounts = const {};
+                            _manualIngredientAdjustments =
+                                const ManualIngredientSelection();
                           });
                           context
                               .read<EnhancedRecommendationProvider>()
-                              .setServingsOverride(
-                                widget.recipe.id,
-                                value,
-                              );
+                              .setServingsOverride(widget.recipe.id, value);
                         },
                       ),
                       // Missing ingredients block (highlight)
                       MissingIngredientsSection(
                         recipe: widget.recipe,
                         servings: _selectedServings,
-                        manualRequiredAmounts: _manualIngredientAmounts.isEmpty
+                        manualRequiredAmounts:
+                            _manualIngredientAdjustments.overrides.isEmpty
                             ? null
-                            : _manualIngredientAmounts,
+                            : _manualIngredientAdjustments.overrides,
+                        manualCustomIngredients:
+                            _manualIngredientAdjustments.additions,
                       ),
                       const SizedBox(height: 16),
                       IngredientsList(
                         recipe: widget.recipe,
                         servings: _selectedServings,
-                        manualRequiredAmounts: _manualIngredientAmounts.isEmpty
+                        manualRequiredAmounts:
+                            _manualIngredientAdjustments.overrides.isEmpty
                             ? null
-                            : _manualIngredientAmounts,
+                            : _manualIngredientAdjustments.overrides,
+                        manualCustomIngredients:
+                            _manualIngredientAdjustments.additions,
                       ),
                       const SizedBox(height: 24),
                       NutritionInfoSection(
@@ -147,23 +148,32 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
       context,
       recipe: widget.recipe,
       servings: _selectedServings,
-      initialRequiredAmounts: _manualIngredientAmounts.isEmpty
+      initialRequiredAmounts: _manualIngredientAdjustments.overrides.isEmpty
           ? null
-          : _manualIngredientAmounts,
+          : _manualIngredientAdjustments.overrides,
+      initialCustomIngredients: _manualIngredientAdjustments.additions,
     );
     if (adjustments == null) return;
 
-    final manual = Map<String, double>.from(adjustments);
+    final manualOverrides = Map<String, double>.from(adjustments.overrides);
+    final manualExtras = adjustments.additions
+        .map((item) => item.sanitize())
+        .where((item) => item.isValid)
+        .toList();
 
     setState(() {
       _isStartingCook = true;
-      _manualIngredientAmounts = manual;
+      _manualIngredientAdjustments = ManualIngredientSelection(
+        overrides: manualOverrides,
+        additions: manualExtras,
+      );
     });
     try {
       final preview = await _cookingService.previewCooking(
         widget.recipe,
         _selectedServings,
-        manualRequiredAmounts: manual.isEmpty ? null : manual,
+        manualRequiredAmounts: manualOverrides.isEmpty ? null : manualOverrides,
+        manualCustomIngredients: manualExtras.isEmpty ? null : manualExtras,
       );
 
       bool allowPartial = false;
@@ -174,7 +184,10 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
           recipe: widget.recipe,
           servings: _selectedServings,
           shortages: preview.shortages,
-          manualRequiredAmounts: manual.isEmpty ? null : manual,
+          manualRequiredAmounts: manualOverrides.isEmpty
+              ? null
+              : manualOverrides,
+          manualCustomIngredients: manualExtras.isEmpty ? null : manualExtras,
         );
         if (!proceed) return;
         allowPartial = true;
@@ -184,7 +197,8 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
         widget.recipe,
         _selectedServings,
         allowPartial: allowPartial,
-        manualRequiredAmounts: manual.isEmpty ? null : manual,
+        manualRequiredAmounts: manualOverrides.isEmpty ? null : manualOverrides,
+        manualCustomIngredients: manualExtras.isEmpty ? null : manualExtras,
       );
 
       if (result.success) {
@@ -200,7 +214,12 @@ class _EnhancedRecipeDetailSheetState extends State<EnhancedRecipeDetailSheet> {
               inventory: inventory,
               shortages: result.shortages,
               partial: result.partial,
-              manualRequiredAmounts: manual.isEmpty ? null : manual,
+              manualRequiredAmounts: manualOverrides.isEmpty
+                  ? null
+                  : manualOverrides,
+              manualCustomIngredients: manualExtras.isEmpty
+                  ? null
+                  : manualExtras,
             ),
           ),
         );

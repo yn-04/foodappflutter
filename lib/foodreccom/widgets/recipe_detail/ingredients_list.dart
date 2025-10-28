@@ -7,11 +7,13 @@ class IngredientsList extends StatelessWidget {
   final RecipeModel recipe;
   final int servings;
   final Map<String, double>? manualRequiredAmounts;
+  final List<ManualCustomIngredient>? manualCustomIngredients;
   const IngredientsList({
     super.key,
     required this.recipe,
     required this.servings,
     this.manualRequiredAmounts,
+    this.manualCustomIngredients,
   });
 
   @override
@@ -22,6 +24,10 @@ class IngredientsList extends StatelessWidget {
       const [],
       servings: servings,
       manualRequiredAmounts: manualRequiredAmounts,
+      manualCustomIngredients: manualCustomIngredients,
+    );
+    final visibleStatuses = statuses.where(
+      (status) => status.requiredAmount > 0,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -34,7 +40,7 @@ class IngredientsList extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        ...statuses.map((st) {
+        ...visibleStatuses.map((st) {
           final display = formatQuantityNumber(
             st.requiredAmount,
             unit: st.unit,
@@ -48,7 +54,7 @@ class IngredientsList extends StatelessWidget {
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           );
-        }).toList(),
+        }),
       ],
     );
   }

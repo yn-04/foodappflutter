@@ -10,6 +10,7 @@ import '../../providers/enhanced_recommendation_provider.dart';
 import '../../utils/purchase_item_utils.dart';
 
 class _IngredientDialogEntry {
+  final String id;
   final String name;
   final bool optional;
   final String originalUnit;
@@ -19,8 +20,10 @@ class _IngredientDialogEntry {
   final double? canonicalPerDisplay;
   final String? canonicalUnitOriginal;
   final String? canonicalUnitDisplay;
+  final bool isCustom;
 
   const _IngredientDialogEntry({
+    required this.id,
     required this.name,
     required this.optional,
     required this.originalUnit,
@@ -30,14 +33,17 @@ class _IngredientDialogEntry {
     required this.canonicalPerDisplay,
     required this.canonicalUnitOriginal,
     required this.canonicalUnitDisplay,
+    this.isCustom = false,
   });
 
   double displayToOriginal(double value) {
+    if (isCustom) return value;
     final canonical = _safeCanonicalQuantity(value, displayUnit, name);
     if (canonical == null) return value;
     final origFactor = canonicalPerOriginal;
     if (origFactor == null || origFactor.abs() < 1e-9) return value;
-    final unitMatch = canonicalUnitOriginal == null ||
+    final unitMatch =
+        canonicalUnitOriginal == null ||
         canonical.unit == canonicalUnitOriginal ||
         canonicalUnitDisplay == canonicalUnitOriginal;
     if (!unitMatch) return value;
@@ -45,11 +51,13 @@ class _IngredientDialogEntry {
   }
 
   double originalToDisplay(double value) {
+    if (isCustom) return value;
     final canonical = _safeCanonicalQuantity(value, originalUnit, name);
     if (canonical == null) return value;
     final displayFactor = canonicalPerDisplay;
     if (displayFactor == null || displayFactor.abs() < 1e-9) return value;
-    final unitMatch = canonicalUnitDisplay == null ||
+    final unitMatch =
+        canonicalUnitDisplay == null ||
         canonical.unit == canonicalUnitDisplay ||
         canonicalUnitOriginal == canonicalUnitDisplay;
     if (!unitMatch) return value;
@@ -57,11 +65,12 @@ class _IngredientDialogEntry {
   }
 }
 
-Future<Map<String, double>?> showIngredientConfirmationDialog(
+Future<ManualIngredientSelection?> showIngredientConfirmationDialog(
   BuildContext context, {
   required RecipeModel recipe,
   required int servings,
   Map<String, double>? initialRequiredAmounts,
+  List<ManualCustomIngredient>? initialCustomIngredients,
 }) async {
   final user = FirebaseAuth.instance.currentUser;
   final displayName = (user?.displayName?.trim().isNotEmpty ?? false)
@@ -75,9 +84,17 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
       .toList(growable: false);
 
   if (entries.isEmpty) {
-    return initialRequiredAmounts == null
+    final overrides = initialRequiredAmounts == null
         ? <String, double>{}
         : Map<String, double>.from(initialRequiredAmounts);
+    final additions = (initialCustomIngredients ?? const [])
+        .map((item) => item.sanitize())
+        .where((item) => item.isValid)
+        .toList(growable: false);
+    return ManualIngredientSelection(
+      overrides: overrides,
+      additions: additions,
+    );
   }
 
   final baseStatuses = analyzeIngredientStatus(
@@ -89,6 +106,10 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
   final entryData = <_IngredientDialogEntry>[];
   final defaults = <String, double>{};
   final working = <String, double>{};
+  final removedEntries = <String>{};
+  final customNames = <String, String>{};
+  final customUnits = <String, String>{};
+  int nextCustomIndex = 0;
 
   for (var i = 0; i < entries.length; i++) {
     final ingredient = entries[i];
@@ -101,8 +122,8 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
       displayUnit = ingredient.unit.trim();
     }
 
-    double displayDefault = status?.requiredAmount ??
-        (ingredient.numericAmount * multiplier);
+    double displayDefault =
+        status?.requiredAmount ?? (ingredient.numericAmount * multiplier);
     if (!displayDefault.isFinite || displayDefault < 0) {
       displayDefault = 0;
     }
@@ -113,13 +134,10 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
       ingredient.unit.trim(),
       key,
     );
-    final displayCanonical = _safeCanonicalQuantity(
-      1,
-      displayUnit,
-      key,
-    );
+    final displayCanonical = _safeCanonicalQuantity(1, displayUnit, key);
 
     final entry = _IngredientDialogEntry(
+      id: 'recipe-$i',
       name: key,
       optional: ingredient.isOptional,
       originalUnit: ingredient.unit.trim(),
@@ -132,7 +150,7 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
     );
     entryData.add(entry);
 
-    defaults[key] = normalizedDefault;
+    defaults[entry.id] = normalizedDefault;
 
     final initialOriginal = initialRequiredAmounts?[key];
     double initialDisplay;
@@ -147,40 +165,95 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
     }
     if (initialDisplay < 0) initialDisplay = 0;
 
-    working[key] = _normalizeAmount(initialDisplay);
+    working[entry.id] = _normalizeAmount(initialDisplay);
+  }
+
+  if (initialCustomIngredients != null && initialCustomIngredients.isNotEmpty) {
+    for (final custom in initialCustomIngredients) {
+      final sanitized = custom.sanitize();
+      if (!sanitized.isValid) continue;
+      final id = 'custom-init-${nextCustomIndex++}';
+      final normalizedDefault = _normalizeAmount(sanitized.amount);
+      final entry = _IngredientDialogEntry(
+        id: id,
+        name: sanitized.name,
+        optional: false,
+        originalUnit: '',
+        displayUnit: sanitized.unit,
+        displayDefault: normalizedDefault,
+        canonicalPerOriginal: null,
+        canonicalPerDisplay: null,
+        canonicalUnitOriginal: null,
+        canonicalUnitDisplay: null,
+        isCustom: true,
+      );
+      entryData.add(entry);
+      defaults[id] = normalizedDefault;
+      working[id] = normalizedDefault;
+      customNames[id] = sanitized.name;
+      customUnits[id] = sanitized.unit;
+    }
   }
 
   if (entryData.isEmpty) {
-    return initialRequiredAmounts == null
+    final overrides = initialRequiredAmounts == null
         ? <String, double>{}
         : Map<String, double>.from(initialRequiredAmounts);
+    return ManualIngredientSelection(overrides: overrides);
   }
 
-  final controllers = <String, TextEditingController>{};
+  final amountControllers = <String, TextEditingController>{};
+  final nameControllers = <String, TextEditingController>{};
+  final unitControllers = <String, TextEditingController>{};
 
-  final dialogResult = await showDialog<Map<String, double>>(
+  final dialogResult = await showDialog<ManualIngredientSelection>(
     context: context,
     builder: (context) {
       return StatefulBuilder(
         builder: (context, setState) {
-          Map<String, double> normalizeOutput() {
-            final result = <String, double>{};
+          ManualIngredientSelection normalizeOutput() {
+            final overrides = <String, double>{};
+            final additions = <ManualCustomIngredient>[];
             for (final entry in entryData) {
-              final key = entry.name;
-              final defaultValue = defaults[key] ?? entry.displayDefault;
-              final displayValue = working[key] ?? defaultValue;
-              final sanitizedDisplay =
-                  displayValue.isFinite ? displayValue : defaultValue;
-              double clampedDisplay =
-                  sanitizedDisplay < 0 ? 0 : sanitizedDisplay;
+              final id = entry.id;
+              final defaultValue = defaults[id] ?? entry.displayDefault;
+              final bool removed = removedEntries.contains(id);
+              final double displayValue = removed
+                  ? 0.0
+                  : (working[id] ?? defaultValue);
+              final double sanitizedDisplay = displayValue.isFinite
+                  ? displayValue
+                  : defaultValue;
+              double clampedDisplay = sanitizedDisplay < 0
+                  ? 0.0
+                  : sanitizedDisplay;
               if (clampedDisplay > 99999.0) clampedDisplay = 99999.0;
+              if (entry.isCustom) {
+                final customName = customNames[id]?.trim() ?? '';
+                if (customName.isEmpty || removed) {
+                  continue;
+                }
+                final customUnit = customUnits[id]?.trim() ?? '';
+                if (clampedDisplay <= 0) continue;
+                additions.add(
+                  ManualCustomIngredient(
+                    name: customName,
+                    amount: _normalizeAmount(clampedDisplay),
+                    unit: customUnit,
+                  ),
+                );
+                continue;
+              }
               final originalAmount = entry.displayToOriginal(clampedDisplay);
               final normalizedOriginal = originalAmount.isFinite
                   ? _normalizeAmount(originalAmount < 0 ? 0 : originalAmount)
                   : _normalizeAmount(0);
-              result[key] = normalizedOriginal;
+              overrides[entry.name] = normalizedOriginal;
             }
-            return result;
+            return ManualIngredientSelection(
+              overrides: overrides,
+              additions: additions,
+            );
           }
 
           return AlertDialog(
@@ -201,22 +274,32 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                       style: TextStyle(color: Colors.black54),
                     ),
                     const SizedBox(height: 16),
-                    ...entryData.map((entry) {
-                      final key = entry.name;
-                      final displayUnit = entry.displayUnit.trim();
-                      final defaultValue = defaults[key] ?? entry.displayDefault;
-                      final value = working[key] ?? defaultValue;
+                    ...entryData.where((entry) => !removedEntries.contains(entry.id)).map((
+                      entry,
+                    ) {
+                      final id = entry.id;
+                      final isCustom = entry.isCustom;
+                      final defaultValue = defaults[id] ?? entry.displayDefault;
+                      final value = working[id] ?? defaultValue;
                       final optional = entry.optional;
                       const double step = 1.0;
-                      final unitLabel = displayUnit.isEmpty ? '' : ' $displayUnit';
-                      final controller = controllers.putIfAbsent(
-                        key,
+                      final displayUnit = isCustom
+                          ? (customUnits[id]?.trim() ?? '')
+                          : entry.displayUnit.trim();
+                      final controller = amountControllers.putIfAbsent(
+                        id,
                         () => TextEditingController(),
                       );
+                      final currentName = isCustom
+                          ? (customNames[id] ?? '')
+                          : entry.name;
+                      final labelNameForFormat = currentName.isEmpty
+                          ? entry.name
+                          : currentName;
                       final displayString = _formatAmount(
                         value,
                         unit: displayUnit,
-                        ingredientName: entry.name,
+                        ingredientName: labelNameForFormat,
                       );
                       if (controller.text != displayString) {
                         controller.value = controller.value.copyWith(
@@ -226,6 +309,39 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                           ),
                         );
                       }
+                      TextEditingController? nameController;
+                      TextEditingController? unitController;
+                      if (isCustom) {
+                        final desiredName = customNames[id] ?? '';
+                        nameController = nameControllers.putIfAbsent(
+                          id,
+                          () => TextEditingController(text: desiredName),
+                        );
+                        if (nameController.text != desiredName) {
+                          nameController.value = nameController.value.copyWith(
+                            text: desiredName,
+                            selection: TextSelection.collapsed(
+                              offset: desiredName.length,
+                            ),
+                          );
+                        }
+                        final desiredUnit = customUnits[id] ?? '';
+                        unitController = unitControllers.putIfAbsent(
+                          id,
+                          () => TextEditingController(text: desiredUnit),
+                        );
+                        if (unitController.text != desiredUnit) {
+                          unitController.value = unitController.value.copyWith(
+                            text: desiredUnit,
+                            selection: TextSelection.collapsed(
+                              offset: desiredUnit.length,
+                            ),
+                          );
+                        }
+                      }
+                      final unitLabel = displayUnit.isEmpty
+                          ? ''
+                          : ' $displayUnit';
                       return Container(
                         margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.all(12),
@@ -241,15 +357,32 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    entry.name,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 15,
-                                    ),
-                                  ),
+                                  child: isCustom
+                                      ? TextField(
+                                          controller: nameController,
+                                          decoration: const InputDecoration(
+                                            hintText: 'ชื่อวัตถุดิบ',
+                                            border: InputBorder.none,
+                                          ),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 15,
+                                          ),
+                                          onChanged: (text) {
+                                            setState(() {
+                                              customNames[id] = text;
+                                            });
+                                          },
+                                        )
+                                      : Text(
+                                          entry.name,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 15,
+                                          ),
+                                        ),
                                 ),
-                                if (optional)
+                                if (optional && !isCustom)
                                   Container(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 8,
@@ -268,6 +401,50 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                                       ),
                                     ),
                                   ),
+                                IconButton(
+                                  tooltip: 'ลบวัตถุดิบ',
+                                  onPressed: () {
+                                    setState(() {
+                                      if (isCustom) {
+                                        entryData.removeWhere(
+                                          (element) => element.id == id,
+                                        );
+                                        defaults.remove(id);
+                                        working.remove(id);
+                                        final amountController =
+                                            amountControllers.remove(id);
+                                        amountController?.dispose();
+                                        final nameController = nameControllers
+                                            .remove(id);
+                                        nameController?.dispose();
+                                        final unitController = unitControllers
+                                            .remove(id);
+                                        unitController?.dispose();
+                                        customNames.remove(id);
+                                        customUnits.remove(id);
+                                      } else {
+                                        removedEntries.add(id);
+                                        working[id] = 0;
+                                        final amountController =
+                                            amountControllers[id];
+                                        if (amountController != null) {
+                                          amountController.value =
+                                              amountController.value.copyWith(
+                                                text: '0',
+                                                selection:
+                                                    const TextSelection.collapsed(
+                                                      offset: 1,
+                                                    ),
+                                              );
+                                        }
+                                      }
+                                    });
+                                  },
+                                  icon: Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.red[400],
+                                  ),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 8),
@@ -278,7 +455,9 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                                   decoration: BoxDecoration(
                                     color: Colors.white,
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: Colors.grey[300]!),
+                                    border: Border.all(
+                                      color: Colors.grey[300]!,
+                                    ),
                                   ),
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 6,
@@ -292,22 +471,26 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                                         onTap: () {
                                           double next = value - step;
                                           if (next < 0) next = 0;
-                                          final normalized = _normalizeAmount(next);
+                                          final normalized = _normalizeAmount(
+                                            next,
+                                          );
                                           setState(() {
-                                            working[key] = normalized;
+                                            working[id] = normalized;
                                           });
                                           final updated = _formatAmount(
                                             normalized,
                                             unit: displayUnit,
-                                            ingredientName: entry.name,
+                                            ingredientName: labelNameForFormat,
                                           );
                                           if (controller.text != updated) {
-                                            controller.value = controller.value.copyWith(
-                                              text: updated,
-                                              selection: TextSelection.collapsed(
-                                                offset: updated.length,
-                                              ),
-                                            );
+                                            controller.value = controller.value
+                                                .copyWith(
+                                                  text: updated,
+                                                  selection:
+                                                      TextSelection.collapsed(
+                                                        offset: updated.length,
+                                                      ),
+                                                );
                                           }
                                         },
                                       ),
@@ -325,32 +508,46 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                                           decoration: const InputDecoration(
                                             isDense: true,
                                             border: InputBorder.none,
-                                            contentPadding: EdgeInsets.symmetric(vertical: 4),
+                                            contentPadding:
+                                                EdgeInsets.symmetric(
+                                                  vertical: 4,
+                                                ),
                                           ),
                                           onTap: () {
-                                            controller.selection = TextSelection(
-                                              baseOffset: 0,
-                                              extentOffset: controller.text.length,
-                                            );
+                                            controller.selection =
+                                                TextSelection(
+                                                  baseOffset: 0,
+                                                  extentOffset:
+                                                      controller.text.length,
+                                                );
                                           },
                                           onChanged: (text) {
-                                            final parsed = double.tryParse(text);
-                                            final normalized = _normalizeAmount(parsed ?? 0);
+                                            final parsed = double.tryParse(
+                                              text,
+                                            );
+                                            final normalized = _normalizeAmount(
+                                              parsed ?? 0,
+                                            );
                                             setState(() {
-                                              working[key] = normalized;
+                                              working[id] = normalized;
                                             });
                                             final updated = _formatAmount(
                                               normalized,
                                               unit: displayUnit,
-                                              ingredientName: entry.name,
+                                              ingredientName:
+                                                  labelNameForFormat,
                                             );
                                             if (controller.text != updated) {
-                                              controller.value = controller.value.copyWith(
-                                                text: updated,
-                                                selection: TextSelection.collapsed(
-                                                  offset: updated.length,
-                                                ),
-                                              );
+                                              controller.value = controller
+                                                  .value
+                                                  .copyWith(
+                                                    text: updated,
+                                                    selection:
+                                                        TextSelection.collapsed(
+                                                          offset:
+                                                              updated.length,
+                                                        ),
+                                                  );
                                             }
                                           },
                                         ),
@@ -360,29 +557,56 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                                         onTap: () {
                                           double next = value + step;
                                           if (next > 99999) next = 99999;
-                                          final normalized = _normalizeAmount(next);
+                                          final normalized = _normalizeAmount(
+                                            next,
+                                          );
                                           setState(() {
-                                            working[key] = normalized;
+                                            working[id] = normalized;
                                           });
                                           final updated = _formatAmount(
                                             normalized,
                                             unit: displayUnit,
-                                            ingredientName: entry.name,
+                                            ingredientName: labelNameForFormat,
                                           );
                                           if (controller.text != updated) {
-                                            controller.value = controller.value.copyWith(
-                                              text: updated,
-                                              selection: TextSelection.collapsed(
-                                                offset: updated.length,
-                                              ),
-                                            );
+                                            controller.value = controller.value
+                                                .copyWith(
+                                                  text: updated,
+                                                  selection:
+                                                      TextSelection.collapsed(
+                                                        offset: updated.length,
+                                                      ),
+                                                );
                                           }
                                         },
                                       ),
                                     ],
                                   ),
                                 ),
-                                if (unitLabel.trim().isNotEmpty) ...[
+                                if (isCustom) ...[
+                                  const SizedBox(width: 8),
+                                  SizedBox(
+                                    width: 80,
+                                    child: TextField(
+                                      controller: unitController,
+                                      textAlign: TextAlign.center,
+                                      decoration: const InputDecoration(
+                                        hintText: 'หน่วย',
+                                        isDense: true,
+                                        contentPadding: EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 6,
+                                        ),
+                                        border: OutlineInputBorder(),
+                                      ),
+                                      onChanged: (text) {
+                                        setState(() {
+                                          customUnits[id] = text;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ] else if (unitLabel.trim().isNotEmpty) ...[
                                   const SizedBox(width: 8),
                                   Text(
                                     unitLabel.trim(),
@@ -394,47 +618,75 @@ Future<Map<String, double>?> showIngredientConfirmationDialog(
                                 ],
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'สูตรแนะนำ: ${_formatAmount(
-                                    defaultValue,
-                                    unit: displayUnit,
-                                    ingredientName: entry.name,
-                                  )}${unitLabel.trim().isEmpty ? '' : unitLabel.trim()}',
-                              style: const TextStyle(
-                                color: Colors.black54,
-                                fontSize: 12,
+                            if (!isCustom) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'สูตรแนะนำ: ${_formatAmount(defaultValue, unit: displayUnit, ingredientName: entry.name)}${unitLabel.trim().isEmpty ? '' : unitLabel.trim()}',
+                                style: const TextStyle(
+                                  color: Colors.black54,
+                                  fontSize: 12,
+                                ),
                               ),
-                            ),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: () {
-                                  final normalized = _normalizeAmount(defaultValue);
-                                  setState(() {
-                                    working[key] = normalized;
-                                  });
-                                  final updated = _formatAmount(
-                                    normalized,
-                                    unit: displayUnit,
-                                    ingredientName: entry.name,
-                                  );
-                                  if (controller.text != updated) {
-                                    controller.value = controller.value.copyWith(
-                                      text: updated,
-                                      selection: TextSelection.collapsed(
-                                        offset: updated.length,
-                                      ),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () {
+                                    final normalized = _normalizeAmount(
+                                      defaultValue,
                                     );
-                                  }
-                                },
-                                child: const Text('รีเซ็ตตามสูตร'),
+                                    setState(() {
+                                      working[id] = normalized;
+                                    });
+                                    final updated = _formatAmount(
+                                      normalized,
+                                      unit: displayUnit,
+                                      ingredientName: entry.name,
+                                    );
+                                    if (controller.text != updated) {
+                                      controller.value = controller.value
+                                          .copyWith(
+                                            text: updated,
+                                            selection: TextSelection.collapsed(
+                                              offset: updated.length,
+                                            ),
+                                          );
+                                    }
+                                  },
+                                  child: const Text('รีเซ็ตตามสูตร'),
+                                ),
                               ),
-                            ),
+                            ],
                           ],
                         ),
                       );
                     }),
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          final id = 'custom-${nextCustomIndex++}';
+                          final entry = _IngredientDialogEntry(
+                            id: id,
+                            name: 'วัตถุดิบใหม่',
+                            optional: false,
+                            originalUnit: '',
+                            displayUnit: '',
+                            displayDefault: 0,
+                            canonicalPerOriginal: null,
+                            canonicalPerDisplay: null,
+                            canonicalUnitOriginal: null,
+                            canonicalUnitDisplay: null,
+                            isCustom: true,
+                          );
+                          entryData.add(entry);
+                          defaults[id] = 0;
+                          working[id] = 0;
+                          customNames[id] = '';
+                          customUnits[id] = '';
+                        });
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('เพิ่มวัตถุดิบ'),
+                    ),
                   ],
                 ),
               ),
@@ -516,6 +768,7 @@ Future<bool> showShortageDialog(
   required int servings,
   required List<IngredientShortage> shortages,
   Map<String, double>? manualRequiredAmounts,
+  List<ManualCustomIngredient>? manualCustomIngredients,
 }) async {
   final provider = context.read<EnhancedRecommendationProvider>();
   final purchaseItems = computePurchaseItems(
@@ -523,6 +776,7 @@ Future<bool> showShortageDialog(
     provider.ingredients,
     servings: servings,
     manualRequiredAmounts: manualRequiredAmounts,
+    manualCustomIngredients: manualCustomIngredients,
   );
 
   final displayItems = purchaseItems
@@ -544,61 +798,61 @@ Future<bool> showShortageDialog(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('วัตถุดิบต่อไปนี้มีไม่พอกับจำนวนเสิร์ฟ (อิงจากหน้ารายละเอียดเมนูตามจำนวนคนที่เลือก) จะให้ระบบใช้เท่าที่มีและบันทึกสต็อกหรือไม่?'),
+                  const Text(
+                    'วัตถุดิบต่อไปนี้มีไม่พอกับจำนวนเสิร์ฟ (อิงจากหน้ารายละเอียดเมนูตามจำนวนคนที่เลือก) จะให้ระบบใช้เท่าที่มีและบันทึกสต็อกหรือไม่?',
+                  ),
                   const SizedBox(height: 12),
                   if (displayItems.isNotEmpty)
-                    ...displayItems.map(
-                      (item) {
-                        final unit = item.unit.trim();
-                        final qtyValue = formatQuantityNumber(
-                          item.quantity,
-                          unit: item.unit,
-                          ingredientName: item.name,
-                        );
-                        final qtyText = unit.isEmpty ? qtyValue : '$qtyValue $unit';
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 3),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.shopping_cart_outlined,
-                                size: 16,
-                                color: Colors.orange,
+                    ...displayItems.map((item) {
+                      final unit = item.unit.trim();
+                      final qtyValue = formatQuantityNumber(
+                        item.quantity,
+                        unit: item.unit,
+                        ingredientName: item.name,
+                      );
+                      final qtyText = unit.isEmpty
+                          ? qtyValue
+                          : '$qtyValue $unit';
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.shopping_cart_outlined,
+                              size: 16,
+                              color: Colors.orange,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                item.name,
+                                style: const TextStyle(color: Colors.black87),
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  item.name,
-                                  style: const TextStyle(color: Colors.black87),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              qtyText,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black87,
                               ),
-                              const SizedBox(width: 6),
-                              Text(
-                                qtyText,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.black87,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    )
+                            ),
+                          ],
+                        ),
+                      );
+                    })
                   else
                     ...shortages.map((item) {
                       final missing = item.missingAmount;
                       final trimmedUnit = item.unit.trim();
-                      final unitLabel = trimmedUnit.isEmpty ? '' : ' $trimmedUnit';
+                      final unitLabel = trimmedUnit.isEmpty
+                          ? ''
+                          : ' $trimmedUnit';
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Text(
-                          '${item.name} • ขาด ${_formatAmount(
-                                missing,
-                                unit: trimmedUnit,
-                                ingredientName: item.name,
-                              )}$unitLabel',
+                          '${item.name} • ขาด ${_formatAmount(missing, unit: trimmedUnit, ingredientName: item.name)}$unitLabel',
                         ),
                       );
                     }),
@@ -612,7 +866,9 @@ Future<bool> showShortageDialog(
               ),
               ElevatedButton(
                 onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange[700]),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange[700],
+                ),
                 child: const Text('ใช้เท่าที่มี'),
               ),
             ],
@@ -640,7 +896,9 @@ Future<void> showPartialSuccessDialog(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('ใช้วัตถุดิบที่มีอยู่แล้ว ระบบบันทึกวัตถุดิบที่ยังขาดไว้นี้:'),
+          const Text(
+            'ใช้วัตถุดิบที่มีอยู่แล้ว ระบบบันทึกวัตถุดิบที่ยังขาดไว้นี้:',
+          ),
           const SizedBox(height: 12),
           ...shortages
               .where((item) => item.missingAmount > 0)
@@ -648,19 +906,10 @@ Future<void> showPartialSuccessDialog(
                 (item) => Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Text(
-                    '- ${item.name}: ต้องการ ${_formatAmount(
-                          item.requiredAmount,
-                          unit: item.unit,
-                          ingredientName: item.name,
-                        )}${item.unit.trim().isEmpty ? '' : ' ${item.unit.trim()}'} ขาด ${_formatAmount(
-                          item.missingAmount,
-                          unit: item.unit,
-                          ingredientName: item.name,
-                        )}',
+                    '- ${item.name}: ต้องการ ${_formatAmount(item.requiredAmount, unit: item.unit, ingredientName: item.name)}${item.unit.trim().isEmpty ? '' : ' ${item.unit.trim()}'} ขาด ${_formatAmount(item.missingAmount, unit: item.unit, ingredientName: item.name)}',
                   ),
                 ),
-              )
-              .toList(),
+              ),
         ],
       ),
       actions: [
@@ -678,10 +927,7 @@ Future<void> showPartialSuccessDialog(
 }
 
 class _QuantityButton extends StatelessWidget {
-  const _QuantityButton({
-    required this.icon,
-    required this.onTap,
-  });
+  const _QuantityButton({required this.icon, required this.onTap});
 
   final IconData icon;
   final VoidCallback onTap;
@@ -702,12 +948,7 @@ String _formatAmount(
   double value, {
   String unit = '',
   String ingredientName = '',
-}) =>
-    formatQuantityNumber(
-      value,
-      unit: unit,
-      ingredientName: ingredientName,
-    );
+}) => formatQuantityNumber(value, unit: unit, ingredientName: ingredientName);
 
 double _normalizeAmount(double value) {
   if (!value.isFinite || value <= 0) return 0;
