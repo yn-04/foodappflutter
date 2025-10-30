@@ -19,6 +19,7 @@ import '../models/filter_options.dart';
 import '../utils/ingredient_utils.dart';
 import '../utils/ingredient_translator.dart';
 import '../utils/allergy_utils.dart';
+import '../services/nutrition_estimator.dart';
 
 class EnhancedRecommendationProvider extends ChangeNotifier {
   static const int _minimumRecommendationCount = 12;
@@ -43,20 +44,25 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     'paleo': 'paleo',
     'low-carb': 'low-carb',
     'low carb': 'low-carb',
+    'low_carb': 'low-carb',
     'คาร์บต่ำ': 'low-carb',
     'high-protein': 'high-protein',
     'high protein': 'high-protein',
+    'high_protein': 'high-protein',
     'โปรตีนสูง': 'high-protein',
     'low-fat': 'low-fat',
     'low fat': 'low-fat',
+    'low_fat': 'low-fat',
     'ไขมันต่ำ': 'low-fat',
     'gluten-free': 'gluten-free',
     'gluten free': 'gluten-free',
     'glutenfree': 'gluten-free',
+    'gluten_free': 'gluten-free',
     'ปลอดกลูเตน': 'gluten-free',
     'dairy-free': 'dairy-free',
     'dairy free': 'dairy-free',
     'dairyfree': 'dairy-free',
+    'dairy_free': 'dairy-free',
     'ปลอดนม': 'dairy-free',
     'ไม่กินนม': 'dairy-free',
   };
@@ -138,6 +144,13 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
       normalized.add(_dietGoalAliases[key] ?? key);
     }
     return normalized;
+  }
+
+  Set<String> _effectiveDietGoalsForRequest() {
+    return <String>{
+      ..._dietPreferences,
+      ...(_userDietOverride ? _explicitDietGoals : _filters.dietGoals),
+    };
   }
 
   bool _isUserRecipe(RecipeModel recipe) {
@@ -537,9 +550,7 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
         _userRecipes = await _userRecipeService.getUserRecipes();
       } catch (_) {}
 
-      final activeDietGoals = _userDietOverride
-          ? _explicitDietGoals
-          : {..._dietPreferences, ..._filters.dietGoals};
+      final activeDietGoals = _effectiveDietGoalsForRequest();
       final normalizedDietGoals = _normalizeDietGoals(activeDietGoals);
 
       String _formatCalories() {
@@ -735,157 +746,15 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
       manualIngredientNames: null,
     );
     _filters = reset;
+    _explicitDietGoals = {};
+    _userDietOverride = false;
     debugPrint('♻️ รีเซ็ตฟิลเตอร์ผู้ใช้หลังประมวลผลคำแนะนำ');
   }
 
   void _appendFallbackRecommendations() {
     final needed = _minimumRecommendationCount - _recommendations.length;
     if (needed <= 0) return;
-    final existingIds = _recommendations.map((r) => r.id).toSet();
-    final fallbackPool = _fallbackRecommendations();
-    for (final recipe in fallbackPool) {
-      if (_recommendations.length >= _minimumRecommendationCount) break;
-      if (existingIds.contains(recipe.id)) continue;
-      _recommendations.add(recipe);
-      existingIds.add(recipe.id);
-    }
-  }
-
-  List<RecipeModel> _fallbackRecommendations() {
-    return [
-      _buildSimpleRecipe(
-        id: 'fallback_pad_kra_prao',
-        name: 'ผัดกะเพราไก่ไข่ดาว',
-        description: 'เมนูไทยยอดนิยม ใช้วัตถุดิบพื้นฐานอย่างไก่สับและใบกะเพรา',
-        calories: 520,
-        protein: 32,
-        carbs: 48,
-        fat: 20,
-        ingredients: [
-          RecipeIngredient(name: 'อกไก่สับ', amount: 200, unit: 'g'),
-          RecipeIngredient(name: 'ใบกะเพรา', amount: 1, unit: 'กำ'),
-          RecipeIngredient(name: 'พริกกระเทียมตำ', amount: 2, unit: 'ช้อนโต๊ะ'),
-          RecipeIngredient(name: 'ข้าวสวย', amount: 1, unit: 'จาน'),
-        ],
-      ),
-      _buildSimpleRecipe(
-        id: 'fallback_green_curry',
-        name: 'แกงเขียวหวานไก่',
-        description: 'รสเข้มข้นจากน้ำกะทิและเครื่องแกงหอมจัดจ้าน',
-        calories: 450,
-        protein: 28,
-        carbs: 24,
-        fat: 28,
-        ingredients: [
-          RecipeIngredient(name: 'สะโพกไก่หั่นชิ้น', amount: 250, unit: 'g'),
-          RecipeIngredient(name: 'กะทิกล่อง', amount: 250, unit: 'ml'),
-          RecipeIngredient(
-            name: 'น้ำพริกแกงเขียวหวาน',
-            amount: 2,
-            unit: 'ช้อนโต๊ะ',
-          ),
-          RecipeIngredient(name: 'มะเขือพวง', amount: 50, unit: 'g'),
-          RecipeIngredient(name: 'ใบโหระพา', amount: 1, unit: 'กำ'),
-        ],
-      ),
-      _buildSimpleRecipe(
-        id: 'fallback_salmon_salad',
-        name: 'สลัดปลาแซลมอนย่างซอสส้ม',
-        description: 'จานสุขภาพโปรตีนสูงพร้อมผักหลากสี',
-        calories: 380,
-        protein: 30,
-        carbs: 18,
-        fat: 20,
-        ingredients: [
-          RecipeIngredient(name: 'ปลาแซลมอนย่าง', amount: 150, unit: 'g'),
-          RecipeIngredient(name: 'ผักสลัดรวม', amount: 120, unit: 'g'),
-          RecipeIngredient(name: 'ส้มซันควิก', amount: 30, unit: 'ml'),
-          RecipeIngredient(name: 'อัลมอนด์อบ', amount: 1, unit: 'ช้อนโต๊ะ'),
-        ],
-      ),
-      _buildSimpleRecipe(
-        id: 'fallback_quinoa_bowl',
-        name: 'ควินัวโบวล์เต้าหู้ย่าง',
-        description: 'เหมาะสำหรับสายรักสุขภาพได้คาร์บเชิงซ้อนและโปรตีนพืช',
-        calories: 410,
-        protein: 24,
-        carbs: 50,
-        fat: 12,
-        ingredients: [
-          RecipeIngredient(name: 'ควินัวสุก', amount: 180, unit: 'g'),
-          RecipeIngredient(name: 'เต้าหู้แข็งย่าง', amount: 120, unit: 'g'),
-          RecipeIngredient(name: 'บร็อคโคลีลวก', amount: 80, unit: 'g'),
-          RecipeIngredient(name: 'น้ำมันมะกอก', amount: 1, unit: 'ช้อนชา'),
-        ],
-      ),
-      _buildSimpleRecipe(
-        id: 'fallback_stir_fried_morning_glory',
-        name: 'ผัดผักบุ้งไฟแดง',
-        description: 'เมนูผักทำง่ายที่ช่วยเพิ่มไฟเบอร์',
-        calories: 180,
-        protein: 6,
-        carbs: 14,
-        fat: 10,
-        ingredients: [
-          RecipeIngredient(name: 'ผักบุ้งไทย', amount: 200, unit: 'g'),
-          RecipeIngredient(name: 'เต้าเจี้ยว', amount: 1, unit: 'ช้อนโต๊ะ'),
-          RecipeIngredient(name: 'กระเทียม', amount: 3, unit: 'กลีบ'),
-          RecipeIngredient(name: 'พริกชี้ฟ้า', amount: 1, unit: 'เม็ด'),
-        ],
-      ),
-      _buildSimpleRecipe(
-        id: 'fallback_chicken_congee',
-        name: 'โจ๊กไก่ใส่ไข่',
-        description: 'ย่อยง่าย ให้พลังงานพอดีสำหรับมื้อเช้า',
-        calories: 320,
-        protein: 18,
-        carbs: 42,
-        fat: 8,
-        ingredients: [
-          RecipeIngredient(name: 'ข้าวกล้องหุง', amount: 1, unit: 'ถ้วย'),
-          RecipeIngredient(name: 'เนื้อไก่ฉีก', amount: 100, unit: 'g'),
-          RecipeIngredient(name: 'ไข่ไก่', amount: 1, unit: 'ฟอง'),
-          RecipeIngredient(name: 'ขิงซอย', amount: 1, unit: 'ช้อนโต๊ะ'),
-        ],
-      ),
-    ];
-  }
-
-  RecipeModel _buildSimpleRecipe({
-    required String id,
-    required String name,
-    required String description,
-    required double calories,
-    required double protein,
-    required double carbs,
-    required double fat,
-    required List<RecipeIngredient> ingredients,
-  }) {
-    return RecipeModel(
-      id: id,
-      name: name,
-      originalName: name,
-      description: description,
-      matchScore: 55,
-      reason: 'เมนูสำรองเพื่อเติมจำนวนคำแนะนำ',
-      ingredients: ingredients,
-      missingIngredients: const [],
-      steps: const [],
-      cookingTime: 20,
-      prepTime: 10,
-      difficulty: 'ง่าย',
-      servings: 2,
-      category: 'อาหารจานหลัก',
-      nutrition: NutritionInfo(
-        calories: calories,
-        protein: protein,
-        carbs: carbs,
-        fat: fat,
-        fiber: 4,
-        sodium: 480,
-      ),
-      source: 'Fallback',
-    );
+    // ยกเลิกการเติมเมนูสำรองเพื่อหลีกเลี่ยงสูตรที่ไม่ได้มาจาก Spoonacular
   }
 
   Future<void> _loadHealthProfile() async {
@@ -915,21 +784,19 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
 
         // dietPreferences
         final diets = hp['dietPreferences'];
+        var normalizedPrefs = <String>{};
         if (diets is List) {
           final raw = diets
               .whereType<String>()
               .map((e) => e.trim())
               .where((e) => e.isNotEmpty);
-          final normalizedPrefs = _normalizeDietGoals(raw);
-          _dietPreferences = normalizedPrefs;
-          if (normalizedPrefs.isNotEmpty && !_userDietOverride) {
-            if (_filters.dietGoals.isEmpty) {
-              _filters = _filters.copyWith(dietGoals: normalizedPrefs);
-            } else {
-              final merged = {..._filters.dietGoals, ...normalizedPrefs};
-              _filters = _filters.copyWith(dietGoals: merged);
-            }
-          }
+          normalizedPrefs = _normalizeDietGoals(raw);
+        }
+        _dietPreferences = normalizedPrefs;
+        if (!_userDietOverride &&
+            !setEquals(_filters.dietGoals, normalizedPrefs)) {
+          _filters =
+              _filters.copyWith(dietGoals: Set<String>.from(normalizedPrefs));
         }
         // nutritionTargetsPerMeal
         int? _readInt(dynamic v) {
@@ -990,6 +857,10 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
     _healthLoaded = true;
   }
 
+  void invalidateHealthProfileCache() {
+    _healthLoaded = false;
+  }
+
   Map<String, dynamic> _buildHealthProfileForAI() {
     final map = <String, dynamic>{};
     if (_allergies.isNotEmpty) {
@@ -999,9 +870,7 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
       map['diet_preferences'] = _dietPreferences.toList();
     }
     final macroTargets = <String, Map<String, int>>{};
-    final effectiveGoals = _userDietOverride
-        ? _explicitDietGoals
-        : {..._dietPreferences, ..._filters.dietGoals};
+    final effectiveGoals = _effectiveDietGoalsForRequest();
     int? _macroValue(int? manual, int? fallback) => manual ?? fallback;
     if (effectiveGoals.contains('high-protein')) {
       final proteinSource = _macroValue(_filters.minProtein, _hpMinProtein);
@@ -1036,9 +905,7 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
 
   String? _buildDietaryNotesForAI() {
     final parts = <String>[];
-    final activeDietGoals = _userDietOverride
-        ? _explicitDietGoals
-        : {..._dietPreferences, ..._filters.dietGoals};
+    final activeDietGoals = _effectiveDietGoalsForRequest();
     if (activeDietGoals.isNotEmpty) {
       parts.add('ข้อจำกัดอาหาร: ${activeDietGoals.join(', ')}');
     }
@@ -1283,7 +1150,19 @@ class EnhancedRecommendationProvider extends ChangeNotifier {
   // ---------- User Recipes CRUD ----------
   Future<void> addUserRecipe(RecipeModel recipe) async {
     try {
-      await _userRecipeService.addUserRecipe(recipe);
+      final needsNutrition = recipe.nutrition.calories <= 0 &&
+          recipe.nutrition.protein <= 0 &&
+          recipe.nutrition.carbs <= 0 &&
+          recipe.nutrition.fat <= 0 &&
+          recipe.nutrition.fiber <= 0 &&
+          recipe.nutrition.sodium <= 0;
+      final enriched = needsNutrition
+          ? recipe.copyWith(
+              nutrition: NutritionEstimator.estimateForRecipe(recipe),
+            )
+          : recipe;
+
+      await _userRecipeService.addUserRecipe(enriched);
       await _userRecipeService.syncDraftsToCloud();
       _userRecipes = await _userRecipeService.getUserRecipes();
       // นำหน้าในรายการแนะนำโดยตัดรายการซ้ำ
