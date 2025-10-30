@@ -1,12 +1,16 @@
 //lib/foodreccom/widgets/recipe_detail/missing_ingredients.dart
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:intl/intl.dart';
 import 'package:my_app/foodreccom/constants/nutrition_thresholds.dart';
 import 'package:my_app/foodreccom/models/purchase_item.dart';
 import 'package:my_app/foodreccom/providers/enhanced_recommendation_provider.dart';
 import 'package:my_app/foodreccom/utils/purchase_item_utils.dart';
+import 'package:my_app/rawmaterial/utils/price_estimator.dart';
 import '../../models/recipe/recipe.dart';
 
 class MissingIngredientsSection extends StatefulWidget {
@@ -29,9 +33,31 @@ class MissingIngredientsSection extends StatefulWidget {
       _MissingIngredientsSectionState();
 }
 
+class _CostEstimate {
+  final double min;
+  final double max;
+
+  const _CostEstimate({required this.min, required this.max});
+
+  double get mid => (min + max) / 2;
+  double get spread => (max - min).abs();
+  bool get isTight {
+    final baseline = max <= 0 ? 5 : max;
+    final tolerance = (baseline * 0.05) + 2;
+    return spread <= tolerance;
+  }
+
+  _CostEstimate operator +(_CostEstimate other) => _CostEstimate(
+        min: (min + other.min).clamp(0, double.infinity).toDouble(),
+        max: (max + other.max).clamp(0, double.infinity).toDouble(),
+      );
+}
+
 class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
   String _storeType =
-      'ซูเปอร์มาร์เก็ต'; // 'ตลาดสด' | 'ซูเปอร์มาร์เก็ต' | 'โชห่วย'
+      'ซูเปอร์มาร์เก็ต'; // 'ตลาดสด' | 'ซูเปอร์มาร์เก็ต' | 'มินิมาร์ท'
+
+  static const _CostEstimate _zeroCost = _CostEstimate(min: 0, max: 0);
 
   @override
   Widget build(BuildContext context) {
@@ -52,23 +78,23 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.orange[50],
+        color: const Color.fromRGBO(253, 245, 214, 1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange[200]!),
+        border: Border.all(color: const Color.fromRGBO(251, 192, 45, 1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.shopping_cart, color: Colors.orange[700], size: 18),
+              const Icon(Icons.shopping_cart, color: Colors.black, size: 18),
               const SizedBox(width: 6),
               Text(
                 'วัตถุดิบที่ต้องซื้อ (${displayItems.length})',
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: Colors.orange[800],
+                  color: Colors.black,
                 ),
               ),
             ],
@@ -123,7 +149,7 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
     final chips = [
       ('ตลาดสด', Icons.storefront),
       ('ซูเปอร์มาร์เก็ต', Icons.local_mall_outlined),
-      ('โชห่วย', Icons.local_convenience_store_outlined),
+      ('มินิมาร์ท', Icons.local_convenience_store_outlined),
     ];
     return Wrap(
       spacing: 8,
@@ -155,7 +181,8 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
     final unitText = item.unit.trim().isEmpty
         ? qtyText
         : '$qtyText ${item.unit}';
-    final priceText = '฿${_estimateItemCost(item).toStringAsFixed(0)}';
+    final estimate = _estimateItemCost(item);
+    final priceText = _formatEstimate(estimate);
     final category = item.category ?? guessCategory(item.name);
     final store = _selectedStoreForCategory(category);
     return Padding(
@@ -164,34 +191,41 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
+              const Icon(
                 Icons.shopping_cart_outlined,
                 size: 16,
-                color: Colors.orange[600],
+                color: Colors.black,
               ),
               const SizedBox(width: 6),
               Expanded(
-                child: Text(
-                  item.name,
-                  style: TextStyle(color: Colors.orange[800]),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                unitText,
-                style: TextStyle(
-                  color: Colors.orange[900],
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                priceText,
-                style: TextStyle(
-                  color: Colors.orange[900],
-                  fontWeight: FontWeight.w700,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text.rich(
+                      TextSpan(
+                        text: unitText,
+                        children: [
+                          const TextSpan(text: '  '),
+                          TextSpan(text: priceText),
+                        ],
+                      ),
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -231,16 +265,89 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
   }
 
   // ---- Cost estimation helpers ----
-  double _estimateItemCost(PurchaseItem it) {
-    final cat = it.category ?? guessCategory(it.name);
-    final canon = toCanonicalQuantity(it.quantity.toDouble(), it.unit, it.name);
-    final price = _pricePerUnit(cat, canon.unit);
-    final m = _storeMultiplier(cat);
-    return canon.amount * price * m;
+  _CostEstimate _estimateItemCost(PurchaseItem it) {
+    final category = it.category ?? guessCategory(it.name);
+    final canonical =
+        toCanonicalQuantity(it.quantity.toDouble(), it.unit, it.name);
+    final multiplier = _storeMultiplier(category);
+
+    final estimate = PriceEstimator.estimateFromCanonical(
+      category: category,
+      canonicalAmount: canonical.amount,
+      canonicalUnit: canonical.unit,
+    );
+
+    if (estimate != null) {
+      return _CostEstimate(
+        min: estimate.minTotal * multiplier,
+        max: estimate.maxTotal * multiplier,
+      );
+    }
+
+    final fallbackPerUnit = _pricePerUnit(category, canonical.unit);
+    final base = canonical.amount * fallbackPerUnit * multiplier;
+    final slack = base < 50 ? 0.35 : 0.2;
+    final delta = (base * slack) + 2;
+    final min = base - delta;
+    return _CostEstimate(
+      min: min < 0 ? 0 : min,
+      max: base + delta,
+    );
   }
 
-  double _groupCost(List<PurchaseItem> items) =>
-      items.fold(0.0, (sum, it) => sum + _estimateItemCost(it));
+  _CostEstimate _groupCost(List<PurchaseItem> items) {
+    double min = 0;
+    double max = 0;
+    for (final item in items) {
+      final estimate = _estimateItemCost(item);
+      min += estimate.min;
+      max += estimate.max;
+    }
+    if (min < 0) min = 0;
+    if (max < min) max = min;
+    return _CostEstimate(min: min, max: max);
+  }
+
+  String _formatEstimate(
+    _CostEstimate estimate, {
+    bool includeApproxPrefix = true,
+  }) {
+    final digits = _currencyDigits(estimate.max);
+    final currency = NumberFormat.currency(
+      locale: 'th_TH',
+      symbol: '฿',
+      decimalDigits: digits,
+    );
+    if (estimate.isTight) {
+      final rounded = _roundUpCurrency(estimate.mid, digits);
+      final text = currency.format(rounded);
+      return includeApproxPrefix ? 'ประมาณ $text' : text;
+    }
+    var minRounded = _roundUpCurrency(estimate.min, digits);
+    final maxRounded = _roundUpCurrency(estimate.max, digits);
+    if (minRounded > maxRounded) minRounded = maxRounded;
+    final minText = currency.format(minRounded);
+    final maxText = currency.format(maxRounded);
+    final range = '$minText – $maxText';
+    return includeApproxPrefix ? 'ประมาณ $range' : range;
+  }
+
+  int _currencyDigits(double value) => 0;
+
+  double _roundUpCurrency(double value, int digits) {
+    if (value <= 0) return 0;
+    final factor = math.pow(10, digits).toDouble();
+    final scaled = value * factor;
+    var ceiled = scaled.ceilToDouble();
+    if (ceiled == 0 && scaled > 0) {
+      ceiled = 1;
+    }
+    final rounded = ceiled / factor;
+    if (rounded > 0 && rounded < 1) {
+      return 1;
+    }
+    return rounded;
+  }
 
   Widget _overallCostSummary(List<PurchaseItem> items) {
     final grouped = <String, List<PurchaseItem>>{};
@@ -248,10 +355,11 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
       final cat = item.category ?? guessCategory(item.name);
       grouped.putIfAbsent(cat, () => []).add(item);
     }
-    final total = grouped.values.fold<double>(
-      0.0,
+    final total = grouped.values.fold<_CostEstimate>(
+      _zeroCost,
       (s, list) => s + _groupCost(list),
     );
+    final totalLabel = _formatEstimate(total);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -279,7 +387,7 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
                 ),
               ),
               Text(
-                '฿${total.toStringAsFixed(0)}',
+                totalLabel,
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
                   color: Colors.blueGrey[900],
@@ -326,7 +434,7 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
         if (category == 'ผลไม้') return 0.85;
         if (category == 'เนื้อสัตว์') return 0.9;
         return 0.95;
-      case 'โชห่วย':
+      case 'มินิมาร์ท':
         if (category == 'เนื้อสัตว์') return 1.1;
         if (category == 'ผัก' || category == 'ผลไม้') return 1.15;
         return 1.2;
@@ -360,7 +468,7 @@ class _MissingIngredientsSectionState extends State<MissingIngredientsSection> {
     if (_storeType == 'ตลาดสด') return ('ตลาดสด', 'ตลาดสด ใกล้ฉัน');
     if (_storeType == 'ซูเปอร์มาร์เก็ต')
       return ('ซูเปอร์มาร์เก็ต', 'ซูเปอร์มาร์เก็ต ใกล้ฉัน');
-    if (_storeType == 'โชห่วย') return ('มินิมาร์ท', 'มินิมาร์ท ใกล้ฉัน');
+    if (_storeType == 'มินิมาร์ท') return ('มินิมาร์ท', 'มินิมาร์ท ใกล้ฉัน');
     return _storeForCategory(category);
   }
 

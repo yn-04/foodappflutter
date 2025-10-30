@@ -50,7 +50,7 @@ class BottomActions extends StatelessWidget {
                 )
               : const Icon(Icons.play_arrow),
           label: Text(
-            isStarting ? 'กำลังเตรียม...' : 'เริ่มทำเมนูนี้ ($servings คน)',
+            isStarting ? 'กำลังเตรียม...' : 'เริ่มทำเมนูนี้',
           ),
         ),
       ),

@@ -1,5 +1,4 @@
 //lib/foodreccom/widgets/recipe_detail/dialogs.dart
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -72,10 +71,6 @@ Future<ManualIngredientSelection?> showIngredientConfirmationDialog(
   Map<String, double>? initialRequiredAmounts,
   List<ManualCustomIngredient>? initialCustomIngredients,
 }) async {
-  final user = FirebaseAuth.instance.currentUser;
-  final displayName = (user?.displayName?.trim().isNotEmpty ?? false)
-      ? user!.displayName!.trim()
-      : 'ผู้ใช้';
   final baseServings = recipe.servings <= 0 ? 1 : recipe.servings;
   final multiplier = servings / (baseServings == 0 ? 1 : baseServings);
 
@@ -264,16 +259,7 @@ Future<ManualIngredientSelection?> showIngredientConfirmationDialog(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'คุณ $displayName ยืนยันการใช้ปริมาณเหล่านี้หรือปรับก่อนเริ่มทำเมนู',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'ระบบจะคำนวณสต็อกและรายการซื้อของตามปริมาณที่ระบุไว้',
-                      style: TextStyle(color: Colors.black54),
-                    ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 8),
                     ...entryData.where((entry) => !removedEntries.contains(entry.id)).map((
                       entry,
                     ) {
@@ -401,8 +387,18 @@ Future<ManualIngredientSelection?> showIngredientConfirmationDialog(
                                       ),
                                     ),
                                   ),
+                                if (optional && !isCustom)
+                                  const SizedBox(width: 6),
+                                if (!optional || isCustom)
+                                  const SizedBox(width: 4),
                                 IconButton(
                                   tooltip: 'ลบวัตถุดิบ',
+                                  padding: EdgeInsets.zero,
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 32,
+                                    minHeight: 32,
+                                  ),
                                   onPressed: () {
                                     setState(() {
                                       if (isCustom) {
@@ -448,8 +444,10 @@ Future<ManualIngredientSelection?> showIngredientConfirmationDialog(
                               ],
                             ),
                             const SizedBox(height: 8),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
+                            Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 8,
+                              runSpacing: 8,
                               children: [
                                 Container(
                                   decoration: BoxDecoration(
@@ -583,8 +581,7 @@ Future<ManualIngredientSelection?> showIngredientConfirmationDialog(
                                     ],
                                   ),
                                 ),
-                                if (isCustom) ...[
-                                  const SizedBox(width: 8),
+                                if (isCustom)
                                   SizedBox(
                                     width: 80,
                                     child: TextField(
@@ -605,9 +602,8 @@ Future<ManualIngredientSelection?> showIngredientConfirmationDialog(
                                         });
                                       },
                                     ),
-                                  ),
-                                ] else if (unitLabel.trim().isNotEmpty) ...[
-                                  const SizedBox(width: 8),
+                                  )
+                                else if (unitLabel.trim().isNotEmpty)
                                   Text(
                                     unitLabel.trim(),
                                     style: const TextStyle(
@@ -615,7 +611,6 @@ Future<ManualIngredientSelection?> showIngredientConfirmationDialog(
                                       fontSize: 14,
                                     ),
                                   ),
-                                ],
                               ],
                             ),
                             if (!isCustom) ...[
@@ -787,20 +782,21 @@ Future<bool> showShortageDialog(
         context: context,
         builder: (_) {
           return AlertDialog(
+            backgroundColor: const Color.fromRGBO(253, 245, 214, 1),
             title: Row(
               children: const [
-                Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                Icon(Icons.warning_amber_rounded, color: Colors.black),
                 SizedBox(width: 8),
-                Text('วัตถุดิบไม่เพียงพอ'),
+                Text(
+                  'วัตถุดิบไม่เพียงพอ',
+                  style: TextStyle(color: Colors.black),
+                ),
               ],
             ),
             content: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'วัตถุดิบต่อไปนี้มีไม่พอกับจำนวนเสิร์ฟ (อิงจากหน้ารายละเอียดเมนูตามจำนวนคนที่เลือก) จะให้ระบบใช้เท่าที่มีและบันทึกสต็อกหรือไม่?',
-                  ),
                   const SizedBox(height: 12),
                   if (displayItems.isNotEmpty)
                     ...displayItems.map((item) {
@@ -820,7 +816,7 @@ Future<bool> showShortageDialog(
                             const Icon(
                               Icons.shopping_cart_outlined,
                               size: 16,
-                              color: Colors.orange,
+                              color: Colors.black,
                             ),
                             const SizedBox(width: 6),
                             Expanded(
@@ -835,7 +831,7 @@ Future<bool> showShortageDialog(
                               qtyText,
                               style: const TextStyle(
                                 fontWeight: FontWeight.w600,
-                                color: Colors.black87,
+                                color: Colors.black,
                               ),
                             ),
                           ],
@@ -862,12 +858,18 @@ Future<bool> showShortageDialog(
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('ยกเลิก'),
+                child: const Text(
+                  'ยกเลิก',
+                  style: TextStyle(color: Colors.black),
+                ),
               ),
-              ElevatedButton(
+              TextButton(
                 onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange[700],
+                style: TextButton.styleFrom(
+                  backgroundColor: const Color.fromRGBO(251, 192, 45, 1),
+                  foregroundColor: Colors.black,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
                 child: const Text('ใช้เท่าที่มี'),
               ),
