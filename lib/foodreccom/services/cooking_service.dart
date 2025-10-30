@@ -6,8 +6,8 @@ import 'package:my_app/common/measurement_constants.dart';
 import 'package:my_app/common/smart_unit_converter.dart' as PieceUnitConverter;
 import 'package:my_app/rawmaterial/utils/unit_converter.dart'
     as StockConverter; // 📦 ใช้สำหรับจัดการสต็อกโดยเฉพาะ
-import 'package:my_app/foodreccom/models/recipe/recipe_ingredient.dart'; // ตรวจสอบ Path ให้ถูกต้อง
 
+import '../constants/unit_conversions.dart' as unit_conversions;
 import '../models/cooking_history_model.dart';
 import '../models/recipe/recipe_model.dart';
 import '../models/recipe/nutrition_info.dart';
@@ -17,6 +17,7 @@ import '../utils/purchase_item_utils.dart' as qty;
 // 🚀 Import ตัวแปลงหน่วย (ซึ่งตอนนี้เป็น "ไฮบริด" แล้ว)
 import '../utils/smart_unit_converter.dart';
 import '../utils/ingredient_translator.dart';
+import '../utils/ingredient_utils.dart' as IngredientUtils;
 
 const Map<String, List<String>> _canonicalNameSeeds = {
   'pork': [
@@ -280,6 +281,15 @@ class CookingService {
           return; // ข้ามวัตถุดิบนี้ไปถ้าแปลงหน่วยไม่ได้
         }
 
+        final adjustedRequiredCanonical = _adjustCanonicalRequirement(
+          ingredientName: ing.name,
+          recipeUnit: ing.unit,
+          canonicalAmount: requiredCanonical.amount,
+          canonicalUnit: requiredCanonical.unit,
+          servings: servingsToMake.toDouble(),
+          hasManualOverride: manualRaw != null,
+        );
+
         // รวมปริมาณวัตถุดิบทั้งหมดที่มีในคลังให้เป็นหน่วย Canonical เดียวกัน
         double availableCanonicalAmount = 0;
         final inventoryDocs = await _findInventoryDocs(user.uid, ing.name);
@@ -297,12 +307,12 @@ class CookingService {
           );
         }
 
-        if (availableCanonicalAmount < requiredCanonical.amount) {
+        if (availableCanonicalAmount < adjustedRequiredCanonical) {
           // <-- ใช้ .amount จาก CanonicalQuantity
           shortages.add(
             IngredientShortage(
               name: ing.name,
-              requiredAmount: requiredCanonical.amount,
+              requiredAmount: adjustedRequiredCanonical,
               availableAmount: availableCanonicalAmount,
               unit: _mapCanonicalUnitToDisplayUnit(requiredCanonical.unit),
             ),
@@ -438,24 +448,14 @@ class CookingService {
         continue; // ข้ามไปถ้าแปลงหน่วยไม่ได้
       }
 
-      double canonicalTarget = requiredCanonical.amount;
-      if (manualAmount == null) {
-        final minimumCanonical = qty.minimumCanonicalRequirementForCooking(
-          ingredientName: ing.name,
-          canonicalUnit: requiredCanonical.unit,
-          servings: effectiveServings,
-        );
-        if (minimumCanonical > canonicalTarget) {
-          canonicalTarget = minimumCanonical;
-        }
-        final lossFactor = _preparationLossFactor(
-          ing.name,
-          requiredCanonical.unit,
-        );
-        if (lossFactor > 0) {
-          canonicalTarget *= (1 + lossFactor);
-        }
-      }
+      final canonicalTarget = _adjustCanonicalRequirement(
+        ingredientName: ing.name,
+        recipeUnit: ing.unit,
+        canonicalAmount: requiredCanonical.amount,
+        canonicalUnit: requiredCanonical.unit,
+        servings: effectiveServings,
+        hasManualOverride: manualAmount != null,
+      );
 
       if (canonicalTarget <= 0) {
         continue;
@@ -471,6 +471,7 @@ class CookingService {
       double consumedCanonical = 0;
       String? usedCategory;
 
+      final usedDocIds = <String>{};
       for (final doc in sortedInventoryDocs) {
         if (amountRemaining <= 0) break;
 
@@ -499,10 +500,15 @@ class CookingService {
         );
 
         final adjustedRemainingCanonical = stockUpdate.canonicalAmount;
-        final actualDeduction = availableCanonical - adjustedRemainingCanonical;
-        if (actualDeduction <= 0) {
-          continue;
+        var actualDeduction = availableCanonical - adjustedRemainingCanonical;
+        if (actualDeduction.isNaN || actualDeduction.isInfinite) {
+          actualDeduction = 0;
         }
+        if (actualDeduction < 0) actualDeduction = 0;
+        if (actualDeduction > availableCanonical) {
+          actualDeduction = availableCanonical;
+        }
+        if (actualDeduction <= 0) continue;
 
         await doc.reference.update({
           'quantity': stockUpdate.quantity,
@@ -514,6 +520,7 @@ class CookingService {
         amountRemaining -= actualDeduction;
         if (amountRemaining < 0) amountRemaining = 0;
         usedCategory ??= (data['category'] ?? '').toString();
+        usedDocIds.add(doc.id);
       }
 
       if (consumedCanonical > 0) {
@@ -527,6 +534,7 @@ class CookingService {
             unit: usedUnit,
             category: usedCategory ?? '',
             cost: 0,
+            rawMaterialIds: usedDocIds.toList(),
           ),
         );
       }
@@ -568,6 +576,7 @@ class CookingService {
       double consumedCanonical = 0;
       String? usedCategory;
 
+      final usedDocIds = <String>{};
       for (final doc in sortedInventoryDocs) {
         if (amountRemaining <= 0) break;
 
@@ -596,7 +605,14 @@ class CookingService {
         );
 
         final adjustedRemainingCanonical = stockUpdate.canonicalAmount;
-        final actualDeduction = availableCanonical - adjustedRemainingCanonical;
+        var actualDeduction = availableCanonical - adjustedRemainingCanonical;
+        if (actualDeduction.isNaN || actualDeduction.isInfinite) {
+          actualDeduction = 0;
+        }
+        if (actualDeduction < 0) actualDeduction = 0;
+        if (actualDeduction > availableCanonical) {
+          actualDeduction = availableCanonical;
+        }
         if (actualDeduction <= 0) continue;
 
         await doc.reference.update({
@@ -609,6 +625,7 @@ class CookingService {
         amountRemaining -= actualDeduction;
         if (amountRemaining < 0) amountRemaining = 0;
         usedCategory ??= (data['category'] ?? '').toString();
+        usedDocIds.add(doc.id);
       }
 
       if (consumedCanonical > 0) {
@@ -620,6 +637,7 @@ class CookingService {
             unit: usedUnit,
             category: usedCategory ?? '',
             cost: 0,
+            rawMaterialIds: usedDocIds.toList(),
           ),
         );
       }
@@ -776,6 +794,54 @@ class CookingService {
     return 0;
   }
 
+  double _adjustCanonicalRequirement({
+    required String ingredientName,
+    required String recipeUnit,
+    required double canonicalAmount,
+    required String canonicalUnit,
+    required double servings,
+    required bool hasManualOverride,
+  }) {
+    if (!canonicalAmount.isFinite || canonicalAmount <= 0) {
+      return 0;
+    }
+    if (hasManualOverride) {
+      return canonicalAmount;
+    }
+    final safeServings = servings <= 0 ? 1.0 : servings;
+    if (_isDirectMetricRecipeUnit(recipeUnit, canonicalUnit)) {
+      return canonicalAmount;
+    }
+    double target = canonicalAmount;
+    final minimumCanonical = qty.minimumCanonicalRequirementForCooking(
+      ingredientName: ingredientName,
+      canonicalUnit: canonicalUnit,
+      servings: safeServings,
+    );
+    if (minimumCanonical > target) {
+      target = minimumCanonical;
+    }
+    final lossFactor = _preparationLossFactor(
+      ingredientName,
+      canonicalUnit,
+    );
+    if (lossFactor > 0) {
+      target *= (1 + lossFactor);
+    }
+    return target;
+  }
+
+  bool _isDirectMetricRecipeUnit(String recipeUnit, String canonicalUnit) {
+    final normalized = recipeUnit.trim().toLowerCase();
+    if (canonicalUnit == 'gram') {
+      return unit_conversions.weightUnits.containsKey(normalized);
+    }
+    if (canonicalUnit == 'milliliter') {
+      return unit_conversions.volumeUnits.containsKey(normalized);
+    }
+    return false;
+  }
+
   _StockQuantity _canonicalToStockQuantity(
     String ingredientName,
     double canonicalAmount,
@@ -815,26 +881,37 @@ class CookingService {
         grams = safeAmount.toDouble();
       }
       if (grams <= 0) {
-        return _StockQuantity(0, StockConverter.UnitConverter.gram, 0);
+        return _buildStockQuantity(
+          ingredientName,
+          0,
+          StockConverter.UnitConverter.gram,
+          canonicalUnit,
+        );
       }
       final rounded = grams.floor();
-      final canonicalRounded = rounded.toDouble();
       if (rounded == 0) {
-        return _StockQuantity(0, StockConverter.UnitConverter.gram, 0);
+        return _buildStockQuantity(
+          ingredientName,
+          0,
+          StockConverter.UnitConverter.gram,
+          canonicalUnit,
+        );
       }
       if (_isKilogramUnit(normalizedOriginal) &&
           rounded % MeasurementConstants.gramsPerKilogram == 0) {
         final kilograms = rounded ~/ MeasurementConstants.gramsPerKilogram;
-        return _StockQuantity(
+        return _buildStockQuantity(
+          ingredientName,
           kilograms,
           StockConverter.UnitConverter.kilogram,
-          kilograms * MeasurementConstants.gramsPerKilogram.toDouble(),
+          canonicalUnit,
         );
       }
-      return _StockQuantity(
+      return _buildStockQuantity(
+        ingredientName,
         rounded,
         StockConverter.UnitConverter.gram,
-        canonicalRounded,
+        canonicalUnit,
       );
     }
 
@@ -851,26 +928,37 @@ class CookingService {
         milliliters = safeAmount.toDouble();
       }
       if (milliliters <= 0) {
-        return _StockQuantity(0, StockConverter.UnitConverter.milliliter, 0);
+        return _buildStockQuantity(
+          ingredientName,
+          0,
+          StockConverter.UnitConverter.milliliter,
+          canonicalUnit,
+        );
       }
       final rounded = milliliters.floor();
-      final canonicalRounded = rounded.toDouble();
       if (rounded == 0) {
-        return _StockQuantity(0, StockConverter.UnitConverter.milliliter, 0);
+        return _buildStockQuantity(
+          ingredientName,
+          0,
+          StockConverter.UnitConverter.milliliter,
+          canonicalUnit,
+        );
       }
       if (_isLiterUnit(normalizedOriginal) &&
           rounded % MeasurementConstants.millilitersPerLiter == 0) {
         final liters = rounded ~/ MeasurementConstants.millilitersPerLiter;
-        return _StockQuantity(
+        return _buildStockQuantity(
+          ingredientName,
           liters,
           StockConverter.UnitConverter.liter,
-          liters * MeasurementConstants.millilitersPerLiter.toDouble(),
+          canonicalUnit,
         );
       }
-      return _StockQuantity(
+      return _buildStockQuantity(
+        ingredientName,
         rounded,
         StockConverter.UnitConverter.milliliter,
-        canonicalRounded,
+        canonicalUnit,
       );
     }
 
@@ -924,20 +1012,36 @@ class CookingService {
         }
       }
       final roundedPieces = pieces.round();
-      return _StockQuantity(
+      return _buildStockQuantity(
+        ingredientName,
         roundedPieces,
         resolvedUnit,
-        roundedPieces.toDouble(),
+        canonicalUnit,
       );
     }
 
     final fallbackRounded = safeAmount.floor();
-    final fallbackCanonical = fallbackRounded.toDouble();
-    return _StockQuantity(
+    return _buildStockQuantity(
+      ingredientName,
       fallbackRounded,
       _mapCanonicalUnitToStockUnit(canonicalUnit),
-      fallbackCanonical,
+      canonicalUnit,
     );
+  }
+
+  _StockQuantity _buildStockQuantity(
+    String ingredientName,
+    int quantity,
+    String unit,
+    String canonicalUnit,
+  ) {
+    final canonicalLeftover = _convertStockToCanonical(
+      ingredientName,
+      quantity,
+      unit,
+      canonicalUnit,
+    );
+    return _StockQuantity(quantity, unit, canonicalLeftover);
   }
 
   double? _gramsFromVolume(String ingredientName, double milliliters) {
@@ -1024,6 +1128,22 @@ class CookingService {
       map[canonical] = value;
     });
     return map;
+  }
+
+  /// ใช้คืนชุด keyword สำหรับชื่อวัตถุดิบหนึ่ง ๆ
+  Set<String> ingredientKeywords(String name) {
+    final canonical = _canonicalizeName(name);
+    final keywords = <String>{
+      canonical,
+      ..._aliasesForCanonical(canonical),
+      ..._buildNameAliases(name),
+    };
+    return keywords..removeWhere((value) => value.trim().isEmpty);
+  }
+
+  /// Wrapper เอาไว้เรียก util ภายนอก (รักษา compatibility ของโค้ดเดิม)
+  bool ingredientsMatch(String available, String required) {
+    return IngredientUtils.ingredientsMatch(available, required);
   }
 
   static String _canonicalizeName(String name) {

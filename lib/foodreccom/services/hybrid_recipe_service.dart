@@ -17,6 +17,10 @@ import 'package:my_app/rawmaterial/constants/categories.dart';
 import 'api_usage_service.dart';
 
 class HybridRecipeService {
+  static const int _aiRecommendationTarget = 7;
+  static const int _externalRecommendationTarget = 5;
+  static const int _urgentExpiryDayThreshold = 0;
+
   final EnhancedAIRecommendationService _aiService =
       EnhancedAIRecommendationService();
   final RapidAPIRecipeService _rapidApiService = RapidAPIRecipeService();
@@ -129,6 +133,14 @@ class HybridRecipeService {
           int.tryParse((dotenv.env['AI_MIN_INGREDIENTS'] ?? '8').trim()) ?? 8;
       int maxCap =
           int.tryParse((dotenv.env['AI_MAX_INGREDIENTS'] ?? '12').trim()) ?? 12;
+      final urgentToday = eligibleIngredients
+          .where((ingredient) =>
+              ingredient.daysToExpiry <= _urgentExpiryDayThreshold)
+          .toList();
+      final baseMaxCap = maxCap;
+      if (urgentToday.length > maxCap) {
+        maxCap = urgentToday.length;
+      }
       if (maxCap <= 0) maxCap = 12;
       if (minCap <= 0) minCap = 1;
       if (minCap > maxCap) {
@@ -143,6 +155,8 @@ class HybridRecipeService {
           eligibleLookup.putIfAbsent(key, () => ing);
         }
       }
+
+      final mustUseAllUrgent = urgentToday.length > baseMaxCap;
 
       IngredientModel? _matchEligible(String name) {
         final key = _normalizeName(name);
@@ -268,7 +282,8 @@ ${allergyJson}
       }
 
       if (manualOverride != null && manualOverride.isNotEmpty) {
-        selectedIngredients = manualOverride;
+        selectedIngredients =
+            _ensureUrgentIngredientCoverage(manualOverride, urgentToday);
         selectionLogLabel = 'Picked(Manual)';
       } else {
         if (useAiIngredientSelector) {
@@ -325,6 +340,10 @@ ${allergyJson}
                 }
               }
               if (pick != null) {
+                if (!_shouldFavorForPrioritySelection(pick) &&
+                    selected.length >= minCap) {
+                  continue;
+                }
                 seen.add(norm(pick.name));
                 selected.add(pick);
               }
@@ -348,7 +367,13 @@ ${allergyJson}
               }
             }
           }
-          selectedIngredients = selected;
+          selectedIngredients =
+              _ensureUrgentIngredientCoverage(selected, urgentToday);
+          selectedIngredients = _enforceSelectionCap(
+            selectedIngredients,
+            urgentToday,
+            maxCap,
+          );
           selectionLogLabel = 'Picked(AI)';
         } else {
           // Rule-based: sort by daysToExpiry asc, then priorityScore desc
@@ -358,7 +383,16 @@ ${allergyJson}
             if (c != 0) return c;
             return b.priorityScore.compareTo(a.priorityScore);
           });
-          selectedIngredients = usable.take(maxCap).toList();
+          selectedIngredients =
+              _ensureUrgentIngredientCoverage(
+                usable.take(maxCap).toList(),
+                urgentToday,
+              );
+          selectedIngredients = _enforceSelectionCap(
+            selectedIngredients,
+            urgentToday,
+            maxCap,
+          );
           print(
             "🧭 Rule-based เลือกวัตถุดิบ: ${selectedIngredients.map((i) => i.name).join(', ')}",
           );
@@ -380,8 +414,15 @@ ${allergyJson}
               selectedIngredients.length >= maxCap) {
             break;
           }
-          selectedIngredients.add(item);
-        }
+        selectedIngredients.add(item);
+      }
+      selectedIngredients =
+          _ensureUrgentIngredientCoverage(selectedIngredients, urgentToday);
+      selectedIngredients = _enforceSelectionCap(
+        selectedIngredients,
+        urgentToday,
+        maxCap,
+      );
       }
       _logIngredientOrderFromModels(
         selectedIngredients,
@@ -428,6 +469,8 @@ ${allergyJson}
             minProtein: minProtein,
             maxCarbs: maxCarbs,
             maxFat: maxFat,
+            urgentIngredientNames: urgentToday.map((e) => e.name).toList(),
+            mustUseAllUrgent: mustUseAllUrgent,
           );
           result.aiGenerationTime = DateTime.now();
         } catch (e, st) {
@@ -450,6 +493,9 @@ ${allergyJson}
         result.aiRecommendations,
         selectedIngredients,
       );
+      result.aiRecommendations = _applyNutritionEstimates(
+        result.aiRecommendations.take(_aiRecommendationTarget).toList(),
+      );
 
       result.externalRecipes = result.externalRecipes.where((recipe) {
         if (_isDessertRecipe(recipe)) {
@@ -463,6 +509,8 @@ ${allergyJson}
         result.externalRecipes,
         selectedIngredients,
       );
+      result.externalRecipes =
+          result.externalRecipes.take(_externalRecommendationTarget).toList();
 
       result.combinedRecommendations = _dedupeRecipes([
         ...result.aiRecommendations,
@@ -503,17 +551,43 @@ ${allergyJson}
     int? minProtein,
     int? maxCarbs,
     int? maxFat,
+    List<String> urgentIngredientNames = const [],
+    bool mustUseAllUrgent = false,
+    int? targetCount,
   }) async {
     if (!_isAiGenerationEnabled()) {
       print('ℹ️ AI generation disabled → ใช้ fallback');
-      return _fallbackAiRecommendations();
+      return _fallbackAiRecommendations(
+        selectedIngredients,
+        cuisineFilters: cuisineFilters,
+        dietGoals: dietGoals,
+        minCalories: minCalories,
+        maxCalories: maxCalories,
+        minProtein: minProtein,
+        maxCarbs: maxCarbs,
+        maxFat: maxFat,
+        urgentIngredientNames: urgentIngredientNames,
+        mustUseAllUrgent: mustUseAllUrgent,
+        targetCount: targetCount ?? _aiRecommendationTarget,
+      );
     }
     if (selectedIngredients.isEmpty) return [];
+
+    final hasStrictFilters =
+        cuisineFilters.isNotEmpty ||
+        dietGoals.isNotEmpty ||
+        minCalories != null ||
+        maxCalories != null ||
+        minProtein != null ||
+        maxCarbs != null ||
+        maxFat != null;
+    final int desiredCount = targetCount ??
+        (hasStrictFilters ? 5 : _aiRecommendationTarget);
 
     final hostToSource = <String, String>{};
     for (final site in _trustedReferenceSites) {
       final url = site['url']!;
-      final host = Uri.parse(url).host.replaceFirst('www.', '').toLowerCase();
+      final host = _normalizeHost(Uri.parse(url).host);
       hostToSource[host] = site['name']!;
     }
 
@@ -532,6 +606,21 @@ ${allergyJson}
         })
         .join('\n');
 
+    final urgentTodayNames = (urgentIngredientNames.isNotEmpty
+            ? urgentIngredientNames
+            : selectedIngredients
+                .where(
+                  (ingredient) =>
+                      ingredient.daysToExpiry <= _urgentExpiryDayThreshold,
+                )
+                .map((ingredient) => ingredient.name)
+                .toList())
+        .map((name) => name.trim())
+        .where((name) => name.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+
     final nearExpiry = inventory
         .where((i) => i.isUrgentExpiry || i.isNearExpiry)
         .map((i) => i.name)
@@ -540,11 +629,13 @@ ${allergyJson}
     final allergyLine = allergyNames.isEmpty
         ? 'ไม่มี'
         : allergyNames.join(', ');
-    final cuisineLine = cuisineFilters.isEmpty
-        ? 'เน้นอาหารไทยหรือ Asian comfort food'
-        : cuisineFilters.join(', ');
+    final hasCuisineFilters = cuisineFilters.isNotEmpty;
+    final cuisineLine = hasCuisineFilters
+        ? '${cuisineFilters.join(', ')} (จำกัดเฉพาะสัญชาติเหล่านี้)'
+        : 'เน้นอาหารไทยหรือ Asian comfort food';
     final dietLine = dietGoals.isEmpty ? 'ไม่มี' : dietGoals.join(', ');
 
+    final hasDietGoals = dietGoals.isNotEmpty;
     final nutritionParts = <String>[];
     if (minCalories != null || maxCalories != null) {
       final min = minCalories != null ? '≥$minCalories' : '';
@@ -564,13 +655,34 @@ ${allergyJson}
         ? 'ไม่กำหนด'
         : nutritionParts.join(', ');
 
+    final cuisineRule = hasCuisineFilters
+        ? 'เลือกเมนูจากสัญชาติที่ผู้ใช้เลือกเท่านั้น (${cuisineFilters.join(', ')}) ห้ามแนะนำสัญชาติอื่น'
+        : 'เลือกเมนูให้ครอบคลุมอย่างน้อย 3 สัญชาติที่แตกต่างกันจากรายการนี้ (ไทย, จีน, ญี่ปุ่น, เกาหลี, เวียดนาม, อินเดีย, อเมริกา, อังกฤษ, ฝรั่งเศส, เยอรมัน, อิตาเลียน, เม็กซิกัน, สเปน) โดยเลือกสัญชาติที่เข้ากับวัตถุดิบมากที่สุด (ไม่จำเป็นต้องใช้ครบทั้งหมดหากวัตถุดิบไม่เอื้อ)';
+    final cuisineTagRule = hasCuisineFilters
+        ? 'แท็กของแต่ละเมนูต้องมีชื่อสัญชาติจากตัวเลือกที่ผู้ใช้เลือก (เช่น "${cuisineFilters.map((c) => c.toLowerCase()).join('", "')}")'
+        : 'เติมแท็กแท็กหลักของแต่ละเมนูให้มีคีย์เวิร์ดของสัญชาตินั้น ๆ (เช่น "thai", "japanese", "mexican")';
+
+    final hasNutritionTargets =
+        minCalories != null ||
+        maxCalories != null ||
+        minProtein != null ||
+        maxCarbs != null ||
+        maxFat != null;
+    final dietRule = hasDietGoals
+        ? 'ทุกเมนูต้องสอดคล้องกับข้อจำกัดไลฟ์สไตล์/อาหาร (${dietGoals.join(', ')}) และใส่แท็กที่สะท้อนข้อจำกัดเหล่านี้ เช่น "${dietGoals.map((d) => d.toLowerCase()).join('", "')}"'
+        : 'หากเมนูใหม่ตรงกับแนวทางพิเศษ เช่น vegan หรือ low-carb ให้เพิ่มแท็กสอดคล้องกัน';
+    final nutritionRule = hasNutritionTargets
+        ? 'ปริมาณโภชนาการต้องอยู่ในช่วงที่กำหนด (แคลอรี่ ${minCalories != null ? '≥$minCalories' : ''}${minCalories != null && maxCalories != null ? ' และ ' : ''}${maxCalories != null ? '≤$maxCalories' : ''}, โปรตีน${minProtein != null ? ' ≥$minProtein g' : ''}${maxCarbs != null ? ', คาร์บ ≤$maxCarbs g' : ''}${maxFat != null ? ', ไขมัน ≤$maxFat g' : ''}) โดยระบุค่าที่คำนวณไว้ในผลลัพธ์'
+        : 'ระบุโภชนาการหลัก (แคลอรี่ โปรตีน คาร์บ ไขมัน) ของแต่ละเมนูถ้ามีข้อมูลที่เชื่อถือได้';
+
     final prompt =
         '''
-คุณคือเชฟอาหารไทยและนักโภชนาการมืออาชีพ ช่วยแนะนำ 5 เมนูที่ทำได้จริงจากคลังวัตถุดิบด้านล่างนี้
+คุณคือเชฟอาหารไทยและนักโภชนาการมืออาชีพ ช่วยแนะนำ $desiredCount เมนูที่ทำได้จริงจากคลังวัตถุดิบด้านล่างนี้
 
 วัตถุดิบหลักที่ควรใช้:
 $ingredientLines
 
+วัตถุดิบหมดอายุวันนี้: ${urgentTodayNames.isEmpty ? 'ไม่มี' : urgentTodayNames.join(', ')}${mustUseAllUrgent && urgentTodayNames.isNotEmpty ? ' (ต้องใช้ให้หมด)' : ''}
 วัตถุดิบใกล้หมดอายุ: ${nearExpiry.isEmpty ? 'ไม่มี' : nearExpiry.join(', ')}
 ข้อจำกัดภูมิแพ้: $allergyLine
 ข้อจำกัดโภชนาการ: $nutritionLine
@@ -578,15 +690,20 @@ $ingredientLines
 เป้าหมายด้านไลฟ์สไตล์/อาหาร: $dietLine
 
 กฎสำคัญ:
-1. ใช้วัตถุดิบจากรายการผู้ใช้ให้มากที่สุด หลีกเลี่ยงของที่ไม่มี
+1. ใช้วัตถุดิบจากรายการผู้ใช้ให้มากที่สุด หลีกเลี่ยงของที่ไม่มี${mustUseAllUrgent && urgentTodayNames.isNotEmpty ? ' และต้องใช้วัตถุดิบที่หมดอายุวันนี้ทั้งหมดในชุดเมนูนี้' : ''}
 2. อนุญาตเฉพาะของครัวพื้นฐาน (น้ำปลา น้ำตาล น้ำมัน พริก กระเทียม ซีอิ๊ว) หากจำเป็น
 3. คำนวณ match_ratio = (จำนวนวัตถุดิบที่ผู้ใช้มี) / (จำนวนวัตถุดิบทั้งหมดของเมนู) และ match_score = match_ratio * 100
 4. ให้เหตุผลว่าทำไมเมนูนี้เหมาะ พร้อมสรุปว่าขาดอะไรบ้าง (ถ้ามี)
 5. อ้างอิงเว็บไซต์ที่น่าเชื่อถือจากรายการนี้เท่านั้น:
 ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").join('\n')}
-6. source_url ต้องเป็นลิงก์หน้าเมนูนั้นโดยตรง (เช่น https://www.wongnai.com/recipes/ชื่อเมนู) ห้ามใช้หน้ารวม/หน้าหลัก/หน้าค้นหา
-7. หลีกเลี่ยงเมนูของหวานหรือทอดมัน ๆ
-8. ตอบกลับเป็น JSON เดียวที่มีคีย์ "recipes" เท่านั้น ไม่มีคำอธิบายอื่น
+6. $cuisineRule
+7. $cuisineTagRule
+8. source_url ต้องเป็นลิงก์หน้าเมนูนั้นโดยตรง (เช่น https://www.wongnai.com/recipes/ชื่อเมนู) ห้ามใช้หน้ารวม/หน้าหลัก/หน้าค้นหา
+9. image_url ต้องเป็นลิงก์รูปภาพ (jpg/png/webp) ที่อยู่บนโดเมนเดียวกับ source_url หรือ CDN ทางการของเมนูนั้น หลีกเลี่ยงลิงก์ค้นหา/ stock photo
+10. $dietRule
+11. $nutritionRule
+12. หลีกเลี่ยงเมนูของหวานหรือทอดมัน ๆ
+13. ตอบกลับเป็น JSON เดียวที่มีคีย์ "recipes" เท่านั้น ไม่มีคำอธิบายอื่น
 
 โครงสร้าง JSON ที่ต้องส่งกลับ:
 {
@@ -603,6 +720,7 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
       "ingredients": [
         {"name": "ชื่อวัตถุดิบ", "amount": 120, "unit": "กรัม"}
       ],
+      "image_url": "https://ตัวอย่างโดเมนที่เชื่อถือได้/ชื่อภาพ.jpg",
       "missing_ingredients": [],
       "steps": [
         "เตรียม...", "ปรุง..."
@@ -620,23 +738,61 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
     try {
       final response = await _aiService.generateTextSmart(prompt);
       final parsed = _parseAiRecipeResponse(response);
-      final filtered = _filterAiRecipesByTrustedSources(parsed, hostToSource);
+      final filtered = _filterAiRecipesByTrustedSources(
+        parsed,
+        hostToSource,
+        limit: desiredCount,
+      );
       if (filtered.isNotEmpty) {
         final enriched = _applyNutritionEstimates(filtered);
-        return _ensureFiveRecommendations(enriched);
+        final filteredByUser = _applyUserFilters(
+          enriched,
+          cuisineFilters: cuisineFilters,
+          dietGoals: dietGoals,
+          minCalories: minCalories,
+          maxCalories: maxCalories,
+          minProtein: minProtein,
+          maxCarbs: maxCarbs,
+          maxFat: maxFat,
+        );
+        return _ensureAiRecommendationCount(
+          filteredByUser,
+          selectedIngredients,
+          cuisineFilters: cuisineFilters,
+          dietGoals: dietGoals,
+          minCalories: minCalories,
+          maxCalories: maxCalories,
+          minProtein: minProtein,
+          maxCarbs: maxCarbs,
+          maxFat: maxFat,
+          targetCount: desiredCount,
+        );
       }
     } catch (e, st) {
       print('⚠️ generateTextSmart error: $e');
       debugPrintStack(stackTrace: st);
     }
 
-    return _fallbackAiRecommendations();
+    return _fallbackAiRecommendations(
+      selectedIngredients,
+      cuisineFilters: cuisineFilters,
+      dietGoals: dietGoals,
+      minCalories: minCalories,
+      maxCalories: maxCalories,
+      minProtein: minProtein,
+      maxCarbs: maxCarbs,
+      maxFat: maxFat,
+      urgentIngredientNames: urgentTodayNames,
+      mustUseAllUrgent: mustUseAllUrgent,
+      targetCount: desiredCount,
+    );
   }
 
   List<RecipeModel> _filterAiRecipesByTrustedSources(
     List<RecipeModel> recipes,
-    Map<String, String> hostToSource,
-  ) {
+    Map<String, String> hostToSource, {
+    int? limit,
+  }) {
     final filtered = <RecipeModel>[];
     for (final recipe in recipes) {
       final rawUrl = recipe.sourceUrl ?? '';
@@ -646,10 +802,13 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
         uri = Uri.tryParse('https://$rawUrl');
       }
       if (uri == null || uri.host.isEmpty) continue;
-      final baseHost = uri.host.replaceFirst('www.', '').toLowerCase();
+      final normalizedHost = _normalizeHost(uri.host);
       MapEntry<String, String>? matched;
       for (final entry in hostToSource.entries) {
-        if (baseHost.contains(entry.key)) {
+        final trustedHost = entry.key;
+        if (normalizedHost == trustedHost ||
+            normalizedHost.endsWith('.$trustedHost') ||
+            trustedHost.endsWith('.$normalizedHost')) {
           matched = entry;
           break;
         }
@@ -674,32 +833,175 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
         if (uri == null || uri.host.isEmpty) continue;
       }
 
+      final imageUrl = (recipe.imageUrl ?? '').trim();
+      if (imageUrl.isEmpty) continue;
+      Uri? imageUri = Uri.tryParse(imageUrl);
+      if (imageUri == null || imageUri.host.isEmpty) {
+        imageUri = Uri.tryParse('https://$imageUrl');
+      }
+      if (imageUri == null || imageUri.host.isEmpty) continue;
+      final imageHost = _normalizeHost(imageUri.host);
+      if (!_isTrustedImageHost(imageHost, matched.key)) continue;
+
       final tags = {...recipe.tags, 'ai', 'trusted'};
       filtered.add(
         recipe.copyWith(
           source: matched.value,
           sourceUrl: uri.toString(),
+          imageUrl: imageUri.toString(),
           tags: tags.toList(),
         ),
       );
     }
-    return _dedupeRecipes(filtered).take(5).toList();
+    final cap = limit ?? _aiRecommendationTarget;
+    return _dedupeRecipes(filtered).take(cap).toList();
   }
 
-  List<RecipeModel> _ensureFiveRecommendations(List<RecipeModel> current) {
-    if (current.length >= 5) {
-      return _applyNutritionEstimates(current.take(5).toList());
+  List<RecipeModel> _ensureAiRecommendationCount(
+    List<RecipeModel> current,
+    List<IngredientModel> selectedIngredients, {
+    List<String> cuisineFilters = const [],
+    Set<String> dietGoals = const {},
+    int? minCalories,
+    int? maxCalories,
+    int? minProtein,
+    int? maxCarbs,
+    int? maxFat,
+    required int targetCount,
+  }) {
+    if (current.length >= targetCount) {
+      return _applyNutritionEstimates(
+        current.take(targetCount).toList(),
+      );
     }
     final merged = [...current];
     final existing = merged.map((r) => _normalizeName(r.name)).toSet();
-    for (final recipe in _fallbackAiRecommendations()) {
-      if (merged.length >= 5) break;
+    for (final recipe in _fallbackAiRecommendations(
+      selectedIngredients,
+      cuisineFilters: cuisineFilters,
+      dietGoals: dietGoals,
+      minCalories: minCalories,
+      maxCalories: maxCalories,
+      minProtein: minProtein,
+      maxCarbs: maxCarbs,
+      maxFat: maxFat,
+      targetCount: targetCount,
+    )) {
+      if (merged.length >= targetCount) break;
       final key = _normalizeName(recipe.name);
       if (existing.add(key)) {
         merged.add(recipe);
       }
     }
-    return _applyNutritionEstimates(merged.take(5).toList());
+
+    if (merged.length < targetCount) {
+      for (final recipe in _fallbackAiRecommendations(
+        selectedIngredients,
+        cuisineFilters: const [],
+        dietGoals: dietGoals,
+        minCalories: minCalories,
+        maxCalories: maxCalories,
+        minProtein: minProtein,
+        maxCarbs: maxCarbs,
+        maxFat: maxFat,
+        preferThaiWhenUnfiltered: false,
+        targetCount: targetCount,
+      )) {
+        if (merged.length >= targetCount) break;
+        final key = _normalizeName(recipe.name);
+        if (existing.add(key)) {
+          merged.add(recipe);
+        }
+      }
+    }
+    return _applyNutritionEstimates(
+      merged.take(targetCount).toList(),
+    );
+  }
+
+  List<IngredientModel> _ensureUrgentIngredientCoverage(
+    List<IngredientModel> current,
+    List<IngredientModel> urgentToday,
+  ) {
+    if (urgentToday.isEmpty) return current;
+    final normalized = <String>{};
+    final enriched = <IngredientModel>[];
+    for (final ingredient in current) {
+      final key = _normalizeName(ingredient.name);
+      if (key.isEmpty || normalized.contains(key)) continue;
+      normalized.add(key);
+      enriched.add(ingredient);
+    }
+    for (final urgent in urgentToday) {
+      final key = _normalizeName(urgent.name);
+      if (key.isEmpty || normalized.contains(key)) continue;
+      normalized.add(key);
+      enriched.add(urgent);
+    }
+    return enriched;
+  }
+
+  List<IngredientModel> _enforceSelectionCap(
+    List<IngredientModel> items,
+    List<IngredientModel> urgentToday,
+    int maxCap,
+  ) {
+    if (items.length <= maxCap) return items;
+    final urgentSet = urgentToday
+        .map((e) => _normalizeName(e.name))
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final result = <IngredientModel>[];
+    final seen = <String>{};
+
+    void addIfPossible(IngredientModel item) {
+      if (result.length >= maxCap) return;
+      final key = _normalizeName(item.name);
+      if (key.isEmpty || seen.contains(key)) return;
+      seen.add(key);
+      result.add(item);
+    }
+
+    for (final item in items) {
+      if (urgentSet.contains(_normalizeName(item.name))) {
+        addIfPossible(item);
+      }
+    }
+    for (final item in items) {
+      if (result.length >= maxCap) break;
+      addIfPossible(item);
+    }
+    return result;
+  }
+
+  bool _shouldFavorForPrioritySelection(IngredientModel ingredient) {
+    if (ingredient.isUrgentExpiry || ingredient.isNearExpiry) return true;
+    if (_isShelfStable(ingredient) && ingredient.daysToExpiry > 7) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _isShelfStable(IngredientModel ingredient) {
+    final name = _normalizeName(ingredient.name);
+    final category = _normalizeName(ingredient.category);
+    final unit = _normalizeName(ingredient.unit);
+
+    bool _containsAny(String target, Set<String> keywords) {
+      if (target.isEmpty) return false;
+      for (final keyword in keywords) {
+        if (keyword.isEmpty) continue;
+        if (target.contains(keyword)) return true;
+      }
+      return false;
+    }
+
+    if (ingredient.expiryDate == null) return true;
+    if (ingredient.daysToExpiry > 90 && !ingredient.isUnderutilized) return true;
+    if (_containsAny(category, _pantryCategoryKeywords)) return true;
+    if (_containsAny(name, _pantryNameKeywords)) return true;
+    if (_containsAny(unit, _pantryUnitKeywords)) return true;
+    return false;
   }
 
   List<RecipeModel> _parseAiRecipeResponse(String? responseText) {
@@ -731,9 +1033,212 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
     }
   }
 
-  List<RecipeModel> _fallbackAiRecommendations() {
-    final recipes = _fallbackAiRecipeMaps.map(RecipeModel.fromAI).toList();
-    return _applyNutritionEstimates(recipes);
+  List<RecipeModel> _fallbackAiRecommendations(
+    List<IngredientModel> selectedIngredients, {
+    List<String> cuisineFilters = const [],
+    Set<String> dietGoals = const {},
+    int? minCalories,
+    int? maxCalories,
+    int? minProtein,
+    int? maxCarbs,
+    int? maxFat,
+    bool preferThaiWhenUnfiltered = true,
+    List<String> urgentIngredientNames = const [],
+    bool mustUseAllUrgent = false,
+    int targetCount = _aiRecommendationTarget,
+  }) {
+    final inventoryNames = selectedIngredients
+        .map((ingredient) => ingredient.name.trim())
+        .where((name) => name.isNotEmpty)
+        .toList();
+    final urgentSet = urgentIngredientNames
+        .map((name) => _normalizeName(name))
+        .where((name) => name.isNotEmpty)
+        .toSet();
+
+    bool _hasIngredient(String requiredName) {
+      if (inventoryNames.isEmpty) return false;
+      for (final stock in inventoryNames) {
+        if (ingredientsMatch(stock, requiredName) ||
+            ingredientsMatch(requiredName, stock)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    final normalizedCuisineFilters = cuisineFilters
+        .map((value) => _normalizeName(value))
+        .where((value) => value.isNotEmpty)
+        .toSet();
+    final normalizedDietGoals = dietGoals
+        .map((value) => _normalizeName(value))
+        .where((value) => value.isNotEmpty)
+        .toSet();
+
+    final candidates = <_FallbackCandidate>[];
+    for (final data in _fallbackAiRecipeMaps) {
+      final recipe = RecipeModel.fromAI(data);
+      final uniqueKeys = <String>{};
+      final matchedNames = <String>{};
+      final missing = <String>[];
+      var matched = 0;
+
+      for (final ingredient in recipe.ingredients) {
+        final name = ingredient.name.trim();
+        if (name.isEmpty) continue;
+        final normalized = _normalizeName(name);
+        if (!uniqueKeys.add(normalized)) continue;
+        if (_hasIngredient(name)) {
+          matched++;
+          matchedNames.add(normalized);
+        } else {
+          missing.add(name);
+        }
+      }
+
+      final total = uniqueKeys.length;
+      final ratio = total == 0 ? 0.0 : matched / total;
+      final score = (ratio * 100).round().clamp(0, 100);
+      final cuisine = _primaryCuisineTag(recipe.tags);
+
+      final unmatchedUrgent =
+          urgentSet.where((u) => !matchedNames.contains(u)).toList();
+      if (mustUseAllUrgent && urgentSet.isNotEmpty && unmatchedUrgent.isNotEmpty) {
+        continue;
+      }
+
+      final enrichedRecipe = recipe.copyWith(
+        matchRatio: ratio,
+        matchScore: score,
+        missingIngredients: missing,
+      );
+
+      if (!_matchesCuisineFilters(enrichedRecipe, normalizedCuisineFilters)) {
+        continue;
+      }
+      if (!_matchesDietGoals(enrichedRecipe, normalizedDietGoals)) {
+        continue;
+      }
+      if (!_matchesNutritionTargets(
+        enrichedRecipe,
+        minCalories: minCalories,
+        maxCalories: maxCalories,
+        minProtein: minProtein,
+        maxCarbs: maxCarbs,
+        maxFat: maxFat,
+      )) {
+        continue;
+      }
+
+      candidates.add(
+        _FallbackCandidate(
+          recipe: enrichedRecipe,
+          cuisine: cuisine,
+          ratio: ratio,
+          matchedCount: matched,
+          totalCount: total,
+        ),
+      );
+    }
+
+    if (mustUseAllUrgent &&
+        urgentSet.isNotEmpty &&
+        candidates.isEmpty) {
+      return _fallbackAiRecommendations(
+        selectedIngredients,
+        cuisineFilters: cuisineFilters,
+        dietGoals: dietGoals,
+        minCalories: minCalories,
+        maxCalories: maxCalories,
+        minProtein: minProtein,
+        maxCarbs: maxCarbs,
+        maxFat: maxFat,
+        preferThaiWhenUnfiltered: preferThaiWhenUnfiltered,
+        urgentIngredientNames: urgentIngredientNames,
+        mustUseAllUrgent: false,
+        targetCount: targetCount,
+      );
+    }
+
+    candidates.sort((a, b) {
+      final ratioCompare = b.ratio.compareTo(a.ratio);
+      if (ratioCompare != 0) return ratioCompare;
+      final matchedCompare = b.matchedCount.compareTo(a.matchedCount);
+      if (matchedCompare != 0) return matchedCompare;
+      final totalCompare = a.totalCount.compareTo(b.totalCount);
+      if (totalCompare != 0) return totalCompare;
+      return a.recipe.name.toLowerCase().compareTo(b.recipe.name.toLowerCase());
+    });
+
+    final selected = <RecipeModel>[];
+    final selectedKeys = <String>{};
+    final usedCuisines = <String>{};
+    final requireThaiEmphasis = preferThaiWhenUnfiltered &&
+        (normalizedCuisineFilters.isEmpty ||
+            normalizedCuisineFilters.contains('thai'));
+
+    int thaiCount() =>
+        selected.where((recipe) => _primaryCuisineTag(recipe.tags) == 'thai').length;
+
+    if (requireThaiEmphasis) {
+      for (final candidate in candidates.where((c) => c.cuisine == 'thai')) {
+        if (selected.length >= targetCount) break;
+        if (thaiCount() >= 2) break;
+        final key = _normalizeName(candidate.recipe.name);
+        if (selectedKeys.add(key)) {
+          selected.add(candidate.recipe);
+          usedCuisines.add('thai');
+        }
+      }
+    }
+
+    // Pass 1: เก็บเมนูที่ให้สัญชาติไม่ซ้ำจนได้อย่างน้อย 3 ประเทศ
+    for (final candidate in candidates) {
+      if (selected.length >= targetCount) break;
+      if (usedCuisines.length >= 3) break;
+      final cuisine = candidate.cuisine;
+      if (cuisine == null || usedCuisines.contains(cuisine)) continue;
+      final key = _normalizeName(candidate.recipe.name);
+      if (selectedKeys.add(key)) {
+        selected.add(candidate.recipe);
+        usedCuisines.add(cuisine);
+      }
+    }
+
+    // Pass 2: เติมเมนูให้ครบตามจำนวนเป้าหมาย โดยยังพยายามเพิ่มสัญชาติที่ยังขาด
+    for (final candidate in candidates) {
+      if (selected.length >= targetCount) break;
+      final key = _normalizeName(candidate.recipe.name);
+      if (selectedKeys.contains(key)) continue;
+      final cuisine = candidate.cuisine;
+      if (usedCuisines.length < 3 &&
+          cuisine != null &&
+          !usedCuisines.contains(cuisine)) {
+        selected.add(candidate.recipe);
+        selectedKeys.add(key);
+        usedCuisines.add(cuisine);
+        continue;
+      }
+      if (selected.length < targetCount) {
+        selected.add(candidate.recipe);
+        selectedKeys.add(key);
+        if (cuisine != null) usedCuisines.add(cuisine);
+      }
+    }
+
+    // Pass 3: หากยังไม่ครบจำนวนเป้าหมายให้เติมจากตัวเลือกที่เหลือ
+    for (final candidate in candidates) {
+      if (selected.length >= targetCount) break;
+      final key = _normalizeName(candidate.recipe.name);
+      if (selectedKeys.contains(key)) continue;
+      selected.add(candidate.recipe);
+      selectedKeys.add(key);
+    }
+
+    return _applyNutritionEstimates(
+      selected.take(targetCount).toList(),
+    );
   }
 
   List<RecipeModel> _dedupeRecipes(List<RecipeModel> recipes) {
@@ -773,6 +1278,113 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
 
       return recipe.copyWith(nutrition: estimated);
     }).toList();
+  }
+
+  List<RecipeModel> _applyUserFilters(
+    List<RecipeModel> recipes, {
+    required List<String> cuisineFilters,
+    required Set<String> dietGoals,
+    int? minCalories,
+    int? maxCalories,
+    int? minProtein,
+    int? maxCarbs,
+    int? maxFat,
+  }) {
+    if (recipes.isEmpty) return recipes;
+    final normalizedCuisine = cuisineFilters
+        .map((value) => _normalizeName(value))
+        .where((value) => value.isNotEmpty)
+        .toSet();
+    final normalizedDietGoals = dietGoals
+        .map((value) => _normalizeName(value))
+        .where((value) => value.isNotEmpty)
+        .toSet();
+
+    final filtered = <RecipeModel>[];
+    for (final recipe in recipes) {
+      if (!_matchesCuisineFilters(recipe, normalizedCuisine)) continue;
+      if (!_matchesDietGoals(recipe, normalizedDietGoals)) continue;
+      if (!_matchesNutritionTargets(
+        recipe,
+        minCalories: minCalories,
+        maxCalories: maxCalories,
+        minProtein: minProtein,
+        maxCarbs: maxCarbs,
+        maxFat: maxFat,
+      )) continue;
+      filtered.add(recipe);
+    }
+    return filtered;
+  }
+
+  bool _matchesCuisineFilters(
+    RecipeModel recipe,
+    Set<String> cuisineFilters,
+  ) {
+    if (cuisineFilters.isEmpty) return true;
+    final tags = recipe.tags
+        .map((tag) => _normalizeName(tag))
+        .where((tag) => tag.isNotEmpty)
+        .toSet();
+    if (tags.any(cuisineFilters.contains)) return true;
+    final primary = _primaryCuisineTag(recipe.tags);
+    if (primary != null && cuisineFilters.contains(primary)) return true;
+    final category = _normalizeName(recipe.category);
+    if (category.isNotEmpty && cuisineFilters.contains(category)) return true;
+    return false;
+  }
+
+  bool _matchesDietGoals(
+    RecipeModel recipe,
+    Set<String> dietGoals,
+  ) {
+    if (dietGoals.isEmpty) return true;
+    final tags = recipe.tags
+        .map((tag) => _normalizeName(tag))
+        .where((tag) => tag.isNotEmpty)
+        .toSet();
+    final tagBasedGoals =
+        dietGoals.where((goal) => !_macroDietGoals.contains(goal)).toSet();
+    for (final goal in tagBasedGoals) {
+      final synonyms = _dietTagSynonyms[goal] ?? {goal};
+      if (!synonyms.any(tags.contains)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool _matchesNutritionTargets(
+    RecipeModel recipe, {
+    int? minCalories,
+    int? maxCalories,
+    int? minProtein,
+    int? maxCarbs,
+    int? maxFat,
+  }) {
+    double? _positiveOrNull(double value) => value > 0 ? value : null;
+    final info = recipe.nutrition;
+    final calories = _positiveOrNull(info.calories);
+    final protein = _positiveOrNull(info.protein);
+    final carbs = _positiveOrNull(info.carbs);
+    final fat = _positiveOrNull(info.fat);
+
+    if (minCalories != null) {
+      if (calories == null || calories < minCalories) return false;
+    }
+    if (maxCalories != null && calories != null && calories > maxCalories) {
+      return false;
+    }
+    if (minProtein != null) {
+      if (protein == null || protein < minProtein) return false;
+    }
+    if (maxCarbs != null && carbs != null && carbs > maxCarbs) {
+      return false;
+    }
+    if (maxFat != null && fat != null && fat > maxFat) {
+      return false;
+    }
+    return true;
   }
 
   bool _isAiGenerationEnabled() {
@@ -1248,29 +1860,188 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
       'name': 'Phol Food Mafia',
       'url': 'https://www.pholfoodmafia.com/recipes/',
     },
+    {
+      'name': 'China Sichuan Food',
+      'url': 'https://www.chinasichuanfood.com/',
+    },
+    {
+      'name': 'Just One Cookbook',
+      'url': 'https://www.justonecookbook.com/',
+    },
+    {
+      'name': 'Korean Bapsang',
+      'url': 'https://www.koreanbapsang.com/',
+    },
+    {
+      'name': 'Vicky Pham',
+      'url': 'https://www.vickypham.com/',
+    },
+    {
+      'name': 'Swasthi\'s Recipes',
+      'url': 'https://www.indianhealthyrecipes.com/',
+    },
+    {
+      'name': 'Serious Eats',
+      'url': 'https://www.seriouseats.com/',
+    },
+    {
+      'name': 'BBC Good Food',
+      'url': 'https://www.bbcgoodfood.com/recipes',
+    },
+    {
+      'name': 'Saveur',
+      'url': 'https://www.saveur.com/recipes/',
+    },
+    {
+      'name': 'The Daring Gourmet',
+      'url': 'https://www.daringgourmet.com/',
+    },
+    {
+      'name': 'Giallo Zafferano',
+      'url': 'https://www.giallozafferano.com/recipes/',
+    },
+    {
+      'name': 'Mexico in My Kitchen',
+      'url': 'https://www.mexicoinmykitchen.com/',
+    },
+    {
+      'name': 'Spanish Sabores',
+      'url': 'https://spanishsabores.com/',
+    },
   ];
 
-  static const Map<String, String> _knownRecipeLinks = {
-    'ผัดกะเพราไก่ไข่ดาว':
-        'https://www.wongnai.com/recipes/stir-fried-minced-chicken-with-holy-basil-and-fried-egg',
-    'ต้มยำกุ้งน้ำใส': 'https://krua.co/recipe/tom-yam-goong-clear-soup/',
-    'แกงเขียวหวานไก่': 'https://www.maeban.co.th/menu_detail.php?bl=1&id=563',
-    'ไข่เจียวหมูสับฟูกรอบ':
-        'https://cookpad.com/th/recipes/5292085-ไข่เจียวหมูสับฟูกรอบ',
-    'ยำเห็ดรวมสมุนไพร':
-        'https://www.pholfoodmafia.com/recipe/spicy-mushroom-salad/',
+  static const Map<String, Set<String>> _trustedImageHosts = {
+    'wongnai.com': {'wongnai.com', 'img.wongnai.com', 'static.wongnai.com'},
+    'maeban.co.th': {'maeban.co.th'},
+    'cookpad.com': {'cookpad.com', 'img.cookpad.com'},
+    'krua.co': {'krua.co'},
+    'pholfoodmafia.com': {'pholfoodmafia.com'},
+    'chinasichuanfood.com': {'chinasichuanfood.com'},
+    'justonecookbook.com': {'justonecookbook.com', 'cdn.justonecookbook.com'},
+    'koreanbapsang.com': {'koreanbapsang.com'},
+    'vickypham.com': {'vickypham.com'},
+    'indianhealthyrecipes.com': {'indianhealthyrecipes.com'},
+    'seriouseats.com': {'seriouseats.com', 'images.ctfassets.net'},
+    'bbcgoodfood.com': {'bbcgoodfood.com', 'images.immediate.co.uk'},
+    'saveur.com': {'saveur.com', 'www.saveur.com'},
+    'daringgourmet.com': {'daringgourmet.com'},
+    'giallozafferano.com': {'giallozafferano.com'},
+    'mexicoinmykitchen.com': {'mexicoinmykitchen.com'},
+    'spanishsabores.com': {'spanishsabores.com'},
+  };
+
+  static const Set<String> _pantryCategoryKeywords = {
+    'เครื่องปรุง',
+    'ปรุงรส',
+    'ซอส',
+    'sauce',
+    'seasoning',
+    'condiment',
+    'น้ำมัน',
+    'น้ำตาล',
+    'เกลือ',
+    'ผง',
+    'แป้ง',
+    'เครื่องเทศ',
+    'spice',
+    'flour',
+    'sugar',
+    'salt',
+    'oil',
+    'vinegar',
+    'dressing',
+  };
+
+  static const Set<String> _pantryNameKeywords = {
+    'น้ำตาล',
+    'น้ำปลา',
+    'น้ำมัน',
+    'เกลือ',
+    'ผงชูรส',
+    'ซีอิ๊ว',
+    'ซอส',
+    'พริกแกง',
+    'กะปิ',
+    'ออริกาโน',
+    'oregano',
+    'sugar',
+    'salt',
+    'oil',
+    'sauce',
+    'seasoning',
+    'fish sauce',
+    'soy sauce',
+    'vinegar',
+    'flour',
+    'starch',
+    'cornstarch',
+  };
+
+  static const Set<String> _pantryUnitKeywords = {
+    'ช้อนชา',
+    'ช้อนโต๊ะ',
+    'ช้อนหวาน',
+    'ช้อนกินข้าว',
+    'tsp',
+    'tbsp',
+    'teaspoon',
+    'tablespoon',
+  };
+
+  static const Set<String> _supportedCuisineTags = {
+    'thai',
+    'chinese',
+    'japanese',
+    'korean',
+    'vietnamese',
+    'indian',
+    'american',
+    'british',
+    'french',
+    'german',
+    'italian',
+    'mexican',
+    'spanish',
+  };
+
+  String? _primaryCuisineTag(List<String> tags) {
+    for (final tag in tags) {
+      final normalized = _normalizeName(tag);
+      if (_supportedCuisineTags.contains(normalized)) {
+        return normalized;
+      }
+    }
+    return null;
+  }
+
+  static const Map<String, Set<String>> _dietTagSynonyms = {
+    'vegan': {'vegan', 'plant-based'},
+    'vegetarian': {'vegetarian', 'ovo-vegetarian', 'lacto-vegetarian', 'plant-based'},
+    'lacto-vegetarian': {'lacto-vegetarian', 'vegetarian'},
+    'ovo-vegetarian': {'ovo-vegetarian', 'vegetarian'},
+    'pescatarian': {'pescatarian'},
+    'gluten-free': {'gluten-free', 'glutenfree'},
+    'dairy-free': {'dairy-free', 'dairyfree', 'non-dairy', 'lactose-free'},
+    'paleo': {'paleo'},
+    'ketogenic': {'ketogenic', 'keto'},
+  };
+
+  static const Set<String> _macroDietGoals = {
+    'high-protein',
+    'low-carb',
+    'low-fat',
+    'ketogenic',
   };
 
   static const List<Map<String, dynamic>> _fallbackAiRecipeMaps = [
     {
-      'id': 'ai_wongnai_pad_kra_prao',
+      'id': 'ai_thai_pad_kra_prao',
       'name': 'ผัดกะเพราไก่ไข่ดาว',
-      'description':
-          'ผัดกะเพราไก่รสจัดจ้าน เสิร์ฟพร้อมไข่ดาวกรอบและข้าวสวยร้อน',
+      'description': 'ผัดกะเพรารสจัดจ้าน เสิร์ฟพร้อมไข่ดาวกรอบและข้าวสวยร้อน',
       'reason':
-          'ใช้ไก่ กระเทียม พริก และไข่ที่มีอยู่แล้ว ปรุงเสร็จในเวลาไม่นาน เหมาะสำหรับมือใหม่',
-      'category': 'อาหารจานเดียว',
-      'tags': ['thai', 'ai', 'quick', 'stir-fry'],
+          'วัตถุดิบหลักเป็นไก่ กระเทียม พริก และไข่ ที่พบในครัวทั่วไป เหมาะกับมื้อเร่งด่วนแบบไทยแท้',
+      'category': 'Stir-fry',
+      'tags': ['thai', 'ai', 'stir-fry'],
       'match_score': 92,
       'match_ratio': 0.92,
       'ingredients': [
@@ -1286,13 +2057,12 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
       ],
       'steps': [
         'โขลกหรือสับกระเทียมและพริกให้พอหยาบ ตั้งกระทะใส่น้ำมัน เจียวให้หอม',
-        'ใส่อกไก่สับลงผัดจนสุก ปรุงรสด้วยน้ำปลา ซีอิ๊วขาว และน้ำตาลทราย ชิมรส',
+        'ใส่อกไก่สับลงผัดจนสุก ปรุงรสด้วยน้ำปลา ซีอิ๊วขาว และน้ำตาลทราย',
         'ปิดไฟแล้วใส่ใบกะเพราผัดคลุกให้เข้ากัน',
-        'ทอดไข่ดาวในน้ำมันร้อนจนขอบกรอบ',
-        'ตักเสิร์ฟผัดกะเพรา คู่กับข้าวสวยและไข่ดาว',
+        'ทอดไข่ดาวจนขอบกรอบ เสิร์ฟพร้อมข้าวสวย',
       ],
-      'cooking_time': 12,
-      'prep_time': 8,
+      'cooking_time': 15,
+      'prep_time': 10,
       'servings': 2,
       'source': 'Wongnai',
       'source_url':
@@ -1300,68 +2070,67 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
       'missing_ingredients': [],
     },
     {
-      'id': 'ai_kruaco_tom_yum_goong',
+      'id': 'ai_thai_tom_yum',
       'name': 'ต้มยำกุ้งน้ำใส',
-      'description':
-          'ซุปต้มยำกุ้งน้ำใสหอมสมุนไพร เผ็ดเปรี้ยวร้อนแรงตามแบบฉบับไทย',
+      'description': 'ซุปต้มยำกุ้งรสจัดกลมกล่อม หอมสมุนไพรไทยสด',
       'reason':
-          'ใช้กุ้งสด เห็ด และสมุนไพรไทยที่เก็บในครัวอยู่แล้ว เหมาะกับผู้ที่ต้องการเมนูซดร้อน',
-      'category': 'ซุป',
-      'tags': ['thai', 'ai', 'soup', 'seafood'],
-      'match_score': 88,
-      'match_ratio': 0.88,
+          'ใช้กุ้ง สมุนไพร และเครื่องปรุงที่มีในครัวไทย ช่วยใช้ของสดที่ใกล้หมดอายุ',
+      'category': 'Soup',
+      'tags': ['thai', 'ai', 'soup'],
+      'match_score': 90,
+      'match_ratio': 0.9,
       'ingredients': [
-        {'name': 'กุ้งขนาดกลาง', 'amount': 6, 'unit': 'ตัว'},
-        {'name': 'เห็ดฟางหรือเห็ดนางรม', 'amount': 120, 'unit': 'กรัม'},
+        {'name': 'กุ้งแม่น้ำแกะเปลือก', 'amount': 300, 'unit': 'กรัม'},
         {'name': 'ตะไคร้หั่นท่อน', 'amount': 2, 'unit': 'ต้น'},
-        {'name': 'ใบมะกรูดฉีก', 'amount': 4, 'unit': 'ใบ'},
-        {'name': 'ข่าแก่หั่นแว่น', 'amount': 4, 'unit': 'แว่น'},
-        {'name': 'พริกขี้หนูสวนบุบ', 'amount': 6, 'unit': 'เม็ด'},
-        {'name': 'น้ำปลา', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
-        {'name': 'น้ำมะนาว', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
-        {'name': 'น้ำซุปกระดูก', 'amount': 600, 'unit': 'มิลลิลิตร'},
-        {'name': 'ผักชีลาวหรือผักชีไทยซอย', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ใบมะกรูดฉีก', 'amount': 5, 'unit': 'ใบ'},
+        {'name': 'ข่าหั่นแว่น', 'amount': 4, 'unit': 'แว่น'},
+        {'name': 'เห็ดฟางผ่าครึ่ง', 'amount': 120, 'unit': 'กรัม'},
+        {'name': 'น้ำปลา', 'amount': 3, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำมะนาว', 'amount': 3, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'พริกขี้หนูสวนบุบ', 'amount': 8, 'unit': 'เม็ด'},
+        {'name': 'น้ำซุปไก่', 'amount': 800, 'unit': 'มิลลิลิตร'},
+        {'name': 'ผักชีฝรั่งซอย', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
       ],
       'steps': [
-        'ตั้งหม้อใส่น้ำซุป ตะไคร้ ข่า และใบมะกรูด ต้มจนหอม',
-        'ใส่เห็ดและกุ้ง ต้มจนกุ้งเริ่มสุก ปรุงรสด้วยน้ำปลา',
-        'ปิดไฟก่อนใส่น้ำมะนาวและพริกขี้หนูบุบ เพื่อรักษากลิ่นหอม',
-        'โรยผักชีซอยก่อนเสิร์ฟ พร้อมข้าวสวยหรือทานเปล่า ๆ',
+        'ตั้งหม้อน้ำซุปให้เดือด ใส่ตะไคร้ ข่า และใบมะกรูดเคี่ยวให้น้ำหอม',
+        'เติมเห็ดฟางลงต้มจนสุก จากนั้นใส่กุ้งให้พอสุกเด้ง',
+        'ปรุงรสด้วยน้ำปลา น้ำมะนาว และพริกขี้หนูบุบ ชิมให้รสกลมกล่อม',
+        'ปิดไฟโรยผักชีฝรั่งซอย เสิร์ฟร้อน ๆ',
       ],
-      'cooking_time': 18,
+      'cooking_time': 20,
       'prep_time': 10,
-      'servings': 2,
+      'servings': 3,
       'source': 'Krua.co',
       'source_url': 'https://krua.co/recipe/tom-yam-goong-clear-soup/',
       'missing_ingredients': [],
     },
     {
-      'id': 'ai_maeban_green_curry',
+      'id': 'ai_thai_green_curry',
       'name': 'แกงเขียวหวานไก่',
-      'description':
-          'แกงเขียวหวานไก่หอมกะทิ ใส่มะเขือพวงและโหระพา เสิร์ฟกับข้าวหรือเส้นขนมจีน',
+      'description': 'แกงเขียวหวานรสเข้มข้น หอมกะทิและใบโหระพา',
       'reason':
-          'ใช้สะโพกไก่ กะทิ น้ำพริกแกง และผักสวนครัวที่มีอยู่ เตรียมล่วงหน้าได้สำหรับหลายมื้อ',
-      'category': 'แกงกะทิ',
+          'เหมาะกับการใช้ไก่ กะทิ และเครื่องแกงที่มีติดครัว พร้อมเสิร์ฟคู่ข้าวสวย',
+      'category': 'Curry',
       'tags': ['thai', 'ai', 'curry'],
-      'match_score': 86,
-      'match_ratio': 0.86,
+      'match_score': 88,
+      'match_ratio': 0.88,
       'ingredients': [
-        {'name': 'สะโพกไก่หั่นชิ้น', 'amount': 300, 'unit': 'กรัม'},
-        {'name': 'น้ำพริกแกงเขียวหวาน', 'amount': 70, 'unit': 'กรัม'},
-        {'name': 'หัวกะทิ', 'amount': 250, 'unit': 'มิลลิลิตร'},
-        {'name': 'หางกะทิหรือ น้ำซุป', 'amount': 300, 'unit': 'มิลลิลิตร'},
-        {'name': 'มะเขือพวง', 'amount': 50, 'unit': 'กรัม'},
+        {'name': 'สะโพกไก่หั่นชิ้น', 'amount': 400, 'unit': 'กรัม'},
+        {'name': 'หัวกะทิ', 'amount': 200, 'unit': 'มิลลิลิตร'},
+        {'name': 'หางกะทิ', 'amount': 300, 'unit': 'มิลลิลิตร'},
+        {'name': 'พริกแกงเขียวหวาน', 'amount': 50, 'unit': 'กรัม'},
+        {'name': 'มะเขือเปราะผ่าครึ่ง', 'amount': 120, 'unit': 'กรัม'},
+        {'name': 'ลูกชิ้นปลาเส้น', 'amount': 100, 'unit': 'กรัม'},
         {'name': 'ใบโหระพา', 'amount': 30, 'unit': 'กรัม'},
         {'name': 'น้ำปลา', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
         {'name': 'น้ำตาลปี๊บ', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
-        {'name': 'ใบมะกรูด', 'amount': 3, 'unit': 'ใบ'},
+        {'name': 'พริกชี้ฟ้าหั่นเฉียง', 'amount': 2, 'unit': 'เม็ด'},
       ],
       'steps': [
-        'ผัดน้ำพริกแกงเขียวหวานกับหัวกะทิให้แตกมัน',
-        'ใส่ไก่ผัดจนตึงตัว เติมหางกะทิ เคี่ยวจนไก่นุ่ม',
-        'ปรุงรสด้วยน้ำปลาและน้ำตาลปี๊บ ใส่มะเขือพวงเคี่ยวต่อพอสุก',
-        'ปิดไฟ โรยใบโหระพาและใบมะกรูดฉีก เสิร์ฟคู่ข้าวสวยหรือเส้นขนมจีน',
+        'เคี่ยวหัวกะทิกับพริกแกงเขียวหวานให้แตกมัน',
+        'ใส่เนื้อไก่ลงผัดให้สุกแล้วเติมหางกะทิ',
+        'ใส่มะเขือเปราะและลูกชิ้นปลา เคี่ยวจนผักนุ่ม',
+        'ปรุงรสด้วยน้ำปลา น้ำตาลปี๊บ ใส่ใบโหระพาและพริกชี้ฟ้าก่อนปิดไฟ',
       ],
       'cooking_time': 25,
       'prep_time': 15,
@@ -1371,75 +2140,541 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
       'missing_ingredients': [],
     },
     {
-      'id': 'ai_cookpad_pork_omelette',
-      'name': 'ไข่เจียวหมูสับฟูกรอบ',
-      'description': 'ไข่เจียวหมูสับเนื้อแน่นฟูกรอบ ทำง่าย ใช้วัตถุดิบพื้นฐาน',
+      'id': 'ai_thai_pad_se-ew',
+      'name': 'ผัดซีอิ๊วเส้นใหญ่หมู',
+      'description': 'เส้นใหญ่ผัดไฟแรงกับหมูและคะน้า กลิ่นกระทะหอม ๆ',
       'reason':
-          'ใช้ไข่ หมูสับ และเครื่องปรุงทั่วไป เหมาะสำหรับมื้อเร่งด่วนหรือเด็ก ๆ',
-      'category': 'อาหารจานเดียว',
-      'tags': ['thai', 'ai', 'omelette', 'quick'],
-      'match_score': 94,
-      'match_ratio': 0.94,
+          'ใช้เส้นใหญ่ ไข่ และผักคะน้าที่เหลือในตู้เย็น ทำง่ายได้พลังงานครบถ้วน',
+      'category': 'Noodle',
+      'tags': ['thai', 'ai', 'stir-fry'],
+      'match_score': 87,
+      'match_ratio': 0.87,
       'ingredients': [
-        {'name': 'ไข่ไก่', 'amount': 3, 'unit': 'ฟอง'},
-        {'name': 'หมูสับ', 'amount': 120, 'unit': 'กรัม'},
-        {'name': 'ซอสปรุงรส', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
-        {'name': 'น้ำปลา', 'amount': 0.5, 'unit': 'ช้อนโต๊ะ'},
-        {'name': 'น้ำมันพืช', 'amount': 1.5, 'unit': 'ถ้วยตวง'},
-        {'name': 'หอมใหญ่ซอย', 'amount': 30, 'unit': 'กรัม'},
+        {'name': 'เส้นใหญ่', 'amount': 400, 'unit': 'กรัม'},
+        {'name': 'หมูหมักหั่นชิ้น', 'amount': 250, 'unit': 'กรัม'},
+        {'name': 'ไข่ไก่', 'amount': 2, 'unit': 'ฟอง'},
+        {'name': 'คะน้าซอย', 'amount': 150, 'unit': 'กรัม'},
+        {'name': 'ซีอิ๊วดำหวาน', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ซีอิ๊วขาว', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำตาลทราย', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'น้ำมันพืช', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'กระเทียมสับ', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'พริกไทยป่น', 'amount': 0.5, 'unit': 'ช้อนชา'},
       ],
       'steps': [
-        'ตีไข่ในชาม ใส่หมูสับ หอมใหญ่ และปรุงรสด้วยซอสปรุงรส น้ำปลา',
-        'ตีให้ฟูเพื่อให้ไข่ขึ้นฟอง',
-        'ตั้งน้ำมันให้ร้อนจัด เทไข่ลงทอดกลับสองด้านจนเหลืองกรอบ',
-        'ตักพักน้ำมัน เสิร์ฟคู่ซอสพริกและข้าวสวย',
+        'ตั้งกระทะไฟแรงใส่น้ำมัน เจียวกระเทียมหอมแล้วใส่หมูผัดจนสุก',
+        'ตอกไข่ลงไปยีให้กระจาย ใส่เส้นใหญ่และคะน้าลงผัด',
+        'ปรุงรสด้วยซีอิ๊วขาว ซีอิ๊วดำ น้ำตาล พริกไทย คลุกให้เข้ากัน',
+        'ผัดจนเส้นหอมกลิ่นกระทะ เสิร์ฟร้อน ๆ',
       ],
-      'cooking_time': 10,
-      'prep_time': 5,
+      'cooking_time': 15,
+      'prep_time': 10,
       'servings': 2,
-      'source': 'Cookpad Thailand',
+      'source': 'Wongnai',
       'source_url':
-          'https://cookpad.com/th/recipes/5292085-ไข่เจียวหมูสับฟูกรอบ',
+          'https://www.wongnai.com/recipes/stir-fried-flat-noodles-with-pork',
       'missing_ingredients': [],
     },
     {
-      'id': 'ai_pholfood_mafia_spicy_mushroom_salad',
-      'name': 'ยำเห็ดรวมสมุนไพร',
-      'description':
-          'ยำเห็ดรวมรสจัดจ้าน หอมสมุนไพร เหมาะสำหรับมื้อเบา ๆ หรือทานคู่กับข้าว',
+      'id': 'ai_thai_pa_lo',
+      'name': 'ไข่พะโล้หมูสามชั้น',
+      'description': 'พะโล้รสหวานเค็มหอมเครื่องเทศ กินคู่ข้าวสวยร้อน',
       'reason':
-          'ใช้เห็ด ผักสด และน้ำปรุงยำที่มีอยู่ เสริมสมุนไพรเพื่อเพิ่มรสชาติและกลิ่นหอม',
-      'category': 'ยำ',
-      'tags': ['thai', 'ai', 'salad', 'healthy'],
-      'match_score': 84,
-      'match_ratio': 0.84,
+          'ช่วยเคลียร์ไข่และหมูสามชั้นในสต็อก พร้อมเก็บทานได้หลายมื้อ',
+      'category': 'Stew',
+      'tags': ['thai', 'ai', 'stew'],
+      'match_score': 85,
+      'match_ratio': 0.85,
       'ingredients': [
-        {'name': 'เห็ดออรินจิหั่นชิ้น', 'amount': 80, 'unit': 'กรัม'},
-        {'name': 'เห็ดเข็มทอง', 'amount': 70, 'unit': 'กรัม'},
-        {'name': 'เห็ดนางรม', 'amount': 70, 'unit': 'กรัม'},
-        {'name': 'หอมแดงซอย', 'amount': 2, 'unit': 'หัว'},
-        {'name': 'ตะไคร้ซอย', 'amount': 1, 'unit': 'ต้น'},
-        {'name': 'พริกขี้หนูซอย', 'amount': 5, 'unit': 'เม็ด'},
-        {'name': 'น้ำปลา', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
-        {'name': 'น้ำมะนาว', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
-        {'name': 'น้ำตาลปี๊บ', 'amount': 1, 'unit': 'ช้อนชา'},
-        {'name': 'ใบสะระแหน่', 'amount': 10, 'unit': 'ใบ'},
+        {'name': 'หมูสามชั้นหั่นชิ้น', 'amount': 400, 'unit': 'กรัม'},
+        {'name': 'ไข่ไก่ต้มสุก', 'amount': 4, 'unit': 'ฟอง'},
+        {'name': 'น้ำตาลปี๊บ', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำปลา', 'amount': 3, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ซอสซีอิ๊วดำ', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'อบเชย', 'amount': 1, 'unit': 'ท่อน'},
+        {'name': 'โป๊ยกั๊ก', 'amount': 2, 'unit': 'ดอก'},
+        {'name': 'กระเทียมไทยทุบ', 'amount': 8, 'unit': 'กลีบ'},
+        {'name': 'น้ำซุปหมู', 'amount': 800, 'unit': 'มิลลิลิตร'},
+        {'name': 'ผักชีรากทุบ', 'amount': 3, 'unit': 'ราก'},
       ],
       'steps': [
-        'ลวกเห็ดต่าง ๆ ในน้ำเดือดให้สุก พักให้สะเด็ดน้ำ',
-        'ผสมน้ำปลา น้ำมะนาว น้ำตาลปี๊บ คนให้น้ำตาลละลาย',
-        'คลุกเห็ดกับน้ำยำ ใส่หอมแดง ตะไคร้ และพริกขี้หนู คลุกให้เข้ากัน',
-        'โรยใบสะระแหน่ก่อนเสิร์ฟ เพิ่มความหอมสดชื่น',
+        'คาราเมลน้ำตาลปี๊บจนเป็นสีน้ำตาลเข้ม ใส่หมูสามชั้นผัดให้เคลือบ',
+        'เติมน้ำซุป ปรุงรสด้วยน้ำปลา ซีอิ๊วดำ และใส่เครื่องเทศทั้งหมด',
+        'เคี่ยวไฟอ่อนจนหมูนุ่ม จากนั้นใส่ไข่ต้มลงไปเคี่ยวต่ออีก 10 นาที',
+        'ชิมรสหวานเค็มตามชอบ เสิร์ฟพร้อมข้าวสวย',
       ],
-      'cooking_time': 12,
-      'prep_time': 8,
-      'servings': 2,
+      'cooking_time': 60,
+      'prep_time': 15,
+      'servings': 4,
       'source': 'Phol Food Mafia',
       'source_url':
-          'https://www.pholfoodmafia.com/recipe/spicy-mushroom-salad/',
+          'https://www.pholfoodmafia.com/recipe/five-spice-stewed-eggs-and-pork/',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_chinese_kung_pao',
+      'name': 'Kung Pao Chicken',
+      'description':
+          'ไก่ผัดพริกถั่วลิสงสไตล์เสฉวน เผ็ดหวานเค็มหอมกลิ่นพริกแห้ง',
+      'reason':
+          'เลือกใช้ไก่ ถั่วลิสง และเครื่องปรุงที่คล้ายครัวไทย เพื่อเพิ่มสีสันแบบจีน',
+      'category': 'Stir-fry',
+      'tags': ['chinese', 'ai', 'stir-fry'],
+      'match_score': 85,
+      'match_ratio': 0.85,
+      'ingredients': [
+        {'name': 'อกไก่หั่นเต๋า', 'amount': 350, 'unit': 'กรัม'},
+        {'name': 'พริกแห้งหั่นท่อน', 'amount': 6, 'unit': 'เม็ด'},
+        {'name': 'ถั่วลิสงคั่ว', 'amount': 60, 'unit': 'กรัม'},
+        {'name': 'กระเทียมสับ', 'amount': 3, 'unit': 'กลีบ'},
+        {'name': 'ขิงสับ', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ต้นหอม', 'amount': 2, 'unit': 'ต้น'},
+        {'name': 'ซีอิ๊วขาว', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ซีอิ๊วดำ', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'น้ำส้มสายชูดำ', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำตาลทราย', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+      ],
+      'steps': [
+        'หมักไก่กับซีอิ๊ว น้ำตาล และแป้งมันเล็กน้อยอย่างน้อย 15 นาที',
+        'ผัดพริกแห้งกับน้ำมันจนหอม ใส่ไก่ผัดจนเกือบสุก',
+        'เติมกระเทียม ขิง ถั่วลิสง และซอสทั้งหมด คลุกจนเข้ากัน',
+        'ผัดใส่ต้นหอมเร็ว ๆ แล้วเสิร์ฟทันที',
+      ],
+      'cooking_time': 20,
+      'prep_time': 15,
+      'servings': 3,
+      'source': 'China Sichuan Food',
+      'source_url': 'https://www.chinasichuanfood.com/kung-pao-chicken/',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_japanese_teriyaki',
+      'name': 'Chicken Teriyaki',
+      'description': 'ไก่เทอริยากิซอสหวานเค็มกลมกล่อม เสิร์ฟแบบญี่ปุ่น',
+      'reason': 'ใช้ไก่และซีอิ๊วที่หาได้ง่ายในไทย เสริมรสชาติญี่ปุ่นแท้',
+      'category': 'Main',
+      'tags': ['japanese', 'ai', 'glaze'],
+      'match_score': 83,
+      'match_ratio': 0.83,
+      'ingredients': [
+        {'name': 'สะโพกไก่ไม่มีกระดูก', 'amount': 400, 'unit': 'กรัม'},
+        {'name': 'ซีอิ๊วญี่ปุ่น', 'amount': 3, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'มิริน', 'amount': 3, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำตาลทราย', 'amount': 1.5, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'เหล้าสาเก', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ขิงขูด', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'กระเทียมขูด', 'amount': 1, 'unit': 'กลีบ'},
+        {'name': 'น้ำมันงา', 'amount': 1, 'unit': 'ช้อนชา'},
+      ],
+      'steps': [
+        'ผสมน้ำซอสเทอริยากิทั้งหมดให้เข้ากัน',
+        'ย่างหรือทอดสะโพกไก่ด้านหนังให้กรอบแล้วกลับอีกด้าน',
+        'เทซอสลงกระทะ เคี่ยวจนข้นและเคลือบไก่เป็นเงา',
+        'หั่นเสิร์ฟคู่ข้าวญี่ปุ่นและผักลวก',
+      ],
+      'cooking_time': 18,
+      'prep_time': 10,
+      'servings': 2,
+      'source': 'Just One Cookbook',
+      'source_url': 'https://www.justonecookbook.com/chicken-teriyaki/',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_korean_bibimbap',
+      'name': 'Bibimbap',
+      'description': 'ข้าวยำเกาหลีรวมผักหลากชนิด ไข่ดาว และซอสโกชูจัง',
+      'reason':
+          'จัดครบทั้งผัก โปรตีน และธัญพืช เหมาะกับการใช้ของเหลือในตู้เย็น',
+      'category': 'Rice Bowl',
+      'tags': ['korean', 'ai', 'rice-bowl'],
+      'match_score': 80,
+      'match_ratio': 0.8,
+      'ingredients': [
+        {'name': 'ข้าวสวย', 'amount': 2, 'unit': 'ถ้วย'},
+        {'name': 'เนื้อวัวสไลซ์', 'amount': 200, 'unit': 'กรัม'},
+        {'name': 'ผักโขมลวก', 'amount': 120, 'unit': 'กรัม'},
+        {'name': 'ถั่วงอกลวก', 'amount': 120, 'unit': 'กรัม'},
+        {'name': 'แครอทซอย', 'amount': 80, 'unit': 'กรัม'},
+        {'name': 'เห็ดหอมสไลซ์', 'amount': 80, 'unit': 'กรัม'},
+        {'name': 'ไข่ไก่', 'amount': 2, 'unit': 'ฟอง'},
+        {'name': 'โกชูจัง', 'amount': 3, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำมันงา', 'amount': 2, 'unit': 'ช้อนชา'},
+        {'name': 'งาคั่ว', 'amount': 1, 'unit': 'ช้อนชา'},
+      ],
+      'steps': [
+        'ผัดเนื้อกับซีอิ๊ว น้ำมันงา และน้ำตาลจนสุก หอม',
+        'ปรุงรสผักแต่ละชนิดด้วยเกลือและน้ำมันงาเล็กน้อย',
+        'จัดข้าวลงชาม วางผัก เนื้อ และไข่ดาวด้านบน',
+        'เสิร์ฟพร้อมซอสโกชูจัง คลุกก่อนรับประทาน',
+      ],
+      'cooking_time': 25,
+      'prep_time': 20,
+      'servings': 2,
+      'source': 'Korean Bapsang',
+      'source_url': 'https://www.koreanbapsang.com/bibimbap/',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_vietnamese_beef_pho',
+      'name': 'Vietnamese Beef Pho',
+      'description':
+          'เฝอเนื้อเวียดนาม ซุปใสกลิ่นอบเชย โป๊ยกั๊ก และสมุนไพรสด',
+      'reason':
+          'ใช้กระดูกและเนื้อวัวพร้อมสมุนไพรไทย สร้างรสซุปที่ลุ่มลึก',
+      'category': 'Soup',
+      'tags': ['vietnamese', 'ai', 'noodle'],
+      'match_score': 78,
+      'match_ratio': 0.78,
+      'ingredients': [
+        {'name': 'เส้นก๋วยเตี๋ยวแบน', 'amount': 200, 'unit': 'กรัม'},
+        {'name': 'กระดูกวัว', 'amount': 700, 'unit': 'กรัม'},
+        {'name': 'เนื้อวัวสไลซ์บาง', 'amount': 200, 'unit': 'กรัม'},
+        {'name': 'หอมใหญ่', 'amount': 1, 'unit': 'หัว'},
+        {'name': 'ขิงแก่', 'amount': 40, 'unit': 'กรัม'},
+        {'name': 'โป๊ยกั๊ก', 'amount': 2, 'unit': 'ดอก'},
+        {'name': 'อบเชย', 'amount': 1, 'unit': 'ท่อน'},
+        {'name': 'น้ำปลา', 'amount': 3, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'น้ำตาลกรวด', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ผักชีลาวและโหระพา', 'amount': 30, 'unit': 'กรัม'},
+      ],
+      'steps': [
+        'คั่วหอมใหญ่และขิงให้หอม เคี่ยวกับกระดูกและเครื่องเทศ 1-2 ชั่วโมง',
+        'ปรุงรสซุปด้วยน้ำปลาและน้ำตาลกรวด ชิมให้กลมกล่อม',
+        'ลวกเส้นและเนื้อสไลซ์ จัดลงชามแล้วราดน้ำซุปเดือด',
+        'เสิร์ฟพร้อมสมุนไพรสด มะนาว และพริก',
+      ],
+      'cooking_time': 120,
+      'prep_time': 25,
+      'servings': 4,
+      'source': 'Vicky Pham',
+      'source_url': 'https://www.vickypham.com/food/vietnamese-beef-pho',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_indian_tikka_masala',
+      'name': 'Chicken Tikka Masala',
+      'description':
+          'แกงไก่ในซอสมะเขือเทศและเครื่องเทศหอมมัน เสิร์ฟกับข้าวบาสมาติ',
+      'reason':
+          'ใช้ไก่ โยเกิร์ต มะเขือเทศ และเครื่องเทศที่หาได้ในร้านเอเชียทั่วไป',
+      'category': 'Curry',
+      'tags': ['indian', 'ai', 'curry'],
+      'match_score': 82,
+      'match_ratio': 0.82,
+      'ingredients': [
+        {'name': 'อกไก่หั่นชิ้น', 'amount': 400, 'unit': 'กรัม'},
+        {'name': 'โยเกิร์ตธรรมชาติ', 'amount': 120, 'unit': 'กรัม'},
+        {'name': 'น้ำมะนาว', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ผงขมิ้น', 'amount': 0.5, 'unit': 'ช้อนชา'},
+        {'name': 'ผงปาปริกา', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'น้ำมันพืช', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'หอมหัวใหญ่สับ', 'amount': 1, 'unit': 'หัว'},
+        {'name': 'กระเทียมสับ', 'amount': 4, 'unit': 'กลีบ'},
+        {'name': 'ขิงสับ', 'amount': 1, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ผงการ์รัมมาซาลา', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'มะเขือเทศบดกระป๋อง', 'amount': 240, 'unit': 'กรัม'},
+        {'name': 'ครีมสด', 'amount': 80, 'unit': 'มิลลิลิตร'},
+      ],
+      'steps': [
+        'หมักไก่ด้วยโยเกิร์ต น้ำมะนาว และเครื่องเทศอย่างน้อย 20 นาที',
+        'ผัดหอม กระเทียม และขิงจนหอม ใส่มะเขือเทศบดและเครื่องเทศลงเคี่ยว',
+        'ใส่ไก่หมักลงเคี่ยวจนสุก เติมครีมสด คนให้เข้ากันแล้วปรับรส',
+        'เสิร์ฟพร้อมข้าวบาสมาติหรือแป้งนาน',
+      ],
+      'cooking_time': 30,
+      'prep_time': 20,
+      'servings': 4,
+      'source': 'Swasthi\'s Recipes',
+      'source_url':
+          'https://www.indianhealthyrecipes.com/chicken-tikka-masala/',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_american_classic_burger',
+      'name': 'Classic Smash Burger',
+      'description':
+          'เบอร์เกอร์เนื้อบดย่างแผ่นบาง หอมกรอบ เสิร์ฟกับชีสและซอสเรียบง่าย',
+      'reason':
+          'ใช้เนื้อบด ชีส และขนมปังที่หาได้ทั่วไป เพิ่มตัวเลือกอาหารอเมริกันทำง่าย',
+      'category': 'Sandwich',
+      'tags': ['american', 'ai', 'grill'],
+      'match_score': 79,
+      'match_ratio': 0.79,
+      'ingredients': [
+        {'name': 'เนื้อวัวบด', 'amount': 450, 'unit': 'กรัม'},
+        {'name': 'เกลือ', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'พริกไทยดำบด', 'amount': 0.5, 'unit': 'ช้อนชา'},
+        {'name': 'ขนมปังเบอร์เกอร์', 'amount': 4, 'unit': 'ชิ้น'},
+        {'name': 'ชีสเชดดาร์แผ่น', 'amount': 4, 'unit': 'แผ่น'},
+        {'name': 'หัวหอมใหญ่สไลซ์', 'amount': 1, 'unit': 'หัว'},
+        {'name': 'เนยจืด', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'มายองเนส', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'ผักกาดหอม', 'amount': 4, 'unit': 'ใบ'},
+        {'name': 'มะเขือเทศสไลซ์', 'amount': 1, 'unit': 'ผล'},
+      ],
+      'steps': [
+        'ปั้นเนื้อวัวเป็นก้อนหลวม ๆ โรยเกลือและพริกไทยให้ทั่ว',
+        'กดเนื้อบนกระทะร้อนให้แผ่นบาง ย่างจนกรอบ ใส่ชีสให้ละลาย',
+        'ปิ้งขนมปังกับเนย ทามายองเนสแล้วประกอบกับผักและเนื้อ',
+        'เสิร์ฟทันทีคู่กับมันฝรั่งทอดหรือสลัด',
+      ],
+      'cooking_time': 15,
+      'prep_time': 15,
+      'servings': 4,
+      'source': 'Serious Eats',
+      'source_url':
+          'https://www.seriouseats.com/the-burger-lab-smashed-burger-recipe',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_british_fish_and_chips',
+      'name': 'Beer-Battered Fish and Chips',
+      'description':
+          'ปลาชุบแป้งเบียร์ทอดกรอบ เสิร์ฟกับมันฝรั่งทอดและซอสทาร์ทาร์',
+      'reason':
+          'ใช้ปลาขาว มันฝรั่ง และของแห้งที่หาได้ง่าย สอดคล้องกับห้องครัวคนไทย',
+      'category': 'Fried',
+      'tags': ['british', 'ai', 'fried'],
+      'match_score': 77,
+      'match_ratio': 0.77,
+      'ingredients': [
+        {'name': 'เนื้อปลาค็อดหรือดอรี่', 'amount': 500, 'unit': 'กรัม'},
+        {'name': 'แป้งสาลีอเนกประสงค์', 'amount': 160, 'unit': 'กรัม'},
+        {'name': 'ผงฟู', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'เบียร์ลาเกอร์เย็น', 'amount': 250, 'unit': 'มิลลิลิตร'},
+        {'name': 'มันฝรั่ง', 'amount': 3, 'unit': 'หัว'},
+        {'name': 'น้ำมันพืช', 'amount': 1, 'unit': 'ลิตร'},
+        {'name': 'เกลือทะเล', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'ซอสทาร์ทาร์', 'amount': 4, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'เลมอน', 'amount': 1, 'unit': 'ผล'},
+      ],
+      'steps': [
+        'หั่นมันฝรั่งเป็นแท่ง ลวกน้ำเดือดแล้วพักให้แห้งก่อนทอด',
+        'ผสมแป้ง ผงฟู และเบียร์ให้เป็นแป้งข้น',
+        'คลุกปลากับแป้งแห้ง ชุบแป้งเบียร์แล้วทอดจนกรอบสีทอง',
+        'ทอดมันฝรั่งจนกรอบ เสิร์ฟพร้อมปลา เลมอน และซอสทาร์ทาร์',
+      ],
+      'cooking_time': 35,
+      'prep_time': 20,
+      'servings': 3,
+      'source': 'BBC Good Food',
+      'source_url': 'https://www.bbcgoodfood.com/recipes/beer-battered-fish-chips',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_french_coq_au_vin',
+      'name': 'Coq au Vin',
+      'description':
+          'สตูว์ไก่ตุ๋นไวน์แดงพร้อมเห็ด เบคอน และหัวหอมมุก กลิ่นหอมลุ่มลึก',
+      'reason':
+          'ใช้ไก่ทั้งชิ้น ผักราก และไวน์ที่หาได้ในซูเปอร์มาร์เก็ต สร้างความหลากหลายแบบฝรั่งเศส',
+      'category': 'Stew',
+      'tags': ['french', 'ai', 'stew'],
+      'match_score': 76,
+      'match_ratio': 0.76,
+      'ingredients': [
+        {'name': 'ไก่บ้านหั่นชิ้นใหญ่', 'amount': 1.2, 'unit': 'กิโลกรัม'},
+        {'name': 'ไวน์แดงแห้ง', 'amount': 500, 'unit': 'มิลลิลิตร'},
+        {'name': 'เบคอนหั่นชิ้น', 'amount': 120, 'unit': 'กรัม'},
+        {'name': 'เห็ดแชมปิญอง', 'amount': 200, 'unit': 'กรัม'},
+        {'name': 'หอมมุก', 'amount': 120, 'unit': 'กรัม'},
+        {'name': 'แครอทหั่นท่อน', 'amount': 2, 'unit': 'หัว'},
+        {'name': 'กระเทียม', 'amount': 4, 'unit': 'กลีบ'},
+        {'name': 'น้ำซุปไก่', 'amount': 250, 'unit': 'มิลลิลิตร'},
+        {'name': 'ใบกระวาน', 'amount': 2, 'unit': 'ใบ'},
+        {'name': 'ไธม์สด', 'amount': 1, 'unit': 'ช้อนชา'},
+      ],
+      'steps': [
+        'หมักไก่กับไวน์แดงและสมุนไพรอย่างน้อย 4 ชั่วโมง แล้วซับให้แห้ง',
+        'ผัดเบคอนให้กรอบ ตักขึ้น ผัดไก่ให้เหลืองแล้วพัก',
+        'ผัดผักลงในหม้อ เติมไวน์หมัก ไก่ และน้ำซุป เคี่ยวจนไก่นุ่ม',
+        'ใส่เห็ดและเบคอนกลับลง เคี่ยวต่อจนซอสข้น เสิร์ฟกับมันบดหรือขนมปัง',
+      ],
+      'cooking_time': 90,
+      'prep_time': 30,
+      'servings': 4,
+      'source': 'Saveur',
+      'source_url': 'https://www.saveur.com/recipes/coq-au-vin/',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_german_sauerbraten',
+      'name': 'Sauerbraten',
+      'description':
+          'สตูว์เนื้อวัวหมักน้ำส้มและสมุนไพรแบบเยอรมัน เสิร์ฟกับกะหล่ำดองและมันฝรั่ง',
+      'reason':
+          'ใช้เนื้อวัว สมุนไพรแห้ง และน้ำส้มสายชูที่หาได้ง่าย เหมาะกับมื้อพิเศษ',
+      'category': 'Roast',
+      'tags': ['german', 'ai', 'roast'],
+      'match_score': 74,
+      'match_ratio': 0.74,
+      'ingredients': [
+        {'name': 'เนื้อวัวส่วนสันคอ', 'amount': 1.5, 'unit': 'กิโลกรัม'},
+        {'name': 'น้ำส้มสายชูหมัก', 'amount': 500, 'unit': 'มิลลิลิตร'},
+        {'name': 'น้ำซุปเนื้อ', 'amount': 500, 'unit': 'มิลลิลิตร'},
+        {'name': 'หัวหอมใหญ่', 'amount': 2, 'unit': 'หัว'},
+        {'name': 'แครอท', 'amount': 2, 'unit': 'หัว'},
+        {'name': 'เซเลอรี่', 'amount': 2, 'unit': 'ก้าน'},
+        {'name': 'ใบกระวาน', 'amount': 3, 'unit': 'ใบ'},
+        {'name': 'โป๊ยกั๊ก', 'amount': 2, 'unit': 'ดอก'},
+        {'name': 'เมล็ดมัสตาร์ด', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'น้ำตาลทรายแดง', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+      ],
+      'steps': [
+        'หมักเนื้อกับน้ำส้ม สมุนไพร และผักอย่างน้อย 24 ชั่วโมง',
+        'นำเนื้อออกมาซับให้แห้ง ย่างในหม้อให้ด้านนอกเป็นสีน้ำตาล',
+        'เติมน้ำหมักที่กรองแล้วและน้ำซุป เคี่ยวไฟอ่อนจนเนื้อนุ่ม',
+        'ปรุงรสซอสให้กลมกล่อม เสิร์ฟกับกะหล่ำดองหรือมันบด',
+      ],
+      'cooking_time': 150,
+      'prep_time': 30,
+      'servings': 6,
+      'source': 'The Daring Gourmet',
+      'source_url':
+          'https://www.daringgourmet.com/traditional-german-sauerbraten/',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_italian_carbonara',
+      'name': 'Spaghetti Carbonara',
+      'description':
+          'สปาเก็ตตี้ซอสครีมชีสจากไข่และพาร์มีซาน หอมกรุ่นแพนเชตตา',
+      'reason':
+          'ใช้เส้นพาสต้า ไข่ และชีสที่มีในซูเปอร์มาร์เก็ต ทำง่ายแต่รสชาติอิตาเลียนแท้',
+      'category': 'Pasta',
+      'tags': ['italian', 'ai', 'pasta'],
+      'match_score': 81,
+      'match_ratio': 0.81,
+      'ingredients': [
+        {'name': 'สปาเก็ตตี้', 'amount': 320, 'unit': 'กรัม'},
+        {'name': 'แพนเชตตาหรือเบคอนรมควัน', 'amount': 150, 'unit': 'กรัม'},
+        {'name': 'ไข่ไก่', 'amount': 3, 'unit': 'ฟอง'},
+        {'name': 'ไข่แดงเพิ่มเติม', 'amount': 1, 'unit': 'ฟอง'},
+        {'name': 'ชีสเพโกริโนขูด', 'amount': 50, 'unit': 'กรัม'},
+        {'name': 'ชีสพาร์มีซานขูด', 'amount': 40, 'unit': 'กรัม'},
+        {'name': 'พริกไทยดำบดใหม่', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'เกลือ', 'amount': 0.5, 'unit': 'ช้อนชา'},
+      ],
+      'steps': [
+        'ต้มเส้นสปาเก็ตตี้จนเกือบสุก เก็บน้ำต้มเส้นไว้เล็กน้อย',
+        'เจียวแพนเชตตาให้กรอบในกระทะใหญ่ ปิดไฟ',
+        'ตีไข่กับชีสและพริกไทย เติมลงกระทะพร้อมเส้นและน้ำต้มเส้นเล็กน้อย',
+        'คลุกเร็ว ๆ ให้ซอสเคลือบเส้นและข้น เสิร์ฟทันที',
+      ],
+      'cooking_time': 20,
+      'prep_time': 10,
+      'servings': 4,
+      'source': 'Giallo Zafferano',
+      'source_url':
+          'https://www.giallozafferano.com/recipes/Spaghetti-Carbonara.html',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_mexican_tinga_tacos',
+      'name': 'Chicken Tinga Tacos',
+      'description':
+          'ทาโก้ไก่ฉีกในซอสมะเขือเทศและชิพอทเล่ รสเผ็ดหอมควัน',
+      'reason':
+          'ใช้ไก่ต้มฉีก มะเขือเทศ และพริกกระป๋อง หาได้ง่ายสำหรับครัวเม็กซิกันสไตล์บ้าน',
+      'category': 'Taco',
+      'tags': ['mexican', 'ai', 'taco'],
+      'match_score': 80,
+      'match_ratio': 0.8,
+      'ingredients': [
+        {'name': 'อกไก่ต้มฉีก', 'amount': 400, 'unit': 'กรัม'},
+        {'name': 'มะเขือเทศบด', 'amount': 240, 'unit': 'กรัม'},
+        {'name': 'พริกชิพอทเล่ในซอสดอบลาดโด้', 'amount': 2, 'unit': 'เม็ด'},
+        {'name': 'หอมหัวใหญ่สับ', 'amount': 1, 'unit': 'หัว'},
+        {'name': 'กระเทียมสับ', 'amount': 3, 'unit': 'กลีบ'},
+        {'name': 'น้ำซุปไก่', 'amount': 120, 'unit': 'มิลลิลิตร'},
+        {'name': 'น้ำมันพืช', 'amount': 2, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'เกลือ', 'amount': 1, 'unit': 'ช้อนชา'},
+        {'name': 'แป้งตอติญญา', 'amount': 8, 'unit': 'แผ่น'},
+        {'name': 'ผักชีและหัวหอมซอย', 'amount': 30, 'unit': 'กรัม'},
+      ],
+      'steps': [
+        'ผัดหัวหอมและกระเทียมในน้ำมันจนใส ใส่มะเขือเทศบดและพริกชิพอทเล่',
+        'เติมน้ำซุป เคี่ยวให้ซอสข้นแล้วใส่ไก่ฉีก เคี่ยวต่อจนซึมซับรส',
+        'อุ่นตอติญญาบนกระทะแห้ง ตักไส้ไก่ลงกลางแผ่น',
+        'โรยผักชีและหัวหอมซอย เสิร์ฟพร้อมมะนาว',
+      ],
+      'cooking_time': 25,
+      'prep_time': 15,
+      'servings': 4,
+      'source': 'Mexico in My Kitchen',
+      'source_url': 'https://www.mexicoinmykitchen.com/chicken-tinga-tacos/',
+      'missing_ingredients': [],
+    },
+    {
+      'id': 'ai_spanish_paella_valenciana',
+      'name': 'Paella Valenciana',
+      'description':
+          'ข้าวผัดสเปนหอมเครื่องเทศ ใช้ไก่ กระต่าย (หรือหมู) และถั่วเขียว พร้อมหญ้าฝรั่น',
+      'reason':
+          'ประยุกต์ใช้ไก่และหมูแทนกระต่ายได้ ใช้ถั่วและข้าวสารที่มีในครัวไทย',
+      'category': 'Rice',
+      'tags': ['spanish', 'ai', 'rice'],
+      'match_score': 75,
+      'match_ratio': 0.75,
+      'ingredients': [
+        {'name': 'ข้าวเมล็ดสั้น', 'amount': 400, 'unit': 'กรัม'},
+        {'name': 'สะโพกไก่หั่นชิ้น', 'amount': 400, 'unit': 'กรัม'},
+        {'name': 'หมูสามชั้นหั่นชิ้น', 'amount': 150, 'unit': 'กรัม'},
+        {'name': 'ถั่วเขียวโทดาโร', 'amount': 150, 'unit': 'กรัม'},
+        {'name': 'ถั่วลันเตา', 'amount': 80, 'unit': 'กรัม'},
+        {'name': 'มะเขือเทศขูด', 'amount': 150, 'unit': 'กรัม'},
+        {'name': 'น้ำสต๊อกไก่', 'amount': 900, 'unit': 'มิลลิลิตร'},
+        {'name': 'ผงหญ้าฝรั่น', 'amount': 0.25, 'unit': 'ช้อนชา'},
+        {'name': 'น้ำมันมะกอก', 'amount': 3, 'unit': 'ช้อนโต๊ะ'},
+        {'name': 'พริกป่นรมควัน', 'amount': 1, 'unit': 'ช้อนชา'},
+      ],
+      'steps': [
+        'ผัดไก่และหมูในกระทะพาเอลล่าให้ผิวเหลือง ตักพัก',
+        'ผัดมะเขือเทศกับน้ำมันและพริกป่น ใส่ข้าวลงคลุก',
+        'เติมสต๊อก หญ้าฝรั่น เนื้อสัตว์ และถั่ว เคี่ยวให้ข้าวดูดน้ำ',
+        'ลดไฟ เคี่ยวจนข้าวสุกและเกิด socarrat เสิร์ฟพร้อมเลมอน',
+      ],
+      'cooking_time': 45,
+      'prep_time': 20,
+      'servings': 4,
+      'source': 'Spanish Sabores',
+      'source_url':
+          'https://spanishsabores.com/authentic-spanish-paella-recipe/',
       'missing_ingredients': [],
     },
   ];
+
+  static const Map<String, String> _knownRecipeLinks = {
+    'ผัดกะเพราไก่ไข่ดาว':
+        'https://www.wongnai.com/recipes/stir-fried-minced-chicken-with-holy-basil-and-fried-egg',
+    'ต้มยำกุ้งน้ำใส': 'https://krua.co/recipe/tom-yam-goong-clear-soup/',
+    'แกงเขียวหวานไก่': 'https://www.maeban.co.th/menu_detail.php?bl=1&id=563',
+    'ผัดซีอิ๊วเส้นใหญ่หมู':
+        'https://www.wongnai.com/recipes/stir-fried-flat-noodles-with-pork',
+    'ไข่พะโล้หมูสามชั้น':
+        'https://www.pholfoodmafia.com/recipe/five-spice-stewed-eggs-and-pork/',
+    'kung pao chicken': 'https://www.chinasichuanfood.com/kung-pao-chicken/',
+    'chicken teriyaki': 'https://www.justonecookbook.com/chicken-teriyaki/',
+    'bibimbap': 'https://www.koreanbapsang.com/bibimbap/',
+    'vietnamese beef pho': 'https://www.vickypham.com/food/vietnamese-beef-pho',
+    'chicken tikka masala':
+        'https://www.indianhealthyrecipes.com/chicken-tikka-masala/',
+    'classic smash burger':
+        'https://www.seriouseats.com/the-burger-lab-smashed-burger-recipe',
+    'beer-battered fish and chips':
+        'https://www.bbcgoodfood.com/recipes/beer-battered-fish-chips',
+    'coq au vin': 'https://www.saveur.com/recipes/coq-au-vin/',
+    'sauerbraten':
+        'https://www.daringgourmet.com/traditional-german-sauerbraten/',
+    'spaghetti carbonara':
+        'https://www.giallozafferano.com/recipes/Spaghetti-Carbonara.html',
+    'chicken tinga tacos':
+        'https://www.mexicoinmykitchen.com/chicken-tinga-tacos/',
+    'paella valenciana':
+        'https://spanishsabores.com/authentic-spanish-paella-recipe/',
+  };
+
+
 
   static const Set<String> _dessertCategoryKeywords = {
     'ขนม',
@@ -1492,6 +2727,28 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
 
   String _normalizeName(String name) => name.trim().toLowerCase();
 
+  static String _normalizeHost(String host) =>
+      host.trim().toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+
+  bool _isTrustedImageHost(String imageHost, String baseHost) {
+    final normalizedImage = _normalizeHost(imageHost);
+    final normalizedBase = _normalizeHost(baseHost);
+    if (normalizedImage == normalizedBase) return true;
+    if (normalizedImage.endsWith('.$normalizedBase')) return true;
+    if (normalizedBase.endsWith('.$normalizedImage')) return true;
+    final allowed = _trustedImageHosts[normalizedBase];
+    if (allowed != null) {
+      for (final host in allowed) {
+        final normalizedAllowed = _normalizeHost(host);
+        if (normalizedImage == normalizedAllowed ||
+            normalizedImage.endsWith('.$normalizedAllowed')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /// Return a readable description of allergy coverage (expanded synonyms/translations).
   /// Falls back to a simple join of provided excludes if expansion fails or is empty.
   String describeAllergyCoverage(List<String> excludeIngredients) {
@@ -1506,6 +2763,22 @@ ${_trustedReferenceSites.map((site) => "- ${site['name']} (${site['url']})").joi
       return excludeIngredients.join(', ');
     }
   }
+}
+
+class _FallbackCandidate {
+  final RecipeModel recipe;
+  final String? cuisine;
+  final double ratio;
+  final int matchedCount;
+  final int totalCount;
+
+  const _FallbackCandidate({
+    required this.recipe,
+    required this.cuisine,
+    required this.ratio,
+    required this.matchedCount,
+    required this.totalCount,
+  });
 }
 
 class _SelectedIngredientProfile {
