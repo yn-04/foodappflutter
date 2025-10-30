@@ -71,7 +71,10 @@ class RecipeParser {
       }
     }
 
-    final servings = (data['servings'] ?? 1).toDouble().clamp(1, double.infinity);
+    final servings = (data['servings'] ?? 1).toDouble().clamp(
+      1,
+      double.infinity,
+    );
 
     final rawServings = data['servings'];
     final servingsCount = (rawServings is num && rawServings > 0)
@@ -102,6 +105,7 @@ class RecipeParser {
     return RecipeModel(
       id: 'rapid_${data['id']}',
       name: data['title'] ?? 'ไม่ระบุชื่อ',
+      originalName: (data['title'] ?? '').toString(),
       description: cleanHtmlTags(data['summary'] ?? ''),
       matchScore: calculateMatchScore(data),
       reason: 'สูตรจาก Spoonacular API',

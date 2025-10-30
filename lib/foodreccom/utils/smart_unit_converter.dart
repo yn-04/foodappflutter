@@ -43,6 +43,18 @@ class SmartUnitConverter {
   }) async {
     final lowerRecipeUnit = recipeUnit.trim().toLowerCase();
     final lowerIngredientName = ingredientName.trim().toLowerCase();
+    final unitCandidates = _expandUnitCandidates(lowerRecipeUnit);
+    final translatedIngredientName =
+        IngredientTranslator.translate(ingredientName)
+            .trim()
+            .toLowerCase();
+    final gramsPerPieceHint =
+        piece_converter.SmartUnitConverter.gramsPerPiece(ingredientName);
+    final ingredientCategory = _classifyIngredientForAi(
+      lowerIngredientName,
+      translatedIngredientName,
+      gramsPerPieceHint,
+    );
 
     // 0. ตรวจสอบเงื่อนไขที่ควรข้าม
     if (_shouldSkipDynamicConversion(lowerIngredientName)) {
@@ -52,7 +64,20 @@ class SmartUnitConverter {
     // === แผน A.1: "กฎ" ภายในแอป (เร็วที่สุด) ===
 
     // 🥚 1. กฎสำหรับ "ชิ้น" (ไข่/ฟอง, ฯลฯ)
-    final pieceRule = piece_converter.SmartUnitConverter.pieceRuleFor(
+    piece_converter.PieceUnitInfo? pieceRule;
+    String? pieceUnitCandidate;
+    for (final candidate in unitCandidates) {
+      final rule = piece_converter.SmartUnitConverter.pieceRuleFor(
+        lowerIngredientName,
+        candidate,
+      );
+      if (rule != null) {
+        pieceRule = rule;
+        pieceUnitCandidate = candidate;
+        break;
+      }
+    }
+    pieceRule ??= piece_converter.SmartUnitConverter.pieceRuleFor(
       lowerIngredientName,
       lowerRecipeUnit,
     );
@@ -63,17 +88,24 @@ class SmartUnitConverter {
       }
       final grams = piece_converter.SmartUnitConverter.gramsFromPiece(
         recipeAmount,
-        lowerRecipeUnit,
+        pieceUnitCandidate ?? lowerRecipeUnit,
         lowerIngredientName,
       );
       if (grams != null && grams > 0) {
         return CanonicalQuantity(grams, 'gram');
       }
     }
-    if (piece_converter.SmartUnitConverter.isPieceUnit(lowerRecipeUnit)) {
+    final isPieceUnit = unitCandidates.any(
+      (candidate) => piece_converter.SmartUnitConverter.isPieceUnit(candidate),
+    );
+    if (isPieceUnit) {
+      final pieceUnit = unitCandidates.firstWhere(
+        (candidate) => piece_converter.SmartUnitConverter.isPieceUnit(candidate),
+        orElse: () => lowerRecipeUnit,
+      );
       final grams = piece_converter.SmartUnitConverter.gramsFromPiece(
         recipeAmount,
-        lowerRecipeUnit,
+        pieceUnit,
         lowerIngredientName,
       );
       if (grams != null && grams > 0) {
@@ -83,22 +115,40 @@ class SmartUnitConverter {
     }
 
     // 📜 2. กฎสำหรับ "หน่วยตวงไทย" (ช้อนแกง, กำมือ, ฯลฯ)
-    final manualRule = _manualUnitRules[lowerRecipeUnit];
-    if (manualRule != null) {
-      return CanonicalQuantity(
-        recipeAmount * manualRule.multiplier,
-        manualRule.canonicalUnit,
-      );
+    for (final candidate in unitCandidates) {
+      final manualRule = _manualUnitRules[candidate];
+      if (manualRule != null) {
+        final manualAmount = recipeAmount * manualRule.multiplier;
+        if (manualRule.canonicalUnit == 'milliliter') {
+          final density = densityForIngredient(ingredientName);
+          if (_shouldConvertVolumeToMass(ingredientCategory, density)) {
+            final grams = density != null ? manualAmount * density : manualAmount;
+            if (grams > 0) {
+              return CanonicalQuantity(grams, 'gram');
+            }
+          }
+        }
+        return CanonicalQuantity(
+          manualAmount,
+          manualRule.canonicalUnit,
+        );
+      }
     }
 
     // ⚖️ 3. กฎสำหรับ "หน่วยมาตรฐาน" (g -> g, ml -> ml)
-    if (weightUnits.containsKey(lowerRecipeUnit)) {
-      final grams = recipeAmount * weightUnits[lowerRecipeUnit]!;
-      return CanonicalQuantity(grams, 'gram');
+    for (final candidate in unitCandidates) {
+      final factor = weightUnits[candidate];
+      if (factor != null) {
+        final grams = recipeAmount * factor;
+        return CanonicalQuantity(grams, 'gram');
+      }
     }
-    if (volumeUnits.containsKey(lowerRecipeUnit)) {
-      final milliliters = recipeAmount * volumeUnits[lowerRecipeUnit]!;
-      return CanonicalQuantity(milliliters, 'milliliter');
+    for (final candidate in unitCandidates) {
+      final factor = volumeUnits[candidate];
+      if (factor != null) {
+        final milliliters = recipeAmount * factor;
+        return CanonicalQuantity(milliliters, 'milliliter');
+      }
     }
 
     // === แผน A.2: "Spoonacular API" (แผนสำรองที่ 1) ===
@@ -208,6 +258,86 @@ class SmartUnitConverter {
     }
     return _densityTable['default'];
   }
+
+  /// 🔍 สร้าง context สำหรับ AI prompt เพื่อช่วยให้โมเดลเข้าใจวัตถุดิบมากขึ้น
+  static AiIngredientContext buildAiIngredientContext(String ingredientName) {
+    final normalized = _normalizeForDensity(ingredientName);
+    final translated = _normalizeForDensity(
+      IngredientTranslator.translate(ingredientName),
+    );
+    final gramsPerPiece =
+        piece_converter.SmartUnitConverter.gramsPerPiece(ingredientName);
+    final density = densityForIngredient(ingredientName);
+    final category = _classifyIngredientForAi(
+      normalized,
+      translated,
+      gramsPerPiece,
+    );
+
+    final aliases = <String>{
+      ingredientName.trim(),
+      IngredientTranslator.translate(ingredientName).trim(),
+      normalized,
+      translated,
+    }..removeWhere((value) => value.isEmpty);
+
+    return AiIngredientContext(
+      category: category,
+      density: density,
+      gramsPerPiece: gramsPerPiece,
+      aliases: aliases.take(_maxAliasesForAi).toList(),
+    );
+  }
+
+  /// 🔁 คืนตัวอย่างการแปลงหน่วยที่มักเจอ เพื่อแนบบอก AI
+  static List<String> aiSampleConversions() =>
+      List<String>.from(_aiSampleConversions);
+
+  static String _classifyIngredientForAi(
+    String normalized,
+    String translated,
+    double? gramsPerPiece,
+  ) {
+    final corpus = '$normalized $translated';
+    if (gramsPerPiece != null) return 'piece-produce';
+    if (_containsKeyword(corpus, _liquidKeywords)) return 'liquid';
+    if (_containsKeyword(corpus, _sauceKeywords)) return 'sauce';
+    if (_containsKeyword(corpus, _powderKeywords)) return 'dry-solid';
+    if (_containsKeyword(corpus, _herbKeywords)) return 'fresh-herb';
+    if (_containsKeyword(corpus, _proteinKeywords)) return 'protein';
+    return 'solid';
+  }
+
+  static bool _containsKeyword(String corpus, Set<String> keywords) {
+    for (final keyword in keywords) {
+      if (keyword.isEmpty) continue;
+      if (corpus.contains(keyword)) return true;
+    }
+    return false;
+  }
+}
+
+class AiIngredientContext {
+  final String category;
+  final double? density;
+  final double? gramsPerPiece;
+  final List<String> aliases;
+
+  const AiIngredientContext({
+    required this.category,
+    required this.density,
+    required this.gramsPerPiece,
+    required this.aliases,
+  });
+
+  Map<String, dynamic> toPromptMap() {
+    return {
+      'category': category,
+      if (density != null) 'density_g_per_ml': density,
+      if (gramsPerPiece != null) 'grams_per_piece': gramsPerPiece,
+      if (aliases.isNotEmpty) 'aliases': aliases,
+    };
+  }
 }
 
 // ⭐️ [สำคัญ] นี่คือ Class ที่ CookingService ต้องใช้
@@ -232,18 +362,27 @@ const Map<String, double> _densityTable = {
   'water': 1.0,
   'น้ำ': 1.0,
   'น้ำเปล่า': 1.0,
+  'น้ำซุป': 1.01,
+  'broth': 1.01,
   'milk': 1.03,
   'นม': 1.03,
   'นมสด': 1.03,
+  'evaporated milk': 1.06,
+  'condensed milk': 1.3,
+  'นมข้น': 1.3,
+  'นมข้นหวาน': 1.3,
   'coconut milk': 0.97,
   'กะทิ': 0.97,
-  'condensed milk': 1.3,
-  'นมข้นหวาน': 1.3,
+  'coconut water': 1.02,
+  'น้ำมะพร้าว': 1.02,
   'sugar': 0.85,
   'น้ำตาล': 0.85,
   'น้ำตาลทราย': 0.85,
   'brown sugar': 0.75,
   'icing sugar': 0.6,
+  'palm sugar': 1.32,
+  'น้ำตาลปี๊บ': 1.32,
+  'coconut sugar': 1.3,
   'salt': 1.2,
   'sea salt': 1.2,
   'เกลือ': 1.2,
@@ -259,19 +398,65 @@ const Map<String, double> _densityTable = {
   'น้ำมัน': 0.92,
   'น้ำมันพืช': 0.92,
   'น้ำมันมะกอก': 0.91,
+  'chili paste': 1.05,
+  'น้ำพริกเผา': 1.05,
   'butter': 0.95,
   'เนย': 0.95,
+  'margarine': 0.95,
   'honey': 1.42,
   'น้ำผึ้ง': 1.42,
   'flour': 0.53,
   'แป้ง': 0.53,
   'แป้งสาลี': 0.53,
+  'rice flour': 0.57,
+  'แป้งข้าวเจ้า': 0.57,
+  'glutinous rice flour': 0.55,
+  'แป้งข้าวเหนียว': 0.55,
+  'cornstarch': 0.54,
+  'แป้งข้าวโพด': 0.54,
   'rice': 0.85,
   'ข้าวสาร': 0.85,
+  'jasmine rice': 0.83,
+  'ข้าวหอมมะลิ': 0.83,
   'garlic': 0.6,
   'กระเทียม': 0.6,
   'onion': 0.85,
   'หอมหัวใหญ่': 0.85,
+  'shallot': 0.75,
+  'หอมแดง': 0.75,
+  'ginger': 0.74,
+  'ขิง': 0.74,
+  'galangal': 0.72,
+  'ข่า': 0.72,
+  'lemongrass': 0.6,
+  'ตะไคร้': 0.6,
+  'holy basil': 0.2,
+  'กะเพรา': 0.2,
+  'โหระพา': 0.2,
+  'coriander': 0.21,
+  'ผักชี': 0.21,
+  'spring onion': 0.25,
+  'ต้นหอม': 0.25,
+  'carrot': 0.64,
+  'แครอท': 0.64,
+  'potato': 0.75,
+  'มันฝรั่ง': 0.75,
+  'cabbage': 0.65,
+  'กะหล่ำปลี': 0.65,
+  'bell pepper': 0.35,
+  'พริกหวาน': 0.35,
+  'chicken': 1.03,
+  'ไก่': 1.03,
+  'pork': 1.05,
+  'หมู': 1.05,
+  'beef': 1.04,
+  'เนื้อวัว': 1.04,
+  'shrimp': 1.05,
+  'กุ้ง': 1.05,
+  'squid': 1.02,
+  'ปลาหมึก': 1.02,
+  'fish': 1.03,
+  'ปลา': 1.03,
 };
 
 String _normalizeForDensity(String value) =>
@@ -288,6 +473,11 @@ const Map<String, _ManualUnitRule> _manualUnitRules = {
     MeasurementConstants.millilitersPerTablespoon,
     'milliliter',
   ),
+  'ช้อนโต๊ะ': _ManualUnitRule(
+    MeasurementConstants.millilitersPerTablespoon,
+    'milliliter',
+  ),
+  'ช้อนโต๊ะพูน': _ManualUnitRule(18, 'milliliter'),
   'ช้อนกินข้าว': _ManualUnitRule(
     MeasurementConstants.millilitersPerTablespoon,
     'milliliter',
@@ -304,10 +494,15 @@ const Map<String, _ManualUnitRule> _manualUnitRules = {
     MeasurementConstants.millilitersPerTeaspoon,
     'milliliter',
   ),
+  'ช้อนชา': _ManualUnitRule(
+    MeasurementConstants.millilitersPerTeaspoon,
+    'milliliter',
+  ),
   'ช้อนชาเล็ก': _ManualUnitRule(
     MeasurementConstants.millilitersPerTeaspoon,
     'milliliter',
   ),
+  'ช้อนชาเล็กพูน': _ManualUnitRule(7, 'milliliter'),
   'แก้ว': _ManualUnitRule(MeasurementConstants.millilitersPerCup, 'milliliter'),
   'แก้วน้ำ': _ManualUnitRule(
     MeasurementConstants.millilitersPerCup,
@@ -317,6 +512,12 @@ const Map<String, _ManualUnitRule> _manualUnitRules = {
     MeasurementConstants.millilitersPerCup,
     'milliliter',
   ),
+  'ถ้วย': _ManualUnitRule(
+    MeasurementConstants.millilitersPerCup,
+    'milliliter',
+  ),
+  'ถ้วยชา': _ManualUnitRule(180, 'milliliter'),
+  'ถ้วยเล็ก': _ManualUnitRule(120, 'milliliter'),
   'ทัพพี': _ManualUnitRule(
     MeasurementConstants.millilitersPerCup / 2,
     'milliliter',
@@ -325,7 +526,153 @@ const Map<String, _ManualUnitRule> _manualUnitRules = {
   'หยิบมือ': _ManualUnitRule(5, 'gram'),
   'ซอง': _ManualUnitRule(12, 'gram'),
   'กระป๋อง': _ManualUnitRule(400, 'milliliter'),
+  'กระป๋องนม': _ManualUnitRule(385, 'gram'),
+  'กระป๋องนมข้น': _ManualUnitRule(385, 'gram'),
+  'กระป๋องนมข้นหวาน': _ManualUnitRule(385, 'gram'),
+  'ขวด': _ManualUnitRule(500, 'milliliter'),
+  'ขวดเล็ก': _ManualUnitRule(330, 'milliliter'),
+  'ขีด': _ManualUnitRule(100, 'gram'),
+  'ครึ่งขีด': _ManualUnitRule(50, 'gram'),
+  'เสี้ยวขีด': _ManualUnitRule(25, 'gram'),
+  'แพ็ค': _ManualUnitRule(200, 'gram'),
 };
+
+const int _maxAliasesForAi = 10;
+
+const List<String> _aiSampleConversions = [
+  '1 ถ้วยตวง ข้าวหอมมะลิ (ดิบ) ≈ 160 gram',
+  '2 ช้อนโต๊ะ น้ำปลา ≈ 30 milliliter',
+  '1 กระป๋องนมข้นหวาน ≈ 385 gram',
+  '3 กลีบ กระเทียมสด ≈ 15 gram',
+  '1 กำ โหระพา ≈ 25 gram',
+  '200 milliliter น้ำกะทิ ≈ 200 gram',
+  '1 ตัว ปลากะพงขาว (ขนาดกลาง) ≈ 300 gram',
+];
+
+const Set<String> _liquidKeywords = {
+  'น้ำ',
+  'ซุป',
+  'น้ำซุป',
+  'milk',
+  'cream',
+  'creamery',
+  'oil',
+  'น้ำมัน',
+  'vinegar',
+  'ซีอิ๊ว',
+  'น้ำปลา',
+  'น้ำสต๊อก',
+  'broth',
+  'stock',
+  'น้ำซอส',
+  'coconut milk',
+  'coconut water',
+  'น้ำมะพร้าว',
+  'น้ำมะนาว',
+  'น้ำส้ม',
+};
+
+const Set<String> _sauceKeywords = {
+  'sauce',
+  'ซอส',
+  'น้ำพริก',
+  'น้ำพริกเผา',
+  'paste',
+  'condensed milk',
+  'oyster',
+  'fish sauce',
+  'soy sauce',
+  'ketchup',
+  'mayonnaise',
+};
+
+const Set<String> _powderKeywords = {
+  'ผง',
+  'powder',
+  'flour',
+  'starch',
+  'แป้ง',
+  'seasoning',
+  'เกลือ',
+  'salt',
+  'sugar',
+  'ผงฟู',
+  'baking powder',
+};
+
+const Set<String> _herbKeywords = {
+  'โหระพา',
+  'กะเพรา',
+  'ใบกะเพรา',
+  'basil',
+  'holy basil',
+  'sweet basil',
+  'coriander',
+  'cilantro',
+  'ผักชี',
+  'spring onion',
+  'ต้นหอม',
+  'พริก',
+  'sliced chili',
+  'mint',
+  'สะระแหน่',
+  'kaffir lime leaf',
+  'ใบมะกรูด',
+  'lemongrass',
+  'ตะไคร้',
+};
+
+const Set<String> _proteinKeywords = {
+  'หมู',
+  'pork',
+  'ไก่',
+  'chicken',
+  'beef',
+  'เนื้อวัว',
+  'ปลา',
+  'fish',
+  'shrimp',
+  'กุ้ง',
+  'ปลาหมึก',
+  'squid',
+  'ไข่',
+  'egg',
+  'duck',
+  'เป็ด',
+};
+
+Set<String> _expandUnitCandidates(String unit) {
+  final trimmed = unit.trim();
+  if (trimmed.isEmpty) return const <String>{};
+
+  final candidates = <String>{};
+  void addCandidate(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized.isNotEmpty) candidates.add(normalized);
+  }
+
+  addCandidate(trimmed);
+
+  final withoutParens =
+      trimmed.replaceAll(RegExp(r'[\(\)\[\]\{\}]'), ' ');
+  addCandidate(withoutParens);
+
+  final strippedSymbols =
+      withoutParens.replaceAll(RegExp(r'[^a-zA-Zก-๙\.]'), ' ');
+  addCandidate(strippedSymbols);
+
+  for (final token in withoutParens
+      .split(RegExp(r'[\/\s]+'))
+      .where((t) => t.isNotEmpty)) {
+    addCandidate(token);
+  }
+
+  final compactAlpha =
+      withoutParens.replaceAll(RegExp(r'[^a-zA-Zก-๙]'), '');
+  addCandidate(compactAlpha);
+
+  return candidates;
+}
 
 bool _shouldSkipDynamicConversion(String lowerIngredientName) {
   if (lowerIngredientName.isEmpty) return true;
@@ -349,6 +696,14 @@ bool _shouldSkipDynamicConversion(String lowerIngredientName) {
     }
   }
   return false;
+}
+
+bool _shouldConvertVolumeToMass(String ingredientCategory, double? density) {
+  if (density == null || density <= 0) return false;
+  if (ingredientCategory == 'liquid' || ingredientCategory == 'sauce') {
+    return false;
+  }
+  return true;
 }
 
 Future<double?> _safeConvert({

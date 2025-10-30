@@ -5,6 +5,7 @@ import 'package:my_app/foodreccom/constants/nutrition_thresholds.dart';
 import '../models/ingredient_model.dart';
 import '../models/purchase_item.dart';
 import '../models/recipe/recipe.dart';
+import 'ingredient_translator.dart';
 
 class CanonicalQuantity {
   final double amount;
@@ -29,6 +30,41 @@ class CanonicalQuantity {
     }
     return CanonicalQuantity(amount - other.amount, unit);
   }
+}
+
+class ManualCustomIngredient {
+  final String name;
+  final double amount;
+  final String unit;
+
+  const ManualCustomIngredient({
+    required this.name,
+    required this.amount,
+    required this.unit,
+  });
+
+  ManualCustomIngredient sanitize() {
+    return ManualCustomIngredient(
+      name: name.trim(),
+      amount: double.parse(amount.toStringAsFixed(2)),
+      unit: unit.trim(),
+    );
+  }
+
+  bool get isValid => name.trim().isNotEmpty && amount > 0;
+}
+
+class ManualIngredientSelection {
+  final Map<String, double> overrides;
+  final List<ManualCustomIngredient> additions;
+
+  const ManualIngredientSelection({
+    Map<String, double>? overrides,
+    List<ManualCustomIngredient>? additions,
+  }) : overrides = overrides ?? const {},
+       additions = additions ?? const [];
+
+  bool get isEmpty => overrides.isEmpty && additions.isEmpty;
 }
 
 class _IngredientProfile {
@@ -212,12 +248,24 @@ List<PurchaseItem> computePurchaseItems(
   List<IngredientModel> inventory, {
   int? servings,
   Map<String, double>? manualRequiredAmounts,
+  List<ManualCustomIngredient>? manualCustomIngredients,
 }) {
+  final manualNormalized =
+      (manualRequiredAmounts == null || manualRequiredAmounts.isEmpty)
+      ? null
+      : manualRequiredAmounts.map(
+          (key, value) => MapEntry(normalizeName(key), value),
+        );
+  final additionNormalized = manualCustomIngredients == null
+      ? const <String>{}
+      : manualCustomIngredients.map((item) => normalizeName(item.name)).toSet();
+
   final statuses = analyzeIngredientStatus(
     recipe,
     inventory,
     servings: servings,
     manualRequiredAmounts: manualRequiredAmounts,
+    manualCustomIngredients: manualCustomIngredients,
   );
 
   final items = statuses.where((status) => status.missingAmount > 0.01).map((
@@ -240,6 +288,13 @@ List<PurchaseItem> computePurchaseItems(
 
   for (final name in recipe.missingIngredients) {
     final normalized = normalizeName(name);
+    if (additionNormalized.contains(normalized)) continue;
+    if (manualNormalized != null) {
+      final manualRaw = manualNormalized[normalized];
+      if (manualRaw != null && manualRaw.isFinite) {
+        if (manualRaw <= 0) continue;
+      }
+    }
     final already = items.any((e) => normalizeName(e.name) == normalized);
     if (already) continue;
 
@@ -350,6 +405,7 @@ List<IngredientNeedStatus> analyzeIngredientStatus(
   List<IngredientModel> inventory, {
   int? servings,
   Map<String, double>? manualRequiredAmounts,
+  List<ManualCustomIngredient>? manualCustomIngredients,
 }) {
   final baseServings = recipe.servings == 0 ? (servings ?? 1) : recipe.servings;
   final resolvedBase = baseServings == 0 ? 1 : baseServings;
@@ -378,6 +434,10 @@ List<IngredientNeedStatus> analyzeIngredientStatus(
       manualAmount = manualRaw < 0 ? 0 : manualRaw;
     }
     final targetAmount = manualAmount ?? scaledAmt;
+    if (targetAmount <= 0) {
+      // หากผู้ใช้กำหนดให้ปริมาณเป็นศูนย์ (เช่น ลบวัตถุดิบ) ก็ไม่ต้องแสดงในสถานะ
+      continue;
+    }
     final targetNeed = toCanonicalQuantity(targetAmount, ri.unit, needName);
     final canonicalUnit = targetNeed.unit;
     final profile = _profileForName(needName.toLowerCase());
@@ -460,6 +520,106 @@ List<IngredientNeedStatus> analyzeIngredientStatus(
         frequencyReason: matchedReason,
       ),
     );
+  }
+
+  if (manualCustomIngredients != null && manualCustomIngredients.isNotEmpty) {
+    for (final custom in manualCustomIngredients) {
+      final sanitized = custom.sanitize();
+      if (!sanitized.isValid) continue;
+      final name = sanitized.name;
+      final unit = sanitized.unit;
+      final normalizedName = name.toLowerCase();
+
+      CanonicalQuantity? targetNeed;
+      try {
+        targetNeed = toCanonicalQuantity(sanitized.amount, unit, name);
+      } catch (_) {
+        targetNeed = null;
+      }
+
+      final canonicalUnit =
+          targetNeed?.unit ??
+          (unit.trim().isEmpty ? 'piece' : unit.trim().toLowerCase());
+      final canonicalRequired = targetNeed?.amount ?? sanitized.amount;
+
+      double haveCanonical = 0;
+      bool hasAnyStock = false;
+      ConsumptionFrequency? matchedFrequency;
+      String? matchedReason;
+
+      for (final inv in inventory) {
+        if (_isExpired(inv)) continue;
+        if (_matches(name, inv.name)) {
+          if (inv.quantity > 0) hasAnyStock = true;
+          try {
+            final hv = toCanonicalQuantity(
+              inv.quantity.toDouble(),
+              inv.unit,
+              inv.name,
+            );
+            final reconciled = _coerceToTargetUnit(
+              targetUnit: canonicalUnit,
+              sourceQuantity: hv,
+              ingredientName: name,
+            );
+            if (reconciled != null) haveCanonical += reconciled;
+          } catch (_) {
+            // ignore if conversion fails for this inventory item
+          }
+
+          final freq = inv.consumptionFrequency;
+          if (freq != null) {
+            if (matchedFrequency == null ||
+                _frequencySeverity(freq) >
+                    _frequencySeverity(matchedFrequency!)) {
+              matchedFrequency = freq;
+              matchedReason = inv.consumptionReason;
+            } else if (_frequencySeverity(freq) ==
+                    _frequencySeverity(matchedFrequency!) &&
+                (matchedReason == null || matchedReason!.trim().isEmpty) &&
+                (inv.consumptionReason?.trim().isNotEmpty ?? false)) {
+              matchedReason = inv.consumptionReason;
+            }
+          }
+        }
+      }
+
+      final displayUnit = unit.trim().isEmpty
+          ? displayUnitForCanonical(canonicalUnit, name)
+          : unit.trim();
+      final requiredDisplay = unit.trim().isEmpty
+          ? _safeConvertCanonicalToUnit(
+              canonicalUnit: canonicalUnit,
+              canonicalAmount: canonicalRequired,
+              targetUnit: displayUnit,
+              ingredientName: name,
+            )
+          : sanitized.amount;
+      final availableDisplay = _safeConvertCanonicalToUnit(
+        canonicalUnit: canonicalUnit,
+        canonicalAmount: haveCanonical,
+        targetUnit: displayUnit,
+        ingredientName: name,
+      );
+      final missingDisplay = requiredDisplay - availableDisplay;
+
+      statuses.add(
+        IngredientNeedStatus(
+          name: name,
+          requiredAmount: requiredDisplay,
+          availableAmount: availableDisplay,
+          missingAmount: missingDisplay > 0 ? missingDisplay : 0.0,
+          unit: displayUnit,
+          canonicalUnit: canonicalUnit,
+          canonicalRequiredAmount: canonicalRequired,
+          canonicalAvailableAmount: haveCanonical,
+          hasAnyStock: hasAnyStock,
+          isOptional: false,
+          consumptionFrequency: matchedFrequency,
+          frequencyReason: matchedReason,
+        ),
+      );
+    }
   }
 
   return statuses;
@@ -621,6 +781,12 @@ CanonicalQuantity toCanonicalQuantity(
     'cc',
     'cm3',
   ])) {
+    if (_shouldTreatVolumeAsSolid(normalizedName)) {
+      final density = _densityForIngredient(normalizedName);
+      if (density != null) {
+        return CanonicalQuantity(amount * density, 'gram');
+      }
+    }
     return CanonicalQuantity(amount, 'milliliter');
   }
   if (_matchesAny(normalizedUnit, const [
@@ -633,6 +799,13 @@ CanonicalQuantity toCanonicalQuantity(
     'ช.ต.',
     'ช้อนแกง',
   ])) {
+    if (_shouldTreatVolumeAsSolid(normalizedName)) {
+      final density = _densityForIngredient(normalizedName);
+      if (density != null) {
+        final ml = amount * MeasurementConstants.millilitersPerTablespoon;
+        return CanonicalQuantity(ml * density, 'gram');
+      }
+    }
     return CanonicalQuantity(
       amount * MeasurementConstants.millilitersPerTablespoon,
       'milliliter',
@@ -647,6 +820,13 @@ CanonicalQuantity toCanonicalQuantity(
     'ชช',
     'ช.ช.',
   ])) {
+    if (_shouldTreatVolumeAsSolid(normalizedName)) {
+      final density = _densityForIngredient(normalizedName);
+      if (density != null) {
+        final ml = amount * MeasurementConstants.millilitersPerTeaspoon;
+        return CanonicalQuantity(ml * density, 'gram');
+      }
+    }
     return CanonicalQuantity(
       amount * MeasurementConstants.millilitersPerTeaspoon,
       'milliliter',
@@ -967,6 +1147,24 @@ double _convertCanonicalToUnit({
   }
 }
 
+double _safeConvertCanonicalToUnit({
+  required String canonicalUnit,
+  required double canonicalAmount,
+  required String targetUnit,
+  required String ingredientName,
+}) {
+  try {
+    return _convertCanonicalToUnit(
+      canonicalUnit: canonicalUnit,
+      canonicalAmount: canonicalAmount,
+      targetUnit: targetUnit,
+      ingredientName: ingredientName,
+    );
+  } catch (_) {
+    return canonicalAmount;
+  }
+}
+
 double convertCanonicalToUnit({
   required String canonicalUnit,
   required double canonicalAmount,
@@ -982,6 +1180,17 @@ double convertCanonicalToUnit({
 }
 
 bool _isLikelyLiquid(String lowerName) {
+  final isSugar = lowerName.contains('น้ำตาล') ||
+      lowerName.contains('palm sugar') ||
+      (lowerName.contains('sugar') &&
+          !lowerName.contains('syrup') &&
+          !lowerName.contains('liquid'));
+  if (isSugar) {
+    return false;
+  }
+  if (lowerName.contains('พริกไทย') || lowerName.contains('pepper')) {
+    return false;
+  }
   const keywords = [
     'น้ำ',
     'น้ํา',
@@ -1015,6 +1224,36 @@ bool _isLikelyLiquid(String lowerName) {
   return false;
 }
 
+bool _shouldTreatVolumeAsSolid(String lowerName) {
+  const keywords = [
+    'น้ำตาลทราย',
+    'น้ำตาลทรายแดง',
+    'น้ำตาล',
+    'granulated sugar',
+    'white sugar',
+    'brown sugar',
+    'caster sugar',
+    'powdered sugar',
+    'พริกไทย',
+    'พริกไทยป่น',
+    'black pepper',
+    'ground pepper',
+  ];
+  for (final keyword in keywords) {
+    if (lowerName.contains(keyword)) {
+      if (keyword.contains('sugar')) {
+        if (lowerName.contains('syrup') ||
+            lowerName.contains('liquid') ||
+            lowerName.contains('เหลว')) {
+          return false;
+        }
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 // Return density in g/ml for common liquids. If null → unknown
 double? _densityForIngredient(String lowerName) {
   final profile = _profileForName(lowerName);
@@ -1031,6 +1270,17 @@ double? _densityForIngredient(String lowerName) {
     ['น้ำปลา', 1.20],
     ['soy sauce', 1.18],
     ['ซีอิ๊ว', 1.18],
+    ['น้ำตาลทราย', 0.85],
+    ['น้ำตาล', 0.85],
+    ['granulated sugar', 0.85],
+    ['white sugar', 0.85],
+    ['น้ำตาลทรายแดง', 0.80],
+    ['brown sugar', 0.80],
+    ['caster sugar', 0.80],
+    ['พริกไทย', 0.52],
+    ['พริกไทยป่น', 0.52],
+    ['ground pepper', 0.52],
+    ['black pepper', 0.52],
     ['oyster sauce', 1.25],
     ['ซอสหอยนางรม', 1.25],
     ['vinegar', 1.01],
@@ -1317,9 +1567,19 @@ String guessCategory(String ingredientName) {
 String normalizeName(String value) => value.trim().toLowerCase();
 
 bool _matches(String need, String have) {
-  final n = _normalizeForMatch(need);
-  final h = _normalizeForMatch(have);
-  return h.contains(n) || n.contains(h);
+  final needAliases = _aliasSet(need);
+  final haveAliases = _aliasSet(have);
+  if (needAliases.isEmpty || haveAliases.isEmpty) return false;
+  for (final alias in needAliases) {
+    if (haveAliases.contains(alias)) return true;
+  }
+  for (final n in needAliases) {
+    for (final h in haveAliases) {
+      if (n.length >= 4 && h.contains(n)) return true;
+      if (h.length >= 4 && n.contains(h)) return true;
+    }
+  }
+  return false;
 }
 
 bool _isExpired(IngredientModel ingredient) {
@@ -1480,4 +1740,31 @@ String _normalizeForMatch(String value) {
   }
 
   return normalized.replaceAll(' ', '');
+}
+
+Set<String> _aliasSet(String value) {
+  final aliases = <String>{};
+
+  void addRawAlias(String raw) {
+    if (raw.trim().isEmpty) return;
+    final canonical = _normalizeForMatch(raw);
+    if (canonical.isNotEmpty) aliases.add(canonical);
+
+    final tokenized = raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^0-9a-zA-Zก-๙\s]'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((token) => token.trim().isNotEmpty);
+    for (final token in tokenized) {
+      final tokenCanonical = _normalizeForMatch(token);
+      if (tokenCanonical.isNotEmpty) aliases.add(tokenCanonical);
+    }
+  }
+
+  addRawAlias(value);
+  final translated = IngredientTranslator.translate(value);
+  if (translated.trim().isNotEmpty) {
+    addRawAlias(translated);
+  }
+  return aliases;
 }
