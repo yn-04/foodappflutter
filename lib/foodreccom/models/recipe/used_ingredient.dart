@@ -5,6 +5,7 @@ class UsedIngredient {
   final String unit;
   final String category;
   final double cost;
+  final List<String> rawMaterialIds;
 
   UsedIngredient({
     required this.name,
@@ -12,6 +13,7 @@ class UsedIngredient {
     required this.unit,
     required this.category,
     required this.cost,
+    this.rawMaterialIds = const [],
   });
 
   factory UsedIngredient.fromMap(Map<String, dynamic> map) {
@@ -21,6 +23,11 @@ class UsedIngredient {
       unit: map['unit'] ?? '',
       category: map['category'] ?? '',
       cost: (map['cost'] ?? 0).toDouble(),
+      rawMaterialIds: List<String>.from(
+        (map['raw_material_ids'] as List? ?? const <dynamic>[]).map(
+          (e) => e?.toString() ?? '',
+        ),
+      )..removeWhere((element) => element.isEmpty),
     );
   }
 
@@ -31,6 +38,7 @@ class UsedIngredient {
       'unit': unit,
       'category': category,
       'cost': cost,
+      if (rawMaterialIds.isNotEmpty) 'raw_material_ids': rawMaterialIds,
     };
   }
 }
