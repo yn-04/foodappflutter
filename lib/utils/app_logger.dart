@@ -9,3 +9,10 @@ void logDebug(Object? message, {StackTrace? stackTrace}) {
     debugPrint('$message');
   }
 }
+
+void logError(Object? message, {StackTrace? stackTrace}) {
+  debugPrint('❌ $message');
+  if (stackTrace != null) {
+    debugPrint(stackTrace.toString());
+  }
+}
