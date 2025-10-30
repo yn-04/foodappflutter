@@ -90,50 +90,25 @@ class _RecommendationPageState extends State<RecommendationPage> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
+        automaticallyImplyLeading: false,
+        title: const Text(
+          'แนะนำเมนูอาหาร',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.black,
+          ),
         ),
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              height: 40,
-              width: 40,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: const Icon(Icons.filter_list, color: Colors.black),
-                onPressed: () => _showFilterSheet(context),
-                tooltip: 'ตัวกรองเมนูอาหาร',
-              ),
-            ),
-            const SizedBox(width: 8),
-            '🍳 แนะนำเมนูอาหาร'.asText(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-            ),
-          ],
-        ),
-        centerTitle: true,
+        centerTitle: false,
         actions: [
           IconButton(
             icon: const Icon(Icons.history, color: Colors.black),
-            onPressed: () async {
-              final provider = context.read<EnhancedRecommendationProvider>();
-              if (provider.cookingHistory.isEmpty) {
-                await provider.loadCookingHistory();
-              }
-              if (!context.mounted) return;
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const CookingHistoryPage()),
-              );
-            },
+            onPressed: _openCookingHistory,
             tooltip: 'เมนูที่ทำไปแล้ว',
           ),
           IconButton(
             icon: const Icon(Icons.bookmarks, color: Colors.black),
-            tooltip: 'เมนูที่ฉันเพิ่มเอง',
+            tooltip: 'เมนูอาหารที่เพิ่ม',
             onPressed: _showUserRecipesMenu,
           ),
         ],
@@ -163,6 +138,14 @@ class _RecommendationPageState extends State<RecommendationPage> {
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              FloatingActionButton.small(
+                heroTag: 'filter_recs',
+                onPressed: () => _showFilterSheet(context),
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+                child: const Icon(Icons.filter_list),
+              ),
+              const SizedBox(height: 12),
               FloatingActionButton(
                 heroTag: 'add_user_recipe',
                 onPressed: () => showModalBottomSheet(
@@ -184,7 +167,7 @@ class _RecommendationPageState extends State<RecommendationPage> {
                     color: Colors.yellow[700]!,
                   );
                 },
-                backgroundColor: Colors.yellow[600],
+                backgroundColor: const Color(0xFFFBC02D),
                 child: const Icon(Icons.refresh, color: Colors.black),
               ),
             ],
@@ -198,7 +181,7 @@ class _RecommendationPageState extends State<RecommendationPage> {
     final provider = context.read<EnhancedRecommendationProvider>();
     final recipes = provider.userRecommendations;
     if (recipes.isEmpty) {
-      context.showSnack('ยังไม่มีเมนูที่เพิ่มเอง', color: Colors.orangeAccent);
+      context.showSnack('ยังไม่มีเมนูอาหารที่เพิ่ม', color: Colors.orangeAccent);
       return;
     }
 
@@ -217,7 +200,7 @@ class _RecommendationPageState extends State<RecommendationPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    'เมนูที่ฉันเพิ่มเอง'.asText(
+                    'เมนูอาหารที่เพิ่ม'.asText(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
@@ -294,7 +277,7 @@ class _RecommendationPageState extends State<RecommendationPage> {
         icon: Icons.restaurant_menu,
         title: 'ยังไม่มีเมนูแนะนำจากระบบ',
         subtitle: hasUserRecipes
-            ? 'คุณยังสามารถเปิดเมนูที่เพิ่มเองจากปุ่มมุมขวาบน'
+            ? 'คุณยังสามารถเปิดเมนูอาหารที่เพิ่มจากปุ่มมุมขวาบน'
             : 'ลองปรับตัวกรองหรือเพิ่มวัตถุดิบเพื่อรับคำแนะนำใหม่',
         color: Colors.green,
         action: hasUserRecipes
@@ -304,7 +287,7 @@ class _RecommendationPageState extends State<RecommendationPage> {
                   backgroundColor: Colors.deepPurple,
                   foregroundColor: Colors.white,
                 ),
-                child: const Text('ดูเมนูที่ฉันเพิ่มเอง'),
+                child: const Text('ดูเมนูอาหารที่เพิ่ม'),
               )
             : ElevatedButton(
                 onPressed: () => provider.getHybridRecommendations(),
@@ -320,25 +303,7 @@ class _RecommendationPageState extends State<RecommendationPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (aiRecipes.isNotEmpty) ...[
-          Row(
-            children: [
-              const Icon(
-                Icons.auto_awesome,
-                color: Colors.blue,
-              ).withPadding(const EdgeInsets.all(8)),
-              'เมนูจาก AI (พร้อมแหล่งอ้างอิง)'.asText(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'ดึงสูตรจากเว็บไซต์ที่เชื่อถือได้ และคัดให้ตรงกับวัตถุดิบที่มีอยู่ในครัว',
-            style: TextStyle(color: Colors.grey[600], fontSize: 13),
-          ),
-          const SizedBox(height: 12),
+        if (aiRecipes.isNotEmpty)
           ListView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -347,28 +312,12 @@ class _RecommendationPageState extends State<RecommendationPage> {
               final recipe = aiRecipes[index];
               return RecipeCard(
                 recipe: recipe,
-                showSourceBadge: true,
                 compact: true,
                 onTap: () => _showRecipeDetail(recipe),
               );
             },
           ),
-          const SizedBox(height: 24),
-        ],
-        if (simpleRecipes.isNotEmpty) ...[
-          Row(
-            children: [
-              const Icon(
-                Icons.emoji_food_beverage,
-                color: Colors.orange,
-              ).withPadding(const EdgeInsets.all(8)),
-              'เมนูง่าย พร้อมทำเร็ว'.asText(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+        if (simpleRecipes.isNotEmpty)
           ListView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -377,28 +326,12 @@ class _RecommendationPageState extends State<RecommendationPage> {
               final recipe = simpleRecipes[index];
               return RecipeCard(
                 recipe: recipe,
-                showSourceBadge: false,
                 compact: true,
                 onTap: () => _showRecipeDetail(recipe),
               );
             },
           ),
-          const SizedBox(height: 24),
-        ],
-        if (remainingHybrid.isNotEmpty) ...[
-          Row(
-            children: [
-              const Icon(
-                Icons.restaurant_menu,
-                color: Colors.green,
-              ).withPadding(const EdgeInsets.all(8)),
-              'เมนูแนะนำ (Hybrid)'.asText(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
+        if (remainingHybrid.isNotEmpty)
           ListView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -407,13 +340,11 @@ class _RecommendationPageState extends State<RecommendationPage> {
               final recipe = remainingHybrid[index];
               return RecipeCard(
                 recipe: recipe,
-                showSourceBadge: false,
                 compact: true,
                 onTap: () => _showRecipeDetail(recipe),
               );
             },
           ),
-        ],
       ],
     );
   }
@@ -427,8 +358,19 @@ class _RecommendationPageState extends State<RecommendationPage> {
     );
   }
 
-  Future<void> _showFilterSheet(BuildContext context) async {
+  Future<void> _openCookingHistory() async {
     final provider = context.read<EnhancedRecommendationProvider>();
+    if (provider.cookingHistory.isEmpty) {
+      await provider.loadCookingHistory();
+    }
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const CookingHistoryPage()),
+    );
+  }
+
+  Future<void> _showFilterSheet(BuildContext pageContext) async {
+    final provider = pageContext.read<EnhancedRecommendationProvider>();
     if (provider.ingredients.isEmpty) {
       await provider.loadIngredients();
     }
@@ -494,7 +436,7 @@ class _RecommendationPageState extends State<RecommendationPage> {
     final shownPraiseCombos = <String>{};
 
     final sheetFuture = showModalBottomSheet(
-      context: context,
+      context: pageContext,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
@@ -702,7 +644,7 @@ class _RecommendationPageState extends State<RecommendationPage> {
             final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
             return FractionallySizedBox(
-              heightFactor: 0.98,
+              heightFactor: 0.94,
               child: ClipRRect(
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(24),
@@ -710,10 +652,11 @@ class _RecommendationPageState extends State<RecommendationPage> {
                 child: Material(
                   color: Colors.white,
                   child: SafeArea(
+                    minimum: const EdgeInsets.only(top: 16),
                     child: Column(
                       children: [
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
+                          padding: const EdgeInsets.fromLTRB(8, 0, 16, 8),
                           child: Row(
                             children: [
                               IconButton(
@@ -885,7 +828,6 @@ class _RecommendationPageState extends State<RecommendationPage> {
                                   fontWeight: FontWeight.w600,
                                 ),
                                 ...dietKeys.map((k) {
-                                  final key = k.toLowerCase();
                                   return CheckboxListTile(
                                     contentPadding: EdgeInsets.zero,
                                     value: selectedDiet.contains(k),
@@ -993,6 +935,9 @@ class _RecommendationPageState extends State<RecommendationPage> {
                                       onPressed: () {
                                         Navigator.pop(context);
                                       },
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.black,
+                                      ),
                                       child: const Text('ยกเลิก'),
                                     ),
                                     const SizedBox(width: 8),
@@ -1052,6 +997,11 @@ class _RecommendationPageState extends State<RecommendationPage> {
                                         Navigator.pop(context);
                                         provider.getHybridRecommendations();
                                       },
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor:
+                                            const Color(0xFFFBC02D),
+                                        foregroundColor: Colors.black,
+                                      ),
                                       child: const Text('ตกลง'),
                                     ),
                                   ],
