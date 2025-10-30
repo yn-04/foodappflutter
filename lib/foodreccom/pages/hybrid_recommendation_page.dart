@@ -380,7 +380,6 @@ class _HybridRecommendationPageState extends State<HybridRecommendationPage>
         final recipe = recipes[index];
         return RecipeCard(
           recipe: recipe,
-          showSourceBadge: true,
           compact: true,
           onTap: () => _showRecipeDetail(recipe),
         );

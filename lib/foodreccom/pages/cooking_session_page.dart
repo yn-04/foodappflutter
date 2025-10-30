@@ -84,17 +84,22 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
         ),
         floatingActionButton: FloatingActionButton.extended(
           onPressed: _completing ? null : _completeCooking,
+          backgroundColor: const Color.fromRGBO(251, 192, 45, 1),
+          foregroundColor: Colors.black,
           icon: _completing
               ? const SizedBox(
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: Colors.white,
+                    color: Colors.black,
                   ),
                 )
-              : const Icon(Icons.check_circle_outline),
-          label: Text(_completing ? 'กำลังบันทึก...' : 'เสร็จแล้ว'),
+              : const Icon(Icons.check_circle_outline, color: Colors.black),
+          label: Text(
+            _completing ? 'กำลังบันทึก...' : 'เสร็จแล้ว',
+            style: const TextStyle(color: Colors.black),
+          ),
         ),
         body: SafeArea(
           child: SingleChildScrollView(
@@ -234,7 +239,7 @@ class _CookingSessionPageState extends State<CookingSessionPage> {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Text(
-            'เมนูนี้ยังไม่มีขั้นตอนละเอียด ลองดูคลิป YouTube ข้างล่างแทน',
+            'เมนูนี้ยังไม่มีขั้นตอนละเอียด ลองดูคลิป YouTube ข้างบนแทน',
             style: theme.textTheme.bodyMedium,
           ),
         ),

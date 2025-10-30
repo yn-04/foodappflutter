@@ -1,10 +1,21 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+
+import 'package:my_app/common/measurement_constants.dart';
+import 'package:my_app/common/smart_unit_converter.dart'
+    as base_unit_converter;
+import 'package:my_app/foodreccom/utils/ingredient_measure_utils.dart';
 
 import '../models/cooking_history_model.dart';
 import '../models/recipe/nutrition_info.dart';
 import '../providers/enhanced_recommendation_provider.dart';
 import '../utils/purchase_item_utils.dart';
+
+final NumberFormat _metricFormatter = NumberFormat('#,##0.##', 'th_TH');
+final NumberFormat _metricFormatterInt = NumberFormat('#,##0', 'th_TH');
 
 class CookingHistoryPage extends StatelessWidget {
   const CookingHistoryPage({super.key});
@@ -40,36 +51,32 @@ class CookingHistoryPage extends StatelessWidget {
           }
 
           final grouped = _groupByDate(history);
-          return RefreshIndicator(
-            onRefresh: provider.loadCookingHistory,
-            color: Colors.orange[600],
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-              itemCount: grouped.length,
-              itemBuilder: (context, index) {
-                final entry = grouped[index];
-                final dateLabel = entry.key;
-                final items = entry.value;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      dateLabel,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
+          return ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+            itemCount: grouped.length,
+            itemBuilder: (context, index) {
+              final entry = grouped[index];
+              final dateLabel = entry.key;
+              final items = entry.value;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    dateLabel,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
                     ),
-                    const SizedBox(height: 8),
-                    ...items.map((item) => _HistoryTile(
-                          history: item,
-                          onTap: () => _showHistoryDetail(context, item),
-                        )),
-                    const SizedBox(height: 20),
-                  ],
-                );
-              },
-            ),
+                  ),
+                  const SizedBox(height: 12),
+                  ...items.map((item) => _HistoryTile(
+                        history: item,
+                        onTap: () => _openHistoryDetail(context, item),
+                      )),
+                  const SizedBox(height: 24),
+                ],
+              );
+            },
           );
         },
       ),
@@ -106,10 +113,33 @@ class CookingHistoryPage extends StatelessWidget {
     ];
     final month = months[date.month - 1];
     final buddhistYear = date.year + 543;
-    return '${date.day} $month ${buddhistYear}';
+    return '${date.day} $month $buddhistYear';
   }
 
   String _formatIngredientAmount(num amount, String unit, String name) {
+    final canonical = IngredientMeasureUtils.toCanonical(
+      amount.toDouble(),
+      unit,
+      name,
+    );
+
+    if (canonical.unit == 'gram') {
+      return _formatMass(canonical.amount);
+    }
+
+    if (canonical.unit == 'milliliter') {
+      return _formatVolume(canonical.amount);
+    }
+
+    final gramsFallback = base_unit_converter.SmartUnitConverter.gramsFromPiece(
+      amount.toDouble(),
+      unit,
+      name,
+    );
+    if (gramsFallback != null) {
+      return _formatMass(gramsFallback);
+    }
+
     final formatted = formatQuantityNumber(
       amount,
       unit: unit,
@@ -118,6 +148,44 @@ class CookingHistoryPage extends StatelessWidget {
     final trimmedUnit = unit.trim();
     if (trimmedUnit.isEmpty) return formatted;
     return '$formatted $trimmedUnit';
+  }
+
+  String _formatMass(double grams) {
+    final safeValue = grams.isFinite ? grams : 0.0;
+    if (safeValue <= 0) {
+      return '0 กรัม';
+    }
+
+    if (safeValue >= MeasurementConstants.gramsPerKilogram) {
+      final kilograms = safeValue / MeasurementConstants.gramsPerKilogram;
+      return '${_formatNumberCeil(kilograms, decimals: 2)} กิโลกรัม';
+    }
+
+    return '${_formatNumberCeil(safeValue)} กรัม';
+  }
+
+  String _formatVolume(double milliliters) {
+    final safeValue = milliliters.isFinite ? milliliters : 0.0;
+    if (safeValue <= 0) {
+      return '0 มิลลิลิตร';
+    }
+
+    if (safeValue >= MeasurementConstants.millilitersPerLiter) {
+      final liters = safeValue / MeasurementConstants.millilitersPerLiter;
+      return '${_formatNumberCeil(liters, decimals: 2)} ลิตร';
+    }
+
+    return '${_formatNumberCeil(safeValue)} มิลลิลิตร';
+  }
+
+  String _formatNumberCeil(double value, {int decimals = 0}) {
+    if (!value.isFinite || value <= 0) return '0';
+    final scale = math.pow(10, decimals).toDouble();
+    final ceiled = (value * scale).ceilToDouble() / scale;
+    if (decimals == 0) {
+      return _metricFormatterInt.format(ceiled.round());
+    }
+    return _metricFormatter.format(ceiled);
   }
 
   bool _hasNutritionData(NutritionInfo? info) {
@@ -131,327 +199,16 @@ class CookingHistoryPage extends StatelessWidget {
         info.sodium.abs() > threshold;
   }
 
-  Widget _nutritionRow({
-    required String label,
-    required double total,
-  }) {
-    const threshold = 0.01;
-    if (total.abs() <= threshold) return const SizedBox.shrink();
-
-    final valueText = _formatNutritionValue(total);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(fontSize: 14),
-            ),
-          ),
-          Text(
-            valueText,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.black54,
-            ),
-            textAlign: TextAlign.right,
-          ),
-        ],
+  void _openHistoryDetail(BuildContext context, CookingHistory history) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CookingHistoryDetailPage(
+          history: history,
+          hasNutrition: _hasNutritionData(history.totalNutrition),
+          formatDate: _formatThaiDate,
+          formatIngredientAmount: _formatIngredientAmount,
+        ),
       ),
-    );
-  }
-
-  String _formatNutritionValue(double value) {
-    if ((value - value.roundToDouble()).abs() < 1e-3) {
-      return value.round().toString();
-    }
-    return value.toStringAsFixed(1).replaceFirst(RegExp(r'\.?0+$'), '');
-  }
-
-  void _showHistoryDetail(BuildContext context, CookingHistory history) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        final ingredients = history.usedIngredients;
-        final recipePortions = history.recipeIngredientPortions;
-        final totalNutrition = history.totalNutrition;
-        final steps = history.recipeSteps;
-        final hasNutritionSection = _hasNutritionData(totalNutrition);
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 20,
-            bottom: 20 + MediaQuery.of(context).viewPadding.bottom,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.receipt_long, color: Colors.orange[700]),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        history.recipeName,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      _formatThaiDate(history.cookedAt),
-                      style: const TextStyle(color: Colors.black54),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'วัตถุดิบที่ใช้',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.orange[800],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                if (ingredients.isEmpty)
-                  const Text(
-                    'ไม่พบข้อมูลวัตถุดิบที่บันทึกไว้',
-                    style: TextStyle(color: Colors.black54),
-                  )
-                else
-                  ...ingredients.map(
-                    (ing) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(
-                            width: 24,
-                            child: Icon(Icons.check_circle,
-                                size: 16, color: Colors.orange),
-                          ),
-                          Expanded(
-                            child: Text(
-                              '${ing.name} • ${_formatIngredientAmount(ing.amount, ing.unit, ing.name)}',
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (recipePortions.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    'ปริมาณตามสูตร (จำนวนที่ใช้รอบนี้)',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.orange[800],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...recipePortions.map(
-                    (portion) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(
-                            width: 24,
-                            child: Icon(Icons.kitchen_outlined,
-                                size: 16, color: Colors.green),
-                          ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  portion.isOptional
-                                      ? '${portion.name} (ไม่บังคับ)'
-                                      : portion.name,
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                                Text(
-                                  _formatIngredientAmount(
-                                    portion.amount,
-                                    portion.unit,
-                                    portion.name,
-                                  ),
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Colors.black54,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-                if (hasNutritionSection) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    'ข้อมูลโภชนาการ',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.orange[800],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _nutritionRow(
-                    label: 'แคลอรี',
-                    total: totalNutrition.calories,
-                  ),
-                  _nutritionRow(
-                    label: 'โปรตีน (g)',
-                    total: totalNutrition.protein,
-                  ),
-                  _nutritionRow(
-                    label: 'คาร์บ (g)',
-                    total: totalNutrition.carbs,
-                  ),
-                  _nutritionRow(
-                    label: 'ไขมัน (g)',
-                    total: totalNutrition.fat,
-                  ),
-                  _nutritionRow(
-                    label: 'ไฟเบอร์ (g)',
-                    total: totalNutrition.fiber,
-                  ),
-                  _nutritionRow(
-                    label: 'โซเดียม (mg)',
-                    total: totalNutrition.sodium,
-                  ),
-                ],
-                if (steps.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    'ขั้นตอนการทำ',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.orange[800],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ...steps.map(
-                    (step) => Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[100],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              CircleAvatar(
-                                radius: 14,
-                                backgroundColor: Colors.orange[200],
-                                child: Text(
-                                  '${step.stepNumber}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  step.instruction,
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (step.timeMinutes > 0) ...[
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.timer_outlined,
-                                  size: 14,
-                                  color: Colors.grey,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  '${step.timeMinutes} นาที',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.black54,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                          if (step.tips.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            ...step.tips.map(
-                              (tip) => Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Icon(
-                                    Icons.lightbulb_outline,
-                                    size: 14,
-                                    color: Colors.orange,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Expanded(
-                                    child: Text(
-                                      tip,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.black54,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-                if (history.notes?.trim().isNotEmpty ?? false) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    'บันทึกเพิ่มเติม',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.orange[800],
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(history.notes!.trim()),
-                ],
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }
@@ -468,14 +225,15 @@ class _HistoryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      elevation: 1,
+      elevation: 0,
+      color: const Color(0xFFF7F1FF),
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
         onTap: onTap,
         leading: CircleAvatar(
-          backgroundColor: Colors.orange[100],
-          child: const Icon(Icons.restaurant, color: Colors.orange),
+          backgroundColor: const Color(0xFFFFEDD5),
+          child: const Icon(Icons.restaurant, color: Color(0xFFFF8A00)),
         ),
         title: Text(
           history.recipeName,
@@ -492,5 +250,276 @@ class _HistoryTile extends StatelessWidget {
         trailing: const Icon(Icons.chevron_right),
       ),
     );
+  }
+}
+
+class CookingHistoryDetailPage extends StatelessWidget {
+  final CookingHistory history;
+  final bool hasNutrition;
+  final String Function(DateTime) formatDate;
+  final String Function(num amount, String unit, String ingredientName)
+      formatIngredientAmount;
+
+  const CookingHistoryDetailPage({
+    super.key,
+    required this.history,
+    required this.hasNutrition,
+    required this.formatDate,
+    required this.formatIngredientAmount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final recipePortions = history.recipeIngredientPortions;
+    final totalNutrition = history.totalNutrition;
+    final steps = history.recipeSteps;
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text(
+          'รายละเอียดเมนู',
+          style: TextStyle(
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.black),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    backgroundColor: const Color(0xFFFFEDD5),
+                    child:
+                        const Icon(Icons.restaurant, color: Color(0xFFFF8A00)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          history.recipeName,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          formatDate(history.cookedAt),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              if (recipePortions.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _sectionTitle('ปริมาณตามสูตร'),
+                const SizedBox(height: 8),
+                ...recipePortions.map(
+                  (portion) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(
+                          width: 24,
+                          child: Icon(Icons.kitchen_outlined,
+                              size: 16, color: Colors.green),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                portion.isOptional
+                                    ? '${portion.name} (ไม่บังคับ)'
+                                    : portion.name,
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                formatIngredientAmount(
+                                  portion.amount,
+                                  portion.unit,
+                                  portion.name,
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.black54,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              if (hasNutrition) ...[
+                const SizedBox(height: 16),
+                _sectionTitle('ข้อมูลโภชนาการ'),
+                const SizedBox(height: 8),
+                _nutritionRow('แคลอรี', totalNutrition.calories),
+                _nutritionRow('โปรตีน (g)', totalNutrition.protein),
+                _nutritionRow('คาร์บ (g)', totalNutrition.carbs),
+                _nutritionRow('ไขมัน (g)', totalNutrition.fat),
+                _nutritionRow('ไฟเบอร์ (g)', totalNutrition.fiber),
+                _nutritionRow('โซเดียม (mg)', totalNutrition.sodium),
+              ],
+              if (steps.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _sectionTitle('ขั้นตอนการทำ'),
+                const SizedBox(height: 8),
+                ...steps.map(
+                  (step) => Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CircleAvatar(
+                              radius: 14,
+                              backgroundColor: Colors.orange[200],
+                              child: Text(
+                                '${step.stepNumber}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                step.instruction,
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (step.timeMinutes > 0) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.timer_outlined,
+                                size: 14,
+                                color: Colors.grey,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${step.timeMinutes} นาที',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.black54,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (step.tips.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          ...step.tips.map(
+                            (tip) => Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(
+                                  Icons.lightbulb_outline,
+                                  size: 14,
+                                  color: Colors.orange,
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    tip,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              if (history.notes?.trim().isNotEmpty ?? false) ...[
+                const SizedBox(height: 16),
+                _sectionTitle('บันทึกเพิ่มเติม'),
+                const SizedBox(height: 6),
+                Text(history.notes!.trim()),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionTitle(String text) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+        color: Colors.orange[800],
+      ),
+    );
+  }
+
+  Widget _nutritionRow(String label, double total) {
+    const threshold = 0.01;
+    if (total.abs() <= threshold) return const SizedBox.shrink();
+    final valueText = _formatNutrition(total);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(label, style: const TextStyle(fontSize: 14)),
+          ),
+          Text(
+            valueText,
+            style: const TextStyle(fontSize: 13, color: Colors.black54),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatNutrition(double value) {
+    if ((value - value.roundToDouble()).abs() < 1e-3) {
+      return value.round().toString();
+    }
+    return value.toStringAsFixed(1).replaceFirst(RegExp(r'\.?0+$'), '');
   }
 }
