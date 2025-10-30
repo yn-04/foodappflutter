@@ -76,7 +76,7 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                             const SizedBox(width: 8),
                             const Expanded(
                               child: Text(
-                                'เพิ่มเมนูของฉัน',
+                                'เพิ่มเมนูอาหาร',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   fontSize: 18,
@@ -176,6 +176,10 @@ class _AddUserRecipeSheetState extends State<AddUserRecipeSheet> {
                             onPressed: _save,
                             icon: const Icon(Icons.save),
                             label: const Text('บันทึก'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFFBC02D),
+                              foregroundColor: Colors.black,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 8),

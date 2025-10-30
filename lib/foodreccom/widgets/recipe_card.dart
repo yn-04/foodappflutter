@@ -1,7 +1,6 @@
 //lib/foodreccom/widgets/recipe_card.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../models/recipe/recipe.dart';
 import '../utils/recipe_image_helper.dart';
 import '../constants/nutrition_thresholds.dart';
@@ -10,14 +9,12 @@ import '../providers/enhanced_recommendation_provider.dart';
 class RecipeCard extends StatelessWidget {
   final RecipeModel recipe;
   final VoidCallback? onTap;
-  final bool showSourceBadge; // ✅ เพิ่ม field
   final bool compact; // ✅ แสดงแบบย่อ (ใช้ใน Dashboard)
 
   const RecipeCard({
     super.key,
     required this.recipe,
     this.onTap,
-    this.showSourceBadge = false,
     this.compact = false,
   });
 
@@ -31,21 +28,8 @@ class RecipeCard extends StatelessWidget {
       compact ? 12.0 : 14.0,
     );
     final double? compactImageHeight = compact ? 280 : null;
-    final sourceLabel = (recipe.source ?? '').trim();
-    final hasSourceBadge = showSourceBadge && sourceLabel.isNotEmpty;
-    final sourceUrl = recipe.sourceUrl?.trim() ?? '';
-    Uri? sourceUri;
-    if (sourceUrl.isNotEmpty) {
-      sourceUri = Uri.tryParse(sourceUrl);
-      if (sourceUri == null ||
-          sourceUri.scheme.isEmpty ||
-          sourceUri.host.isEmpty) {
-        final normalized = Uri.tryParse('https://$sourceUrl');
-        if (normalized != null && normalized.host.isNotEmpty) {
-          sourceUri = normalized;
-        }
-      }
-    }
+    final hasPrimaryImage = recipe.displayImageUrl.isNotEmpty;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 3,
@@ -61,22 +45,20 @@ class RecipeCard extends StatelessWidget {
                 ? MainAxisAlignment.center
                 : MainAxisAlignment.start,
             children: [
-              if (recipe.displayImageUrl.isNotEmpty) ...[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: compactImageHeight != null
-                      ? SizedBox(
-                          height: compactImageHeight,
-                          width: double.infinity,
-                          child: _buildRecipeImage(),
-                        )
-                      : AspectRatio(
-                          aspectRatio: 4 / 3,
-                          child: _buildRecipeImage(),
-                        ),
-                ),
-                SizedBox(height: compact ? 10 : 12),
-              ],
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: compactImageHeight != null
+                    ? SizedBox(
+                        height: compactImageHeight,
+                        width: double.infinity,
+                        child: _buildRecipeImage(hasPrimaryImage),
+                      )
+                    : AspectRatio(
+                        aspectRatio: 4 / 3,
+                        child: _buildRecipeImage(hasPrimaryImage),
+                      ),
+              ),
+              SizedBox(height: compact ? 10 : 12),
               // Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -117,24 +99,6 @@ class RecipeCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: recipe.scoreColor,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      '${recipe.matchScoreLabel}%',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
                 ],
               ),
 
@@ -148,12 +112,6 @@ class RecipeCard extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-
-              if (hasSourceBadge) ...[
-                const SizedBox(height: 6),
-                _SourceReferenceChip(label: sourceLabel, uri: sourceUri),
-              ],
-
               const SizedBox(height: 8),
 
               // Details (allow horizontal scroll for smaller cards)
@@ -278,19 +236,14 @@ class RecipeCard extends StatelessWidget {
     );
   }
 
-  Widget _buildRecipeImage() {
+  Widget _buildRecipeImage(bool hasPrimaryImage) {
+    if (!hasPrimaryImage) {
+      return const _RecipeFallbackImage();
+    }
     return Image.network(
       recipe.displayImageUrl,
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => Image.network(
-        RecipeImageHelper.defaultImage,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => Container(
-          color: Colors.grey[200],
-          alignment: Alignment.center,
-          child: const Icon(Icons.restaurant, color: Colors.grey),
-        ),
-      ),
+      errorBuilder: (_, __, ___) => const _RecipeFallbackImage(),
       loadingBuilder: (context, child, loadingProgress) {
         if (loadingProgress == null) return child;
         return Container(
@@ -383,78 +336,23 @@ class _FrequencyDisplay {
   const _FrequencyDisplay({required this.label, required this.color});
 }
 
-class _SourceReferenceChip extends StatelessWidget {
-  final String label;
-  final Uri? uri;
-
-  const _SourceReferenceChip({required this.label, required this.uri});
+class _RecipeFallbackImage extends StatelessWidget {
+  const _RecipeFallbackImage();
 
   @override
   Widget build(BuildContext context) {
-    final isClickable = uri != null && uri!.host.isNotEmpty;
-    final displayLabel = label.isNotEmpty
-        ? label
-        : (uri != null ? uri!.host : 'แหล่งอ้างอิง');
-    final tooltipMessage = uri?.toString() ?? displayLabel;
-    final textColor = isClickable ? Colors.blue[700] : Colors.blueGrey[700];
-    final iconColor = isClickable ? Colors.blue : Colors.blueGrey[600];
-
-    Future<void> openLink() async {
-      if (!isClickable) return;
-      try {
-        final target = uri!;
-        bool launched = await launchUrl(
-          target,
-          mode: LaunchMode.externalApplication,
-        );
-        if (!launched) {
-          launched = await launchUrl(target, mode: LaunchMode.inAppWebView);
-        }
-        if (!launched) {
-          launched = await launchUrl(target, mode: LaunchMode.platformDefault);
-        }
-        if (!launched) {
-          _showLinkError(context);
-        }
-      } catch (_) {
-        _showLinkError(context);
-      }
-    }
-
-    return InkWell(
-      onTap: isClickable ? () => openLink() : null,
-      borderRadius: BorderRadius.circular(8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(Icons.link, size: 14, color: iconColor),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Tooltip(
-              message: tooltipMessage,
-              child: Text(
-                'อ้างอิง: $displayLabel',
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  decoration: isClickable
-                      ? TextDecoration.underline
-                      : TextDecoration.none,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ),
-        ],
+    return Image.asset(
+      RecipeImageHelper.fallbackAsset,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Container(
+        color: Colors.grey[200],
+        alignment: Alignment.center,
+        child: Icon(
+          Icons.restaurant_menu,
+          color: Colors.grey[500],
+          size: 40,
+        ),
       ),
-    );
-  }
-
-  void _showLinkError(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('ไม่สามารถเปิดลิงก์แหล่งอ้างอิงได้')),
     );
   }
 }

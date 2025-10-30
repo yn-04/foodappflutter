@@ -93,7 +93,7 @@ class StatusCard extends StatelessWidget {
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: color.withOpacity(0.9),
+                color: Colors.black,
               ),
             ),
             if (subtitle != null) ...[
@@ -101,7 +101,7 @@ class StatusCard extends StatelessWidget {
               Text(
                 subtitle!,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: color.withOpacity(0.7), fontSize: 14),
+                style: const TextStyle(color: Colors.black87, fontSize: 14),
               ),
             ],
             if (action != null) ...[const SizedBox(height: 20), action!],
